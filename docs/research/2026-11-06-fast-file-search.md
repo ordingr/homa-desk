@@ -112,7 +112,7 @@ Confidence: High for existence/licence (GitHub API fetched); Medium for fitness 
 - Per-user: `AppData/Local/Temp/`, `AppData/Local/Microsoft/WindowsApps/`, `AppData/Local/Packages/`, `AppData/Local/Microsoft/Edge/`, `AppData/Local/Google/Chrome/` (browser caches; make this one easy to toggle), `AppData/Local/Docker/`.
 - Developer: `**/node_modules/`, `**/.git/` (keep the repo, drop the object store — ripgrep's default behaviour), `**/.venv/`, `**/venv/`, `**/__pycache__/`, `**/target/`, `**/bin/`, `**/obj/`, `**/.gradle/`, `**/.m2/`, `**/.nuget/packages/`, `**/.cache/`, `**/.vs/`, `**/dist/`, `**/build/`, `**/.next/`, `**/.turbo/`.
 - Attribute toggles: hidden and system files excluded by default except an allow-list for dotfiles the user cares about (`.env` is also a secrets concern — see MCP safety).
-- Include rules: explicit root list per machine (e.g. `C:\Users\<you>\`, `C:\AI Projects\`, `D:\`), network shares as scheduled roots, removable drives opt-in. Include rules override excludes only when more specific (gitignore's "last match wins" within a file, but a parent-excluded folder cannot be re-included — surface that in the settings UI).
+- Include rules: explicit root list per machine (e.g. `C:\Users\<user>\`, `C:\AI Projects\`, `D:\`), network shares as scheduled roots, removable drives opt-in. Include rules override excludes only when more specific (gitignore's "last match wins" within a file, but a parent-excluded folder cannot be re-included — surface that in the settings UI).
 
 ### Q7. Optional file-content search (kept short per scope)
 

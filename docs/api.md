@@ -449,3 +449,376 @@ These are recorded so the trail stays visible. The PRD is not edited.
 12. **Missing routes for the browser UI.** No HTTP route to press an action button or mark a card seen. The PRD does not require them in section 8.
 13. **Missing field name.** A structured reminder without `title` returns `missing_field` with `field: "text"`.
 14. **Not in M1.** `GET /v1/search`, `GET /v1/files/{...}/preview`, `POST /v1/actions/...` and the MCP endpoint are not registered (section 3.6).
+
+---
+
+## 9. M2 additions, as shipped
+
+Supersedes: section 2.2 (the string shape of `401`, `403` and `413`, which are now the object shape with the codes in 9.1; read in `assistant/server/auth.py` and `assistant/server/app.py` on 2026-11-06), section 3.4 (the `GET /v1/health` payload `{status, version}`), section 3.6 (the MCP endpoint listed as not in M1) and section 8, items 1 and 14 (health payload and MCP route not registered). The M1 text above is kept as written.
+
+- Date: 2026-11-06. Written by doc-keeper (M2-7) from the M2 code as read on 2026-11-06.
+- Sources read: `assistant/server/{mcp,app,auth,routes_health}.py`, `assistant/app.py` (health override and the `/mcp` mount), `assistant/mcp_stdio.py`, `assistant/calendar/{ics,meetings,outlook}.py`, `assistant/settings.py`, `assistant/overlay/settings_ui.py`, `assistant/security/token.py`, `assistant/cards/store.py` (`patch`), `assistant/server/routes_reminders.py` (text grammar errors).
+- Verification: the M2 security review, `docs/security/2026-11-06-m2-review.md` (Review 5), observed the MCP routes, status codes, `mcp.log` and the shim against a live instance. Anything not in that review is marked "code only".
+- Plan: `docs/plans/2026-11-06-assistant-v1-plan.md`, sections 7.2 and 16.3 to 16.4.
+
+### 9.1 MCP transport, address and authentication
+
+| Item | Value |
+|---|---|
+| Endpoint | `/mcp` on the running app's loopback port (`127.0.0.1:<port>`). `POST /mcp` and `POST /mcp/` both answer; `/mcp/<anything>` returns 404. |
+| Transport | MCP Streamable HTTP in stateless mode with JSON responses. Each POST carries one JSON-RPC message. No session is kept. |
+| Auth | The same chain as section 1: Host, then Origin, then the bearer token, then the body cap. |
+| Token | `Authorization: Bearer <token>`, the value of the `token` file in the home folder. |
+
+Rejections, produced by the app's middleware before the MCP library runs:
+
+- `Host` is not `127.0.0.1` or `localhost`: `403` with `{"error": {"code": "forbidden_host", "message": ..., "field": null}}`.
+- `Origin` is present and is not loopback: `403` with code `forbidden_origin`.
+- No token, or a wrong one: `401` with code `unauthorized` and `WWW-Authenticate: Bearer` (observed).
+- Body over 1 MiB, declared or streamed: `413` with code `payload_too_large` (observed: a declared 1,048,803-byte body and a chunked 1,114,112-byte body both returned a clean 413).
+
+Observed in Review 5: `POST /mcp` and `POST /mcp/` return `tools/list` with 200 and no redirect; `/mcp?x=1` returns 200; `/mcp/extra` returns 404; a bogus `Mcp-Session-Id` is ignored; `tools/call` works without `initialize`.
+
+**9.1.1 The Accept header.** The library answers `406` with a JSON-RPC error body when the request has no `Accept` header or lists only `text/event-stream`. `application/json` alone and `*/*` both return 200. Claude Code, the stdio shim and the MCP client send `application/json, text/event-stream`.
+
+**9.1.2 Other methods and bodies (observed).** `DELETE` returns 405 ("Session termination not supported"). `PUT` and `OPTIONS` return 405. A `GET` with `Accept: text/event-stream` opens a stream that does not end (R5-N2, open). Bodies: invalid or deeply nested JSON returns 400 (`Parse error: recursion limit exceeded` for nesting); an empty body returns 400; `{}` returns 400 with a validation error; a JSON-RPC batch returns 400 (batching is not supported); a notification (no `id`) returns 202 with an empty body; `Content-Type: text/plain` returns 400. No case returned 500 in the review run.
+
+### 9.2 Tools
+
+Four tools. All are annotated `readOnlyHint: false`, `destructiveHint: false` and `openWorldHint: false`; `dismiss_card` is also `idempotentHint: true`. There is no tool that opens, reveals, renames, deletes, runs or lists anything (AC-MC-7). The read-only file tools of AC-MC-3 belong to M3a and are not in M2.
+
+| Tool | Arguments | Returns | Notes |
+|---|---|---|---|
+| `send_card` | `title` (required), `detail`, `kind` (`waiting`, `done`, `meeting`, `reminder`, `custom`), `priority` (1 to 5), `sticky` (boolean), `url`, `actions` (up to 3 objects, each `{"id", "label"[, "shortcut"]}`), `id` | `{"id": "<card id>"}` | Same validation as `POST /v1/cards` (section 5). Passing the id of an open card replaces it. Source is `"mcp"`. A dismissed id creates a new card. |
+| `update_card` | `id` (required); any of `title`, `detail`, `kind`, `priority`, `sticky`, `url`, `actions` | `{"id": "<card id>"}` | Only the fields passed change. There is no `renotify` argument, and the seen state is not cleared (code only). |
+| `dismiss_card` | `id` (required) | `{"ok": true}` | Dismissing an already dismissed card is not an error. |
+| `add_reminder` | `text` (required), `sticky` (boolean, default `false`) | `{"id": "<12 hex>", "interpretation": "<text>"}` | The text form of `POST /v1/reminders` (section 3.2 and the README "Reminders" grammar). |
+
+Tool errors come back as an MCP tool result with `isError: true` and this text:
+
+- Validation: `<field>: <message>`, for example `kind: kind must be one of: waiting, done, meeting, reminder, custom.` and `title: title must be at most 120 characters.` (observed).
+- Unknown or dismissed id, in `update_card` and `dismiss_card`: `id: No card with that id.` (observed).
+- Reminder text that is not understood: `didn't understand — try 'text in 10m' or 'text at 3pm'`, the same text as the HTTP route.
+- Reminder text over the title limit: `title must be at most 120 characters.`
+- A wrong argument type is rejected by the MCP library. Its message can echo the value the caller sent (R5-N8). The app's own errors name the field, not the value.
+
+### 9.3 `mcp.log`
+
+Path: `<home>/logs/mcp.log`, by default `~/.assistant/logs/mcp.log`. It has one line for each `tools/list` and each `tools/call`, including calls that fail validation.
+
+Format:
+
+```
+<stamp> <method> tool=<name or -> args=[<key>=<shape>,...] result_bytes=<n> <ok|error>
+```
+
+- `<stamp>`: local time with its UTC offset, to the second.
+- `<method>`: `tools/call` or `tools/list`. The tool is `-` for `tools/list`.
+- `<shape>`: `str[<length>]`, `list[<count>]`, `dict[<count>]`, or the Python type name (`int`, `bool`, `float`, `NoneType`). No argument value is written.
+- `result_bytes`: the size of the JSON result. `ok`, or `error` when the result is a tool error.
+- If the call raised an exception the library did not turn into a result, the line ends with `error=<exception name>` in place of `result_bytes`.
+
+Example, as written by the code and quoted in Review 5:
+
+```
+<stamp> tools/call tool=send_card args=[title=str[11],url=str[19],id=str[12]] result_bytes=142 ok
+```
+
+Observed in Review 5: none of the planted argument values appeared in the log. Known issue R5-N1: the tool name and argument keys are written without removing newlines, so a token holder can add a forged line. The file rotates at 1 MiB to `mcp.log.1`, which is kept as one backup.
+
+### 9.4 `GET /v1/mcp/log`
+
+- Requires the token. Without it: `401` (observed).
+- Query `lines`: a whole number, default 200, clamped to 1 to 1000. A value that is not a whole number falls back to 200.
+- Returns `{"lines": ["<line>", ...]}`: the last `lines` lines of the current `mcp.log`, oldest first. It does not read `mcp.log.1`, and it reads at most the last 512 KiB of the file.
+
+### 9.5 The stdio shim, `python -m assistant.mcp_stdio`
+
+Used by Claude Desktop, which starts a local program. The shim is in `assistant/mcp_stdio.py` and uses only the standard library.
+
+- Reads one JSON-RPC message per line from stdin. For each line it POSTs to `http://127.0.0.1:<port>/mcp/` and writes each response line to stdout. A notification writes nothing.
+- The token is read from the home folder before each line, so a token change needs no change to the shim's configuration.
+- The port is the `port` value in `settings.json`, read without writing anything. Before sending, the shim checks that the listener on that port is the Assistant (the same check as the `send` command). A mismatch sends nothing.
+- It uses an opener with no proxy and no redirect following, a 30-second timeout and a 4 MiB response cap. A server-sent-events response is turned into one output line per `data:` line.
+- Failures are JSON-RPC errors with code `-32000`, carrying the request id (or `null` for an unparsable line):
+  - `Parse error: the line is not valid JSON.`
+  - `No usable token at <token path>; run: python -m assistant --init`
+  - the listener-mismatch text from the check above
+  - `Assistant answered HTTP <code> on /mcp.`
+  - `Assistant is not running on 127.0.0.1:<port>.`
+- The home folder is set by `ASSISTANT_HOME` when it is set, and otherwise is `~/.assistant`.
+
+### 9.6 `GET /v1/health` (M2 fields)
+
+Requires the token. Example shape (placeholder values):
+
+```json
+{"status": "ok", "version": "0.1.0", "uptime_s": 1234, "index": null, "plugins": [],
+ "calendars": [{"label": "calendar.example", "kind": "ics", "host": "calendar.example",
+                "last_ok": 1793000000.0, "last_error": null, "events": 3}]}
+```
+
+- `version`: the package version, `0.1.0`.
+- `uptime_s`: whole seconds since the app object was created, not since logon.
+- `index`: `null` until M3. `plugins`: `[]` until M5.
+- `calendars`: one object per calendar source in use.
+  - `label`: for an ICS source, the host; for Outlook, `Outlook calendar (this PC)`.
+  - `kind`: `ics` or `outlook`.
+  - `host`: the ICS host, or `null` for Outlook.
+  - `last_ok`: epoch seconds of the last successful read, or `null`.
+  - `last_error`: a short text, or `null` after a successful read. It never contains the address (see 9.7).
+  - `events`: the number of events held from the last successful read.
+
+Observed in Review 5: `last_error: "HTTP 404"` with `host: "127.0.0.1"`.
+
+### 9.7 Calendar card fields
+
+Calendars are read by `calendar/meetings.py`. Two card kinds are produced.
+
+**Meeting card** (one per event, after de-duplication):
+
+| Field | Value |
+|---|---|
+| `id` | `meeting-` followed by 16 hex characters. The hash is of the normalised title and the start minute, so the same event keeps its id across polls. |
+| `kind` | `meeting` (blue; kind defaults in 5.3: priority 4, sticky). |
+| `source` | `calendar`. |
+| `title` | `<subject> starts in <N> minutes`, or `<subject> starts now` when the lead time is 0. The subject is cut so the title fits. |
+| `detail` | `HH:MM–HH:MM`, then the location (cut to 80 characters) when there is one, then the join label (`Zoom`, `Teams`, `Meet`, `Webex`, or `Join`) when there is a join link. Joined with ` · `. |
+| `url` | The join link, when one was found. It opens on click only when it starts with `http://` or `https://` (section 5.1). |
+| `expires_at` | The event end time. The card is dismissed then. |
+| `renotify` | Set when a card with the same id is updated with a new end time. |
+
+Creation time: the card appears at the start minus the lead time. A poll that finds the start already inside the lead window shows it at once. Events that have started, all-day events, declined events and cancelled events produce no card. Two events from different sources with the same normalised title and starts within 60 seconds produce one card. The card reads `source: "calendar"`, which is not in the mute list (9.10).
+
+**Stale-feed card** (one per calendar, after one hour without a successful read):
+
+| Field | Value |
+|---|---|
+| `id` | `calendar-error-` followed by 12 hex characters (a hash of the source label). |
+| `kind` | `custom`, shown with the label `NOTIFICATION`. Not sticky: it fades 20 seconds after it is first seen. |
+| `source` | `calendar`. |
+| `title` | `Calendar not updating: <label>`. |
+| `detail` | `Last error: <error>. No meeting cards come from this calendar until it recovers.` |
+
+The card is dismissed when the calendar reads successfully again. The `error` text is one of the values listed under `last_error` above, or the exception class name.
+
+**Error texts** from the calendar readers, all free of the address: `HTTP <code>`, `response is not an iCalendar feed`, `feed too large`, `connection failed`, `<exception class>: <reason>` for a network error, `classic Outlook is not installed`, `Outlook COM failed (<exception class>)`.
+
+**Address handling.** An ICS address must be `http`, `https` or `webcal` with a host; `webcal` is converted to `https`. The source keeps the full address in a private field. Its repr and every log line show `scheme://host/...`. The list in Settings shows `host  (path hidden)`. `file:`, `ftp:` and host-less addresses are refused by the source (observed).
+
+**Time zones.** A `TZID` is resolved in this order: the tzdata zone of the same name, then the Windows zone name in a built-in table of 17 names, then the feed's own `VTIMEZONE`, then UTC for `UTC` and `GMT`. Anything else is read as UTC, with one warning per name in `app.log` (code only; the warning text is the name, which comes from the feed).
+
+**Recurrence.** `FREQ=DAILY` and `FREQ=WEEKLY` are expanded, with `INTERVAL`, `BYDAY`, `COUNT`, `UNTIL` and `EXDATE`. An override with `RECURRENCE-ID` replaces that occurrence. `MONTHLY`, `YEARLY` and other frequencies show only the first occurrence (code only). The window is 24 hours from the read.
+
+**Join links.** Found in this order: the event `URL` property, `LOCATION`, `DESCRIPTION`, `X-GOOGLE-CONFERENCE` and `X-MICROSOFT-SKYPETEAMSMEETINGURL`. The hosts are `zoom.us`, `zoom.com`, `zoomgov.com`, `teams.microsoft.com`, `teams.live.com`, `meet.google.com` and `webex.com`, and their subdomains. The first match wins. R5-F1 applies: the host check accepts an `@` after an allowed host.
+
+### 9.8 `settings.json`
+
+Path: `<home>/settings.json`. Created on the first run with the defaults. Written with two-space indentation and sorted keys. Defaults and ranges, from `assistant/settings.py`:
+
+```json
+{
+  "schema": 1,
+  "port": 17171,
+  "hotkey": "",
+  "theme": "dark",
+  "sound_on": true,
+  "cards_every_monitor": true,
+  "mute_sources": {"hooks": false, "http": false, "mcp": false, "file": false, "reminders": false},
+  "calendars": {"ics_urls": [], "outlook": true, "lead_minutes": 5, "poll_minutes": 5},
+  "claude_code": {},
+  "mcp": {}
+}
+```
+
+| Key | Allowed | Applies |
+|---|---|---|
+| `schema` | `1` | Written; not read for behaviour. |
+| `port` | integer, 1024 to 65535 | After restart. |
+| `hotkey` | string | Reserved for M3. Not read. |
+| `theme` | string | Stored; no effect in M2. |
+| `sound_on` | boolean | The General checkbox writes it. Nothing reads it (9.10). |
+| `cards_every_monitor` | boolean | At once. |
+| `mute_sources.hooks`, `.http`, `.mcp`, `.file`, `.reminders` | boolean each | At once. |
+| `calendars.ics_urls` | list of strings, each `http`, `https` or `webcal` with a host | At once; a source change starts a poll. |
+| `calendars.outlook` | boolean | At once. |
+| `calendars.lead_minutes` | integer, 0 to 120 | At once. |
+| `calendars.poll_minutes` | integer, 1 to 60 | At once; the poll timer is replaced. |
+| `claude_code` | object | Reserved. No key read. |
+| `mcp` | object | Reserved. No key read. |
+
+Behaviour:
+
+- A file change, by hand or by the app, is checked every 5 seconds (`Settings.watch`). Listeners run for each key whose value changed.
+- An invalid value for a scalar key is logged as a warning and the default is used. An invalid value inside `calendars` or `mute_sources` resets that whole object to its defaults (R5-F5 covers `calendars`).
+- The app's own saves write a temporary file and replace the old one, retrying up to 10 times on a permission error.
+- Once `calendars.ics_urls` is not empty, the file is given a single user-only permission entry on each save (R2-11). If that fails, the save is refused and the calendar addresses are not written. Hand edits keep that entry.
+- Unknown keys are kept.
+
+### 9.9 Known limits from Review 5
+
+Listed in `docs/security/2026-11-06-m2-review.md`. Fixes are scheduled before M3 unless noted.
+
+- R5-F1: the join-link check accepts a URL of the form `https://<allowed host>@<other host>/...`, and the browser goes to `<other host>`. Fix pending.
+- R5-F2: one event that raises an error in the parser (an extreme duration or date) drops every event from that feed. Fix pending.
+- R5-F3: `token.regenerate()` can fail while another reader has the token file open. The old token stays valid. Fix pending.
+- R5-F4: `hooks remove` can restore a backup that holds Assistant's own entries, after a reinstall. Fix pending.
+- R5-F5: classic Outlook is on by default (`calendars.outlook: true`), and an invalid `calendars` value resets the section. Fix pending.
+- R5-N1 (mcp.log line injection), R5-N2 (`GET /mcp` streams that do not end), R5-N3 (ICS redirects followed to `http`, `https` and `ftp` targets; the default proxy is used on purpose), R5-N4 (unbounded set of unknown time zone names in the log), R5-N5 (bearer text masked only in tool input), R5-N6 (token copies in the clipboard, shell history and `~/.claude.json`), R5-N7 (no cap on calendar addresses; sources are read one after another), R5-N8 (validation text can echo a value), R5-N9 (no per-file ACL re-applied on external edits), R5-N10 (a python listener with no pid file still receives the token from `send`), R5-N11 (AC-MC-8 viewer missing; Claude Desktop snippet caveat).
+- Carried: R2-6, R2-9 (FAT or exFAT home folder), R2-10 (`ws_max_size`, M3b), Review 1 N8 (hash-pinned requirements, M4-6).
+
+### 9.10 Differences from the PRD and the plan (recorded, not fixed)
+
+1. **Mute list.** The per-source mute list is `hooks, http, mcp, file, reminders` (plan 16.3, A18). Calendar cards have `source: "calendar"`, which is not in the list, so calendar cards cannot be muted by source. PRD AC-ST-4 says "any source id".
+2. **Outlook default.** PRD AC-MT-2 says the Outlook source "can be enabled". The code enables it by default (`calendars.outlook: true`) (R5-F5).
+3. **Lead-time range.** PRD AC-MT-3 says "configurable 0–30". The settings, the window and `meetings.py` allow 0 to 120.
+4. **Per-source status line.** PRD AC-MT-1 says a fetch failure is "shown as a status line in Settings". The Calendars page has no status line; the state is in `/v1/health` only. The same clause says each ICS URL has a label. The page has no label field; the label is the host.
+5. **Duplicate rule.** PRD AC-MT-5 says "same UID or same subject+start". The code uses the same normalised subject with a start within 60 seconds, and does not compare UIDs across sources.
+6. **Declined events.** PRD AC-MT-6. The ICS source decides "declined" from the calendar name (`X-WR-CALNAME`, when it holds an address) or from every attendee having declined. The app gives the source no user address (code only).
+7. **Recurrence.** Only daily and weekly ICS rules are expanded (9.7). PRD AC-MT-2 asks for recurring instances in the Outlook source; the Outlook source reads them through `IncludeRecurrences`.
+8. **MCP call log.** PRD AC-MC-8 says the log "is viewable from Settings". The Settings window has no viewer. The log is available only through `GET /v1/mcp/log` (R5-N11 (a)).
+9. **MCP log content.** PRD AC-MC-8 says "arguments with path only". The code writes argument names and shapes, and no values (9.3). This is stricter than the PRD.
+10. **File tools.** AC-MC-3 (read-only file tools) is in M3a. Plan 7.2 lists AC-MC-3 against M2-7, but only AC-MC-6 (the card and reminder tools) is met in M2.
+11. **Desktop snippet.** AC-MC-2 asks for the Claude Desktop config. The Settings page writes `"command": "python"`, not a path to `python.exe`. It adds `env.ASSISTANT_HOME` only when that variable is set in the Settings process (R5-N11 (c)).
+12. **General page, sound.** The "Play sounds for new cards" checkbox writes `sound_on` in `settings.json`. The sound state the overlay uses is kept in `state_ui.json`, and the menu's **Sound on** / **Sound off** item uses it. Nothing reads `sound_on`, so the checkbox has no effect on sound.
+13. **Keys stored but not read.** `theme`, `hotkey`, `claude_code` and `mcp` are stored or shown but not read in M2.
+14. **Port and hooks.** Changing `port` in Settings takes effect after restart (AC-ST-3). It does not rewrite the Claude Code hook entries, which carry the port; run **Install hooks** again (section 4.1).
+15. **Health payload.** PRD section 8 lists `version, uptime_s, index, plugins`. M2 returns those plus `status` and `calendars`, as the plan's 16.4 expects.
+
+---
+
+## 10. M2-9 corrections (Review 5 fixes), 2026-11-06
+
+Supersedes: section 9.1.2 (other methods on `/mcp`, and the open `GET` stream, R5-N2); section 9.3 (the R5-N1 known issue in `mcp.log`); section 9.7 "Time zones" (the warning count, R5-N4) and "Join links" (the host check, R5-F1); section 9.8 (the `calendars.outlook` default, the `calendars.ics_urls` limits, and the rule that an invalid value resets `calendars`); section 9.9 items R5-F1 to R5-F5, R5-N1, R5-N2, R5-N3, R5-N4, R5-N5, R5-N7 and the snippet part of R5-N11, as far as this section says they are fixed; section 9.10 items 2 (Outlook default) and 11 (Desktop snippet). The M2 text in sections 9.1.2, 9.3, 9.7, 9.8, 9.9 and 9.10 is kept as written.
+
+- Date: 2026-11-06. Written by doc-keeper (M2-9 correction notes).
+- Sources: the code as read on 2026-11-06 (`assistant/server/mcp.py`, `assistant/calendar/meetings.py`, `assistant/calendar/ics.py`,
+  `assistant/settings.py`, `assistant/security/token.py`, `assistant/hooks_installer.py`, `assistant/cards/claude_sessions.py`,
+  `assistant/overlay/settings_ui.py`), and `tests/test_m2_9.py`.
+- Verification: `tests/test_m2_9.py`, 47 tests, qa PASS by observation (reported in the tech-lead brief for M2-9). The suite
+  total (396 passed) is also as reported in that brief. doc-keeper did not run either. The M2-9 security re-check is not yet
+  in `docs/security/`. Until it is, treat the "fixed" statements here as qa-verified only.
+- Commit: M2-9 is not committed at the time of writing. The commit hash is a placeholder for git-keeper to fill in.
+
+### 10.1 MCP methods (R5-N2)
+
+- Any method other than `POST` on `/mcp` or `/mcp/` answers `405 Method Not Allowed`, with the header `Allow: POST` and a
+  plain-text body. The check is in the ASGI wrapper in `assistant/server/mcp.py` (`__call__`), so it runs after the Host,
+  Origin, token and body-size checks of section 9.1.
+- The 405 body is plain text, like the router's 405 in section 1. It is not the JSON error object of section 2.2.
+- Observed by tests: `GET`, `PUT`, `DELETE` and `PATCH` on both paths return 405 with `Allow: POST`
+  (`test_n2_non_post_on_mcp_is_405_allow_post`). `POST` `initialize` still returns 200 on both paths
+  (`test_n2_post_initialize_is_still_200`), and a real MCP client still lists `send_card` (`test_n2_real_client_still_lists_tools`).
+- Not covered by M2-9: the 406 rule in section 9.1.1 and the body rules in section 9.1.2 for `POST`.
+
+### 10.2 Join links (R5-F1)
+
+- `find_join_url` accepts a candidate only if all of these hold (`_is_join_url` in `assistant/calendar/meetings.py`):
+  - the scheme is `https` (case-insensitive);
+  - there is no user name and no password in the URL;
+  - the port is absent or 443;
+  - the host (lower case) equals an allowed domain, or ends with `.` followed by one.
+- Allowed domains (`JOIN_DOMAINS`): `zoom.us`, `zoom.com`, `zoomgov.com`, `teams.microsoft.com`, `teams.live.com`,
+  `meet.google.com`, `webex.com`.
+- **Inconsistency, open:** the M2-9 brief's list does not include `zoom.com`. The code includes it. Security should decide
+  whether it stays.
+- The text is still scanned in the order of section 9.7, and the first candidate that passes is used. A refused candidate does
+  not stop the scan (`test_f1_mixed_text_returns_the_good_link_not_the_first_match`).
+- Refused forms, from the tests: `https://zoom.us@<other>/...`, `https://teams.microsoft.com@<other>/...`,
+  `https://zoom.us:443.<other>/...`, `http://zoom.us/...`, `https://zoom.us:8443/...`, `https://user:pw@zoom.us/...`,
+  `https://evilzoom.us/...`, `https://zoom.us.<other>/...`.
+- Accepted forms, from the tests: subdomains such as `us02web.zoom.us`, `teams.microsoft.com`, `meet.google.com`, and
+  `zoom.us:443`.
+- The 2048-character limit on `url` (section 5.1) still applies.
+
+### 10.3 Calendar feed, one bad event (R5-F2)
+
+- A parse error in one `VEVENT` skips only that event. The feed status is still `last_ok`, with `last_error` null
+  (`test_f2_hostile_events_do_not_silence_the_feed_and_source_is_marked_ok`).
+- The warning for a skipped event is `skipping a calendar event that could not be read (uid length N, subject length M)`.
+  It gives the lengths of the UID and SUMMARY fields, not their text, and it does not give the address (`ics.py`,
+  `_describe_event`). One warning is logged per skipped event.
+- Clamps (`assistant/calendar/ics.py`):
+  - A `DURATION` longer than 366 days is capped at 366 days (`MAX_DURATION`, `_parse_duration`). An oversized duration gives an
+    event of 366 days, not an error (`test_f2_parse_level_events_and_clamps`).
+  - Event dates are accepted only in the years 1970 to 2100 (`MIN_YEAR`, `MAX_YEAR`). A date outside that range skips the event.
+- The per-event isolation is at the parser level (`ics.py`). The feed-level size limit of 8 MB (section 9.7 and the README)
+  is unchanged.
+
+### 10.4 Token Regenerate under readers (R5-F3)
+
+- On Windows, the token file is read with `FILE_SHARE_DELETE` (and read and write sharing), so a reader does not block the
+  replace in `regenerate()` (`assistant/security/token.py`, `_read_text`). Off Windows, or without `pywin32`, a plain read is
+  used.
+- `_replace` retries `os.replace` on `PermissionError` for up to 5 seconds (`REPLACE_BUDGET_S`), with a back-off that starts at
+  10 ms and doubles to a 200 ms cap. If the budget runs out, the error is raised. The new token is then not in place, and the
+  old token stays valid. This last part is from the code, not from a test.
+- Observed by tests: 60 regenerations under four polling readers, and under four spinning readers, never fail
+  (`test_f3_sixty_regenerations_under_*`). A transient `PermissionError` is retried (`test_f3_replace_retries_a_transient_permission_error`).
+  The running app serves the new token on the next request and refuses the old one with 401 (`test_f3_live_app_serves_the_new_token_on_the_next_request`).
+
+### 10.5 `hooks remove` and backups (R5-F4)
+
+- When `hooks remove` restores a backup, it first removes Assistant's own hook entries from the backup bytes
+  (`_without_ours`, `assistant/hooks_installer.py`). A restored file therefore has no bearer token and no
+  `/v1/hooks/claude-code` URL.
+- Observed by test (`test_f4_install_edit_regenerate_remove_leaves_no_bearer`): install, edit the file, regenerate, remove.
+  The regenerate takes a new backup of the edited file, which holds the old token, and `remove` restores that backup. The test
+  checks that the restored file keeps the user's own keys and hook, and that `installed()` reports `no`.
+
+### 10.6 Classic Outlook and `calendars` validation (R5-F5)
+
+- `calendars.outlook` defaults to `false` (`DEFAULTS` in `assistant/settings.py`). With no settings file, Outlook is off
+  (`test_f5_default_outlook_is_off_with_no_settings_file`). This replaces the default `true` in section 9.8 and 9.10 item 2.
+- Validation is per key inside `calendars`. A bad `lead_minutes` (for example 999) falls back to its default, and `ics_urls`
+  and `outlook` are kept (`test_f5_a_bad_lead_does_not_discard_the_urls_and_outlook_defaults_off`). This replaces the
+  "resets the whole section" rule for `calendars` in section 9.8. The rule still applies to `mute_sources`.
+- `--doctor` prints `0 ICS feed(s), Outlook off` when the key is absent, and `Outlook on` when it is `true`
+  (`test_doctor_says_outlook_off_when_the_key_is_absent`).
+
+### 10.7 Calendar address caps and redirects (R5-N7, R5-N3)
+
+- `calendars.ics_urls` holds at most 20 addresses (`MAX_ICS_URLS`), and each is at most 2048 characters (`MAX_ICS_URL_CHARS`),
+  in `assistant/settings.py`.
+  - `Settings.set` refuses a list of 21 addresses, or an address longer than 2048 characters, with `ValueError`
+    (`test_n7_overlong_url_is_dropped_and_set_rejects_21_and_long`).
+  - An edited file is not refused. Addresses that are not strings or are longer than 2048 characters are dropped, and the list
+    is trimmed to 20. The log then has one warning that gives the count and no address (`test_n7_external_edit_with_25_urls_keeps_20_and_warns`).
+- ICS redirects (`_HttpRedirects`, `assistant/calendar/ics.py`): a redirect to any scheme other than `http` or `https` is not
+  followed, and the fetch fails with a source error. At most 3 redirects are followed (`MAX_REDIRECTS`), so a fourth is refused.
+  Observed by tests: a redirect to `ftp://` is refused, a four-redirect chain is refused, and a two-redirect chain is followed
+  (`test_n3_*`). The system proxy is still used on purpose (`ProxyHandler` in `ics.py`). This replaces the statement in section 9.9
+  that redirects are followed to `ftp` targets.
+
+### 10.8 Masking in hook card text (R5-N5)
+
+- The bearer masking of section 4.5 now also applies to the text of `Stop` (the last assistant message), `Notification` (the
+  message) and `StopFailure` (the error). It masks `Bearer <token>` text and bare token-like strings, which show as `***`
+  (`assistant/cards/claude_sessions.py`, `_mask`). Plain prose is not changed (`test_n5_*`, including a 43-character bare string).
+- Section 4.5 is otherwise unchanged.
+
+### 10.9 Claude Desktop snippet (R5-N11, snippet path)
+
+- `desktop_snippet()` writes `"command"` as `sys.executable`. When that is `pythonw.exe` and a `python.exe` sits in the same
+  folder, the console `python.exe` is written instead. `env.ASSISTANT_HOME` is added only when the variable is set
+  (`assistant/overlay/settings_ui.py`, `_python_command`). Tests: `test_n11_snippet_uses_the_interpreter_path_not_bare_python`,
+  `test_n11_pythonw_is_swapped_for_the_console_python`.
+- This replaces section 9.10 item 11, which said the page writes `"command": "python"`.
+- Not changed by M2-9: the README caveat that `-m assistant.mcp_stdio` needs Python to import the package from the folder
+  Claude Desktop starts the program in ("not yet checked on both laptops"). That is a different part of R5-N11, and it stays open.
+
+### 10.10 Log lines and time-zone warnings (R5-N1, R5-N4)
+
+- Tool names and argument keys written to `mcp.log` have control characters removed and line breaks replaced with spaces, so a
+  crafted name cannot start a new log line (`test_n1_control_characters_in_tool_name_and_keys_stay_on_one_log_line`). This
+  replaces the known issue in section 9.3.
+- Unknown `TZID` names are logged at most 50 times. After that, one line says that further unknown calendar time zones are not
+  logged (`test_n4_unknown_tzid_warnings_are_capped_with_one_closing_line`). This narrows section 9.7 ("one warning per name").
+
+### 10.11 Still open after M2-9
+
+- The M2-9 security re-check is not yet recorded in `docs/security/`.
+- The `zoom.com` question in 10.2.
+- R5-N11 (a): the Settings window has no viewer for the MCP call log (section 9.10 item 8). Not changed by M2-9.
+- Review 5 items that the M2-9 brief does not name. This section does not restate their status. The review file is the record.
+- The work-laptop probes listed in section 9.9 and the README, which M2-9 does not touch.

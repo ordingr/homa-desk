@@ -17,7 +17,7 @@ Sub-questions written before searching: who praises what (reviews, READMEs, top-
 
 ## Method
 
-- No `deep-research` skill exists in the TeamAgents or user skills directories (checked `C:\AI Projects\TeamAgents\.claude\skills\` and `C:\Users\<you>\.claude\skills\`), so this was a structured fan-out: four read-only research subagents ran in parallel on (A) launcher features, (B) notification hubs and finders, (C) plugin ecosystems, (D) Python plugin mechanics and security. The researcher then fetched the Flow Launcher Python client source directly to settle the one load-bearing mechanical question (per-request process vs long-lived).
+- No `deep-research` skill exists in the TeamAgents or user skills directories (checked `C:\AI Projects\TeamAgents\.claude\skills\` and `C:\Users\<user>\.claude\skills\`), so this was a structured fan-out: four read-only research subagents ran in parallel on (A) launcher features, (B) notification hubs and finders, (C) plugin ecosystems, (D) Python plugin mechanics and security. The researcher then fetched the Flow Launcher Python client source directly to settle the one load-bearing mechanical question (per-request process vs long-lived).
 - Every URL in "URLs fetched" at the end was fetched and read on 2026-11-06 by the researcher or a subagent. Items marked **[unverified]** come from search snippets or memory and were not confirmed on a fetched page. **[inference]** marks our own reasoning.
 - Source classes: **[official doc]** (vendor/Microsoft/Python docs), **[repo]** (README, raw source, GitHub API counts), **[issue]** (GitHub issue with reaction count), **[community]** (forum, blog, Product Hunt), **[inference]**.
 - Confidence scale: **High** = primary source read this session; **Medium** = README/forum/consistent secondaries; **Low** = snippet, anecdote, or extrapolation.
@@ -318,9 +318,9 @@ Manifest (`plugin.toml`; TOML because `tomllib` is in the Python 3.11 standard l
 id = "hello-cards"                 # lowercase + hyphens; MUST equal the folder name (Obsidian/HA rule)
 name = "Hello cards"
 version = "0.1.0"                  # semver; compared to catalog / release tag for updates
-author = "Your Name"
+author = "<your name>"
 description = "Shows one card when Assistant starts."
-homepage = "https://github.com/example/assistant-hello-cards"
+homepage = "https://github.com/<you>/assistant-hello-cards"
 min_assistant_version = "0.1.0"
 entry = "plugin.py"                # module that defines the classes named in [provides]
 
