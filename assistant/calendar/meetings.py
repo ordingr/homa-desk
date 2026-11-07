@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import queue
 import re
 import threading
 import time
@@ -24,6 +25,7 @@ MAX_POLL_MINUTES = 60
 HORIZON_S = 24 * 3600
 STALE_AFTER_S = 3600.0
 DEDUPE_TOLERANCE_S = 60.0
+SOURCE_DEADLINE_S = 15.0
 MAX_LOCATION_SHOWN = 80
 
 JOIN_DOMAINS = ("zoom.us", "zoom.com", "zoomgov.com", "teams.microsoft.com", "teams.live.com",
@@ -107,6 +109,7 @@ class _SourceState:
         self.last_error: Optional[str] = None
         self.error_since: Optional[float] = None
         self.events: list = []
+        self.worker: Optional[threading.Thread] = None
 
 
 def _num(value: Any, default: float, lo: float, hi: float) -> float:
@@ -117,6 +120,10 @@ def _num(value: Any, default: float, lo: float, hi: float) -> float:
 
 def _norm_subject(subject: str) -> str:
     return " ".join(subject.lower().split())
+
+
+def _norm_uid(uid: str) -> str:
+    return "" if uid.startswith("nouid-") else uid.strip().lower()
 
 
 class MeetingScheduler:
@@ -192,11 +199,33 @@ class MeetingScheduler:
         threading.Thread(target=self.poll, name="meeting-poll", daemon=True).start()
 
     def poll(self) -> None:
+        """Fetch every source on its own thread; one that has not answered within SOURCE_DEADLINE_S is
+        recorded as timed out and abandoned, so it cannot hold back the others."""
         if not self._poll_gate.acquire(blocking=False):
             return
         try:
+            results: queue.Queue = queue.Queue()
+            waiting = []
             for st in list(self._states):
-                self._poll_one(st)
+                if st.worker is not None and st.worker.is_alive():
+                    self._record(st, None, "timed out", self._clock())
+                    continue
+                st.worker = threading.Thread(target=self._fetch_into, args=(st, results),
+                                             name="meeting-fetch", daemon=True)
+                st.worker.start()
+                waiting.append(st)
+            deadline = time.monotonic() + SOURCE_DEADLINE_S
+            while waiting:
+                try:
+                    st, events, err = results.get(timeout=max(0.0, deadline - time.monotonic()))
+                except queue.Empty:
+                    break
+                waiting.remove(st)
+                self._record(st, events, err, self._clock())
+                with self._lock:
+                    self._sync()
+            for st in waiting:
+                self._record(st, None, "timed out", self._clock())
             with self._lock:
                 self._sync()
         except Exception:
@@ -204,15 +233,16 @@ class MeetingScheduler:
         finally:
             self._poll_gate.release()
 
-    def _poll_one(self, st: _SourceState) -> None:
+    def _fetch_into(self, st: _SourceState, results: queue.Queue) -> None:
         from datetime import timedelta, timezone
-        now = self._clock()
-        start = datetime.fromtimestamp(now, timezone.utc)
+        start = datetime.fromtimestamp(self._clock(), timezone.utc)
         try:
-            events = st.source.fetch(start, start + timedelta(seconds=HORIZON_S))
-            err = None
+            events, err = st.source.fetch(start, start + timedelta(seconds=HORIZON_S)), None
         except Exception as exc:
             events, err = None, _safe_error(exc)
+        results.put((st, events, err))
+
+    def _record(self, st: _SourceState, events, err: Optional[str], now: float) -> None:
         with self._lock:
             if err is None:
                 st.events = list(events or [])
@@ -305,13 +335,15 @@ class MeetingScheduler:
         groups: list = []
         for st, ev, ts in items:
             norm = _norm_subject(ev.subject)
+            uid = _norm_uid(ev.uid)
             for g in groups:
-                if g["norm"] == norm and abs(g["start"] - ts) <= DEDUPE_TOLERANCE_S:
+                if abs(g["start"] - ts) <= DEDUPE_TOLERANCE_S and (g["norm"] == norm or (uid and uid in g["uids"])):
                     g["events"].append(ev)
                     g["states"].append(st)
+                    g["uids"].add(uid)
                     break
             else:
-                groups.append({"norm": norm, "start": ts, "events": [ev], "states": [st]})
+                groups.append({"norm": norm, "start": ts, "events": [ev], "states": [st], "uids": {uid}})
         out = {}
         for g in groups:
             first = g["events"][0]

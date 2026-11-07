@@ -28,10 +28,16 @@ def _tail(path, count: int) -> list:
             data = fh.read()
     except OSError:
         return []
-    lines = data.decode("utf-8", "replace").splitlines()
+    lines = [line.rstrip("\r") for line in data.decode("utf-8", "replace").split("\n")]
+    if lines and not lines[-1]:
+        lines.pop()
     if size > _TAIL_READ_BYTES and lines:
         lines = lines[1:]
     return lines[-count:]
+
+
+def mcp_log_tail(count: int) -> list:
+    return _tail(paths.logs_dir() / MCP_LOG_NAME, count)
 
 
 async def mcp_log(request: Request) -> JSONResponse:
@@ -41,7 +47,7 @@ async def mcp_log(request: Request) -> JSONResponse:
     except ValueError:
         count = MCP_LOG_DEFAULT_LINES
     count = max(1, min(count, MCP_LOG_MAX_LINES))
-    return JSONResponse({"lines": _tail(paths.logs_dir() / MCP_LOG_NAME, count)})
+    return JSONResponse({"lines": mcp_log_tail(count)})
 
 
 routes = [Route("/v1/health", health, methods=["GET"]),

@@ -265,3 +265,27 @@ def test_outlook_source_reports_availability_as_a_bool_without_raising():
     if outlook_classic_present():
         pytest.skip("classic Outlook is installed here; QA does not start Outlook (AC-MT-2 is a personal-laptop check)")
     assert outlook.OutlookSource().available() is False
+
+
+# ---- M3-0: lead range and UID dedupe in the real scheduler ---------------------------------------------------------
+
+@pytest.mark.parametrize("lead,accepted", [(0, True), (120, True), (121, False)])
+def test_lead_minutes_range_is_0_to_120(env, lead, accepted):
+    cal = env.settings.get("calendars")
+    if accepted:
+        env.settings.set("calendars", {**cal, "lead_minutes": lead})
+        uibus.drain()
+        assert env.settings.get("calendars")["lead_minutes"] == lead
+    else:
+        with pytest.raises(ValueError):
+            env.settings.set("calendars", {**cal, "lead_minutes": lead})
+
+
+def test_same_uid_in_two_feeds_with_different_subjects_makes_one_card(env):
+    t = time.time() + 5 * 60 + 2
+    a = FakeSource("A", [event("shared@example.test", "Planning", t)])
+    b = FakeSource("B", [event("SHARED@example.test", "Planning (invite copy)", t + 20)])
+    env.make([a, b]).start()
+    assert wait_until(lambda: [c for c in env.store.visible() if c.kind == "meeting"], timeout=10, step=0.2)
+    time.sleep(1.0)
+    assert len([c for c in env.store.visible() if c.kind == "meeting"]) == 1

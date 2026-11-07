@@ -17,6 +17,7 @@ log = logging.getLogger("assistant.calendar.ics")
 FETCH_TIMEOUT_S = 15.0
 MAX_FEED_BYTES = 8 * 1024 * 1024
 MAX_DAY_STEPS = 20000
+MAX_MONTH_STEPS = 1600
 MAX_DURATION = timedelta(days=366)
 MIN_YEAR, MAX_YEAR = 1970, 2100
 MAX_REDIRECTS = 3
@@ -142,15 +143,21 @@ def _parse_feed(text: str, window_start: datetime, window_end: datetime, label: 
         masters.append(info)
     out = []
     for info in masters:
-        if info["recurrence_id"] is None and info["rrule"]:
-            for occ_start, occ_end in _expand(info, window_start, window_end):
-                if (info["uid"], occ_start.timestamp()) in overrides:
-                    continue
-                out.append(_make_event(info, occ_start, occ_end, label, me, recurring=True))
-        else:
-            start, end = info["start"], info["end"]
-            if _overlaps(start, end, window_start, window_end):
-                out.append(_make_event(info, start, end, label, me, recurring=False))
+        found = []
+        try:
+            if info["recurrence_id"] is None and info["rrule"]:
+                for occ_start, occ_end in _expand(info, window_start, window_end):
+                    if (info["uid"], occ_start.timestamp()) in overrides:
+                        continue
+                    found.append(_make_event(info, occ_start, occ_end, label, me, recurring=True))
+            else:
+                start, end = info["start"], info["end"]
+                if _overlaps(start, end, window_start, window_end):
+                    found.append(_make_event(info, start, end, label, me, recurring=False))
+        except (ValueError, OverflowError, OSError):
+            log.warning("skipping a calendar event that could not be expanded (uid length %d)", len(info["uid"]))
+            continue
+        out.extend(found)
     out.sort(key=lambda e: (e.start, e.subject))
     return out
 
@@ -536,8 +543,8 @@ def _until(value: str, tz) -> Optional[datetime]:
 def _expand(info: dict, ws: datetime, we: datetime):
     rule = info["rrule"]
     freq = rule["FREQ"].upper()
-    if freq not in ("DAILY", "WEEKLY"):
-        log.debug("RRULE FREQ=%s is not expanded; only the first occurrence is used", freq)
+    if freq not in ("DAILY", "WEEKLY", "MONTHLY", "YEARLY"):
+        log.warning("RRULE FREQ=%s is not expanded; only the first occurrence is used", freq[:16])
         if _overlaps(info["start"], info["end"], ws, we) and info["start"].timestamp() not in info["exdates"]:
             yield info["start"], info["end"]
         return
@@ -547,27 +554,14 @@ def _expand(info: dict, ws: datetime, we: datetime):
     except ValueError:
         return
     until = _until(rule["UNTIL"], info["tz"]) if "UNTIL" in rule else None
-    byday = {re.sub(r"[^A-Z]", "", d.upper()) for d in rule.get("BYDAY", "").split(",") if d}
-    byday_idx = {_WEEKDAYS.index(d) for d in byday if d in _WEEKDAYS}
     wall, tz, all_day = info["wall"], info["tz"], info["all_day"]
     start0 = wall.date()
-    if freq == "WEEKLY" and not byday_idx:
-        byday_idx = {start0.weekday()}
-    week0 = start0 - timedelta(days=start0.weekday())
     all_day_span = (info["end_wall"].date() - start0) if all_day else None
     duration = info["end"] - info["start"]
     last_day = we.astimezone(tz).date() + timedelta(days=1) if tz is not None else we.astimezone().date() + timedelta(days=1)
     produced = 0
-    day = start0
-    for _ in range(MAX_DAY_STEPS):
-        if day > last_day:
-            return
-        n = (day - start0).days
-        if freq == "DAILY":
-            ok = n % interval == 0 and (not byday_idx or day.weekday() in byday_idx)
-        else:
-            ok = ((day - week0).days // 7) % interval == 0 and day.weekday() in byday_idx
-        if ok:
+    try:
+        for day in _candidate_days(rule, freq, interval, start0, last_day):
             occ_start = _localize(datetime.combine(day, wall.time()), tz)
             produced += 1
             if count is not None and produced > count:
@@ -580,4 +574,86 @@ def _expand(info: dict, ws: datetime, we: datetime):
                        if all_day else occ_start + duration)
             if occ_start.timestamp() not in info["exdates"] and _overlaps(occ_start, occ_end, ws, we):
                 yield occ_start, occ_end
+    except _BadRule:
+        return
+
+
+class _BadRule(Exception):
+    pass
+
+
+def _byday(rule: dict) -> list:
+    """BYDAY as [(ordinal or None, weekday index)]."""
+    out = []
+    for part in rule.get("BYDAY", "").split(","):
+        m = re.fullmatch(r"([+-]?\d{1,2})?([A-Z]{2})", part.strip().upper())
+        if m and m.group(2) in _WEEKDAYS:
+            out.append((int(m.group(1)) if m.group(1) else None, _WEEKDAYS.index(m.group(2))))
+    return out
+
+
+def _month_days(rule: dict, year: int, month: int, default_day: Optional[int]) -> list:
+    """Days of one month picked by BYDAY or BYMONTHDAY, else default_day (skipped in a month too short for it)."""
+    last = _pycal.monthrange(year, month)[1]
+    picked: set = set()
+    byday = _byday(rule)
+    if byday:
+        for nth, wd in byday:
+            same = [d for d in range(1, last + 1) if date(year, month, d).weekday() == wd]
+            if nth is None:
+                picked.update(same)
+            elif 1 <= abs(nth) <= len(same):
+                picked.add(same[nth - 1] if nth > 0 else same[nth])
+    elif rule.get("BYMONTHDAY"):
+        try:
+            for part in rule["BYMONTHDAY"].split(","):
+                n = int(part)
+                if 0 < n <= last:
+                    picked.add(n)
+                elif n < 0 and -n <= last:
+                    picked.add(last + 1 + n)
+        except ValueError:
+            raise _BadRule from None
+    elif default_day is not None and default_day <= last:
+        picked.add(default_day)
+    return sorted(picked)
+
+
+def _candidate_days(rule: dict, freq: str, interval: int, start0: date, last_day: date):
+    """Days matching the rule from DTSTART on, in order, up to last_day. BYSETPOS and other BY* parts are ignored."""
+    if freq in ("MONTHLY", "YEARLY"):
+        try:
+            months = sorted({int(m) for m in rule["BYMONTH"].split(",") if 1 <= int(m) <= 12}) \
+                if freq == "YEARLY" and rule.get("BYMONTH") else [start0.month]
+        except ValueError:
+            raise _BadRule from None
+        has_day_part = bool(rule.get("BYMONTHDAY")) or bool(_byday(rule))
+        step = interval if freq == "MONTHLY" else 12 * interval
+        index = start0.year * 12 + start0.month - 1
+        for _ in range(MAX_MONTH_STEPS):
+            year, month0 = divmod(index, 12)
+            if year > MAX_YEAR or date(year, month0 + 1, 1) > last_day:
+                return
+            for m in (months if freq == "YEARLY" else [month0 + 1]):
+                for d in _month_days(rule, year, m, None if has_day_part else start0.day):
+                    day = date(year, m, d)
+                    if day >= start0:
+                        yield day
+            index += step
+        return
+    byday_idx = {wd for _n, wd in _byday(rule)}
+    if freq == "WEEKLY" and not byday_idx:
+        byday_idx = {start0.weekday()}
+    week0 = start0 - timedelta(days=start0.weekday())
+    day = start0
+    for _ in range(MAX_DAY_STEPS):
+        if day > last_day:
+            return
+        n = (day - start0).days
+        if freq == "DAILY":
+            ok = n % interval == 0 and (not byday_idx or day.weekday() in byday_idx)
+        else:
+            ok = ((day - week0).days // 7) % interval == 0 and day.weekday() in byday_idx
+        if ok:
+            yield day
         day += timedelta(days=1)

@@ -5,24 +5,29 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
 from .. import __version__, paths, uibus
+from ..cards.model import strip_control
 from . import gfx, monitors, win
 
 log = logging.getLogger("assistant.overlay.settings_ui")
 
 PAGES = ("General", "Cards", "Calendars", "Claude Code", "MCP", "About")
 RESTART_NOTE = "takes effect after restart"
-HOTKEY_NOTE = "coming in M3 — " + RESTART_NOTE
 COVERAGE_SENTENCE = ("Assistant sees permission prompts and task completion; it cannot yet see "
                      "AskUserQuestion or plan-approval waits (hook coverage probe pending).")
 MUTE_LABELS = (("hooks", "Claude Code hooks"), ("http", "HTTP API"), ("mcp", "MCP"),
-               ("file", "File drop"), ("reminders", "Reminders"))
+               ("file", "File drop"), ("reminders", "Reminders"), ("calendar", "Calendar meetings"))
 SAVE_DELAY_MS = 400
+HOTKEY_SETTLE_MS = 400
+STATUS_REFRESH_MS = 5000
+MCP_LOG_VIEW_LINES = 100
+MAX_LABEL_CHARS = 64
 CONFIRM_RESET_MS = 4000
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -34,6 +39,25 @@ def mask_url(url: str) -> str:
     except ValueError:
         host = None
     return f"{host}  (path hidden)" if host else "(unrecognised address)"
+
+
+def format_calendar_status(entries: list) -> str:
+    """One line per calendar: label, host, last good read, last error. Never the address path."""
+    if not entries:
+        return "No calendars are being read."
+    lines = []
+    for entry in entries:
+        label = str(entry.get("label") or "calendar")
+        host = entry.get("host")
+        ok = entry.get("last_ok")
+        parts = [label]
+        if host and host != label:
+            parts.append(str(host))
+        parts.append(f"last ok {time.strftime('%H:%M', time.localtime(ok))}" if ok else "not read yet")
+        if entry.get("last_error"):
+            parts.append(f"error: {entry['last_error']}")
+        lines.append("  \u00b7  ".join(parts))
+    return "\n".join(lines)
 
 
 def outlook_classic_present() -> bool:
@@ -84,13 +108,16 @@ class SettingsWindow:
     """Settings window: six pages, every change saved on the spot (AC-ST-2, AC-ST-3)."""
 
     def __init__(self, root: tk.Misc, settings, token_provider: Callable[[], str], port: int,
-                 scale: float = 1.0, runner: Callable[..., tuple[int, str]] = run_assistant_cli) -> None:
+                 scale: float = 1.0, runner: Callable[..., tuple[int, str]] = run_assistant_cli,
+                 calendar_status: Optional[Callable[[], list]] = None) -> None:
         self.settings = settings
         self._token_provider = token_provider
         self._token_override: Optional[str] = None
         self.port = port
         self.scale = scale
         self._runner = runner
+        self._calendar_status = calendar_status
+        self._regen_thread: Optional[threading.Thread] = None
         self._pending: dict[str, tuple[str, Callable[[], None]]] = {}
         self._confirm_after: Optional[str] = None
         self.current = ""
@@ -139,14 +166,24 @@ class SettingsWindow:
         win.apply_dialog_styles(self.win)
         self.win.lift()
         self.win.focus_force()
+        self.win.after(STATUS_REFRESH_MS, self._status_tick)
 
     def _place(self) -> None:
         self.win.update_idletasks()
         w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
+        self._refresh_mcp()
+        tallest = 0
+        for frame in self.pages.values():
+            frame.pack(fill="both", expand=True)
+            self.win.update_idletasks()
+            tallest = max(tallest, frame.winfo_reqheight())
+            frame.pack_forget()
+        self.pages[self.current].pack(fill="both", expand=True)
+        h = max(h, tallest + int(28 * self.scale))
         mon = monitors.primary_monitor()
         x = mon.work[0] + (mon.work[2] - mon.work[0] - w) // 2
         y = mon.work[1] + (mon.work[3] - mon.work[1] - h) // 3
-        self.win.geometry(f"+{max(mon.work[0], x)}+{max(mon.work[1], y)}")
+        self.win.geometry(f"{w}x{h}+{max(mon.work[0], x)}+{max(mon.work[1], y)}")
 
     def show(self, name: str) -> None:
         if self._alive():
@@ -156,10 +193,16 @@ class SettingsWindow:
             self._nav[page].configure(bg=gfx.BUTTON_BG_HOVER if page == name else gfx.BUTTON_BG)
         self.pages[name].pack(fill="both", expand=True)
         self.current = name
-        if name == "Claude Code":
+        if name == "General":
+            self.sound_var.set(bool(self.settings.get("sound_on", True)))
+            self._refresh_hotkey()
+        elif name == "Calendars":
+            self._refresh_status()
+        elif name == "Claude Code":
             self._refresh_hooks()
         elif name == "MCP":
             self._refresh_mcp()
+            self._refresh_mcp_log()
 
     def _alive(self) -> bool:
         return self.win is not None
@@ -259,12 +302,66 @@ class SettingsWindow:
         if self._save("General", "port", value):
             self._port_error = ""
             self._ok("General", f"Saved. Port {value} {RESTART_NOTE}.")
+            self._offer_hooks_reinstall(value)
         else:
             self._port_error = self._errors["General"].cget("text")
+
+    def _general_apply_hotkey(self) -> None:
+        text = self.hotkey_var.get().strip()
+        if text == str(self.settings.get("hotkey", "") or ""):
+            return
+        if not self._save("General", "hotkey", text):
+            return
+        pages = getattr(self, "search_pages", None)
+        if pages is not None and pages.hotkey_var.get() != text:
+            pages.hotkey_var.set(text)
+        self.win.after(HOTKEY_SETTLE_MS, self._refresh_hotkey)
+
+    def _refresh_hotkey(self) -> None:
+        if self.win is None:
+            return
+        current = str(self.settings.get("hotkey", "") or "")
+        if self.hotkey_var.get().strip() != current and self.win.focus_get() is not self.hotkey_entry                 and "hotkey" not in self._pending:
+            self.hotkey_var.set(current)
+        pages = getattr(self, "search_pages", None)
+        if pages is None:
+            return
+        try:
+            info = pages._hotkey_info()
+        except Exception:
+            return
+        status = str(info.get("status", ""))
+        ok = status == "registered"
+        self.hotkey_note.configure(
+            text=status if info.get("combo") else "disabled",
+            fg=gfx.PANEL_OK if ok else gfx.PANEL_ERR if info.get("combo") else gfx.PANEL_DIM)
+
+    def _offer_hooks_reinstall(self, value: int) -> None:
+        if value == self.port:
+            self.hooks_offer.pack_forget()
+            return
+        self.hooks_offer_text.configure(
+            text=f"Claude Code hooks send to port {self.port}. Re-install them for port {value}, then restart "
+                 "Assistant; until both are done, hook cards do not arrive.")
+        self.hooks_offer_button.configure(text=f"Re-install Claude Code hooks for port {value}")
+        self.hooks_offer.pack(fill="x", pady=(4, 0), after=self.port_row)
+
+    def _reinstall_hooks(self) -> None:
+        self.flush()
+        self.hooks_offer_button.configure(state="disabled")
+        self._hooks_cli("install", then=self._reinstall_done)
+
+    def _reinstall_done(self) -> None:
+        self.hooks_offer_button.configure(state="normal")
+        if getattr(self, "hooks_exit", 1) == 0:
+            self._ok("General", "Claude Code hooks re-installed for the new port. Restart Assistant to use it.")
+        else:
+            self._fail("General", "Re-installing the hooks failed; see the Claude Code page.")
 
     def _build_general(self) -> None:
         page = self._p("General", "General")
         row = self._row(page, "Port")
+        self.port_row = row
         self.port_var = tk.StringVar(value=str(self.settings.get("port", self.port)))
         self.port_entry = self._entry(row, self.port_var, 8)
         self.port_entry.pack(side="left")
@@ -274,11 +371,17 @@ class SettingsWindow:
         self.port_note = tk.Label(row, text=f"{RESTART_NOTE} (running on {self.port})", bg=gfx.PANEL_BG,
                                   fg=gfx.PANEL_DIM, font=self._small)
         self.port_note.pack(side="left", padx=10)
+        self.hooks_offer = tk.Frame(page, bg=gfx.PANEL_BG)
+        self.hooks_offer_text = self._text(self.hooks_offer, "")
+        self.hooks_offer_button = self._button(self.hooks_offer, "", self._reinstall_hooks)
+        self.hooks_offer_button.pack(anchor="w", pady=(2, 4))
         row = self._row(page, "Hotkey")
-        self.hotkey_var = tk.StringVar(value=str(self.settings.get("hotkey", "")))
-        self.hotkey_entry = self._entry(row, self.hotkey_var, 16, disabled=True)
+        self.hotkey_var = tk.StringVar(value=str(self.settings.get("hotkey", "") or ""))
+        self.hotkey_entry = self._entry(row, self.hotkey_var, 16)
         self.hotkey_entry.pack(side="left")
-        self.hotkey_note = tk.Label(row, text=HOTKEY_NOTE, bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM, font=self._small)
+        self.hotkey_var.trace_add("write", lambda *_: self._debounce("hotkey", self._general_apply_hotkey))
+        self.hotkey_entry.bind("<Return>", lambda _e: self.flush())
+        self.hotkey_note = tk.Label(row, text="", bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM, font=self._small)
         self.hotkey_note.pack(side="left", padx=10)
         self.sound_var = self._check(page, "Play sounds for new cards", bool(self.settings.get("sound_on", True)),
                                      lambda v: self._save("General", "sound_on", v))
@@ -332,6 +435,14 @@ class SettingsWindow:
         self.ics_entry.pack(side="left", fill="x", expand=True, ipady=2)
         self.ics_entry.bind("<Return>", lambda _e: self._add_ics())
         self._button(add_row, "Add", self._add_ics).pack(side="left", padx=(8, 0))
+        label_row = tk.Frame(page, bg=gfx.PANEL_BG)
+        label_row.pack(fill="x", pady=(6, 0))
+        self.label_var = tk.StringVar()
+        self.label_entry = self._entry(label_row, self.label_var, 24)
+        self.label_entry.pack(side="left", ipady=2)
+        self._button(label_row, "Set label for selected feed", self._set_label).pack(side="left", padx=(8, 0))
+        self.ics_list.bind("<<ListboxSelect>>", lambda _e: self._load_label())
+        self.status_label = self._text(page, "", mono=True, pady=(8, 2))
         self._refresh_ics()
 
         cal = self._calendars()
@@ -364,8 +475,9 @@ class SettingsWindow:
         self._set_calendar(**{key: value})
 
     def _refresh_ics(self) -> None:
-        urls = self._calendars().get("ics_urls", [])
-        self._ics_masked = [mask_url(u) for u in urls]
+        cal = self._calendars()
+        urls, labels = cal.get("ics_urls", []), cal.get("labels", {})
+        self._ics_masked = [f"{labels[u]}  \u00b7  {mask_url(u)}" if labels.get(u) else mask_url(u) for u in urls]
         self.ics_list.delete(0, "end")
         for line in self._ics_masked:
             self.ics_list.insert("end", line)
@@ -391,9 +503,49 @@ class SettingsWindow:
             self._fail("Calendars", "select a feed to remove")
             return
         urls = list(self._calendars().get("ics_urls", []))
+        labels = dict(self._calendars().get("labels", {}))
+        labels.pop(urls[picked[0]], None)
         del urls[picked[0]]
-        if self._set_calendar(ics_urls=urls):
+        if self._set_calendar(ics_urls=urls, labels=labels):
             self._refresh_ics()
+
+    def _load_label(self) -> None:
+        picked = self.ics_list.curselection()
+        urls = self._calendars().get("ics_urls", [])
+        if picked and picked[0] < len(urls):
+            self.label_var.set(self._calendars().get("labels", {}).get(urls[picked[0]], ""))
+
+    def _set_label(self) -> None:
+        picked = self.ics_list.curselection()
+        if not picked:
+            self._fail("Calendars", "select a feed to label")
+            return
+        urls = self._calendars().get("ics_urls", [])
+        labels = dict(self._calendars().get("labels", {}))
+        text = strip_control(self.label_var.get()).strip()[:MAX_LABEL_CHARS]
+        if text:
+            labels[urls[picked[0]]] = text
+        else:
+            labels.pop(urls[picked[0]], None)
+        if self._set_calendar(labels=labels):
+            self._refresh_ics()
+            self.ics_list.selection_set(picked[0])
+
+    def _refresh_status(self) -> None:
+        try:
+            entries = self._calendar_status() if self._calendar_status else []
+        except Exception:
+            entries = []
+        self.status_label.configure(text=format_calendar_status(entries))
+
+    def _status_tick(self) -> None:
+        if self.win is None:
+            return
+        if self.current == "Calendars":
+            self._refresh_status()
+        elif self.current == "General":
+            self._refresh_hotkey()
+        self.win.after(STATUS_REFRESH_MS, self._status_tick)
 
     def _build_claude_code(self) -> None:
         page = self._p("Claude Code", "Claude Code")
@@ -453,6 +605,15 @@ class SettingsWindow:
         self.regen_button.pack(anchor="w", pady=(8, 0))
         self._text(page, "Clients using the old token (hooks, MCP) stop working until updated; "
                          "hooks are reinstalled for you.")
+        head = tk.Frame(page, bg=gfx.PANEL_BG)
+        head.pack(fill="x", pady=(10, 2))
+        tk.Label(head, text="MCP log (latest calls, no content)", bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM,
+                 font=self._small, anchor="w").pack(side="left")
+        self._button(head, "Refresh", self._refresh_mcp_log).pack(side="left", padx=8)
+        self.mcp_log_text = tk.Text(page, height=6, wrap="char", font=self._mono, bg=gfx.INPUT_BG,
+                                    fg=gfx.PANEL_FG, relief="flat", highlightthickness=1,
+                                    highlightbackground=gfx.INPUT_BORDER, state="disabled")
+        self.mcp_log_text.pack(fill="x")
         self._error_line("MCP")
 
     def mcp_command_text(self, masked: bool = True) -> str:
@@ -461,6 +622,15 @@ class SettingsWindow:
     def _refresh_mcp(self) -> None:
         self.mcp_command_label.configure(text=self.mcp_command_text(masked=True))
         self.mcp_json_label.configure(text=desktop_snippet())
+
+    def _refresh_mcp_log(self) -> None:
+        from ..server.routes_health import mcp_log_tail
+        lines = mcp_log_tail(MCP_LOG_VIEW_LINES)
+        self.mcp_log_text.configure(state="normal")
+        self.mcp_log_text.delete("1.0", "end")
+        self.mcp_log_text.insert("1.0", "\n".join(lines) if lines else "(no MCP calls logged yet)")
+        self.mcp_log_text.configure(state="disabled")
+        self.mcp_log_text.see("end")
 
     def _clip(self, text: str) -> None:
         self.win.clipboard_clear()
@@ -494,13 +664,30 @@ class SettingsWindow:
                 pass
         self._confirm_after = None
         if self._alive():
-            self.regen_button.configure(text="Regenerate token")
+            self.regen_button.configure(text="Regenerate token", state="normal")
 
     def regenerate_token(self) -> None:
+        if self._regen_thread is not None and self._regen_thread.is_alive():
+            return
         from ..security import token as token_mod
-        try:
-            result = token_mod.regenerate()
-        except Exception as exc:
+        self.regen_button.configure(text="Regenerating…", state="disabled")
+        self._ok("MCP", "Creating a new token…")
+
+        def work() -> None:
+            try:
+                result, exc = token_mod.regenerate(), None
+            except Exception as err:
+                result, exc = None, err
+            uibus.post(self._regenerate_done, result, exc)
+
+        self._regen_thread = threading.Thread(target=work, name="settings-regenerate", daemon=True)
+        self._regen_thread.start()
+
+    def _regenerate_done(self, result, exc) -> None:
+        if not self._alive():
+            return
+        self._reset_regen_button()
+        if exc is not None:
             self._fail("MCP", f"could not regenerate the token ({type(exc).__name__})")
             return
         self._token_override = getattr(result, "token", result)
@@ -554,6 +741,8 @@ class SettingsWindow:
             "ics_list": list(self.ics_list.get(0, "end")),
             "mcp_command": self.mcp_command_label.cget("text"),
             "mcp_json": self.mcp_json_label.cget("text"),
+            "mcp_log": self.mcp_log_text.get("1.0", "end").rstrip("\n"),
+            "calendar_status": self.status_label.cget("text"),
             "hooks_status": self.hooks_label.cget("text"),
             "exstyle": win.describe_exstyle(win.get_exstyle(win.hwnd_of(self.win))),
         }

@@ -32,6 +32,7 @@ class IconActions:
     mute: Callable[[Optional[float]], None] = _noop
     unmute: Callable[[], None] = _noop
     settings: Callable[[], None] = _noop
+    set_sound: Callable[[bool], None] = _noop
     quit: Callable[[], None] = _noop
     position_changed: Callable[[int, int], None] = _noop
 
@@ -87,8 +88,6 @@ class Icon:
         self.scale = 1.0
         self.size = BASE_SIZE
         self._drag: Optional[dict] = None
-
-        sounds.set_enabled(bool(load_state().get("sound", True)))
 
         self.win = tk.Toplevel(root)
         self.win.withdraw()
@@ -245,10 +244,7 @@ class Icon:
 
     def set_sound(self, enabled: bool) -> None:
         sounds.set_enabled(enabled)
-        try:
-            save_state({"sound": enabled})
-        except OSError:
-            log.exception("could not save sound setting")
+        self.actions.set_sound(enabled)
 
     def open_reminder(self) -> None:
         if self.reminder_input is not None and self.reminder_input.open:

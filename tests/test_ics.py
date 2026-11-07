@@ -147,3 +147,28 @@ def test_url_path_is_never_logged_or_repr_d_or_put_in_errors(ics_server, caplog)
     texts = [caplog.text, repr(good), str(good), repr(bad), str(err.value), repr(err.value)]
     assert not any(SECRET in t for t in texts), [t for t in texts if SECRET in t]
     assert any(SECRET in p for p in ics_server.hits), "the fetch itself must have used the real path"
+
+
+# ---- M3-0: R6-1 and MONTHLY/YEARLY through the real fetch path ---------------------------------------------------
+
+def test_floating_until_in_1970_does_not_silence_the_feed_over_http(ics_server):
+    body = "\r\n".join([
+        "BEGIN:VCALENDAR", "VERSION:2.0",
+        "BEGIN:VEVENT", "UID:bad@example.test", "DTSTAMP:20260101T000000Z", "DTSTART:20261105T100000",
+        "DTEND:20261105T110000", "RRULE:FREQ=DAILY;UNTIL=19700101T000000", "SUMMARY:Bad", "END:VEVENT",
+        "BEGIN:VEVENT", "UID:good@example.test", "DTSTAMP:20260101T000000Z", "DTSTART:20261110T100000Z",
+        "DTEND:20261110T110000Z", "SUMMARY:Still here", "END:VEVENT", "END:VCALENDAR", ""])
+    url = ics_server.serve("/cal/r61.ics", body)
+    events = ics.IcsSource(url, "Work").fetch(*NOV)
+    assert [e.subject for e in events] == ["Still here"]
+
+
+def test_monthly_second_tuesday_is_expanded_through_the_fetch_path(ics_server):
+    body = "\r\n".join([
+        "BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:m@example.test", "DTSTAMP:20260101T000000Z",
+        "DTSTART:20260908T100000Z", "DTEND:20260908T110000Z", "RRULE:FREQ=MONTHLY;BYDAY=2TU",
+        "SUMMARY:Monthly sync", "END:VEVENT", "END:VCALENDAR", ""])
+    url = ics_server.serve("/cal/monthly.ics", body)
+    events = ics.IcsSource(url, "Work").fetch(datetime(2026, 9, 1, tzinfo=UTC), datetime(2027, 1, 1, tzinfo=UTC))
+    assert [e.start.astimezone(UTC).date().isoformat() for e in events] == \
+        ["2026-09-08", "2026-10-13", "2026-11-10", "2026-12-08"]
