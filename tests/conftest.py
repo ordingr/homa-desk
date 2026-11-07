@@ -16,6 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 STARTUP_TIMEOUT = 30.0
 SHUTDOWN_TIMEOUT = 15.0
 
+_DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -58,7 +60,7 @@ def _health_ok(port: int, token: str) -> bool:
     request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/health",
                                      headers={"Authorization": f"Bearer {token}"})
     try:
-        with urllib.request.urlopen(request, timeout=2) as response:
+        with _DIRECT.open(request, timeout=2) as response:
             return response.status == 200
     except (urllib.error.URLError, OSError):
         return False
@@ -119,20 +121,43 @@ def running_app(assistant_home, assistant_port, assistant_env):
                                + (assistant_home / "console.txt").read_text(errors="replace"))
         yield f"http://127.0.0.1:{assistant_port}", token
     finally:
-        _stop(proc)
+        _stop(proc, assistant_port, token)
         console.close()
         log_path = assistant_home / "logs" / "app.log"
         if log_path.is_file():
             assert "shutting down" in log_path.read_text(encoding="utf-8"), "no graceful-shutdown line in app.log"
 
 
-def _stop(proc: subprocess.Popen) -> None:
-    """Ask the app to close its window (taskkill without /F), force-kill only if that fails."""
+def _wait_exit(proc: subprocess.Popen, timeout: float) -> bool:
+    try:
+        proc.wait(timeout=timeout)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _stop(proc: subprocess.Popen, port: int | None = None, token: str = "") -> None:
+    """Graceful stop: POST /v1/shutdown, then taskkill without /F (retried; it can hit a window that is
+    mid-destruction and print "Invalid window handle"), force-kill only if both fail."""
     if proc.poll() is None:
-        for pid in _child_pids(proc.pid) or [proc.pid]:
-            subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True, timeout=30)
+        exited = False
+        if port and token:
+            request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/shutdown", data=b"{}", method="POST",
+                                             headers={"Authorization": f"Bearer {token}",
+                                                      "Content-Type": "application/json"})
+            try:
+                _DIRECT.open(request, timeout=5).close()
+            except (urllib.error.URLError, OSError):
+                pass
+            exited = _wait_exit(proc, 5.0)
+        for _ in range(3):
+            if exited:
+                break
+            for pid in _child_pids(proc.pid) or [proc.pid]:
+                subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True, timeout=30)
+            exited = _wait_exit(proc, 0.3)
         try:
-            proc.wait(timeout=SHUTDOWN_TIMEOUT)
+            proc.wait(timeout=SHUTDOWN_TIMEOUT if not exited else 1)
         except subprocess.TimeoutExpired:
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=30)
             proc.wait(timeout=10)

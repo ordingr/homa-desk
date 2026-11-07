@@ -225,14 +225,60 @@ def test_card_appears_within_1s_of_the_post(overlay):
     assert wait_until(lambda: overlay.window(card["id"]), timeout=1.0), "no window within 1 s"
 
 
-def test_five_kinds_show_five_windows_with_kind_colours_stacked_newest_at_the_bottom_above_the_icon(overlay):
+def _monitor_count() -> int:
+    """Number of monitors the app enumerates, read in-process (the debug payload does not expose monitors)."""
+    try:
+        from assistant.overlay import monitors
+        return len(monitors.list_monitors())
+    except Exception:
+        import win32api
+        return len(win32api.EnumDisplayMonitors(None, None))
+
+
+def _icon_monitor_index(overlay) -> int:
+    """Index (in the order the app lists monitors, as used by the window 'monitor' key) of the icon's monitor."""
+    from assistant.overlay import monitors
+    left, top, right, bottom = overlay.ui()["icon"]["rect"]
+    target = monitors.monitor_at((left + right) // 2, (top + bottom) // 2)
+    return [m.handle for m in monitors.list_monitors()].index(target.handle)
+
+
+def _set_every_monitor(overlay, value: bool):
+    """The setting has no HTTP route yet: edit settings.json in the scratch home and restart the app."""
+    path = overlay.home / "settings.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["cards_every_monitor"] = value
+    path.write_text(json.dumps(data), encoding="utf-8")
+    overlay.restart()
+
+
+@pytest.fixture
+def single_monitor_cards(overlay):
+    _set_every_monitor(overlay, False)
+    yield
+    _set_every_monitor(overlay, True)
+
+
+def _windows_by_card(overlay) -> dict:
+    by_card: dict = {}
+    for w in overlay.windows():
+        by_card.setdefault(_card_id(w), []).append(w)
+    return by_card
+
+
+def test_five_kinds_show_one_window_per_monitor_with_kind_colours_stacked_newest_at_the_bottom_above_the_icon(overlay):
     kinds = ["waiting", "done", "meeting", "reminder", "custom"]
+    monitors_n = _monitor_count()
     for k in kinds:
         overlay.post(id=f"e2e-{k}", title=k, kind=k)
         time.sleep(0.15)
-    assert wait_until(lambda: len(overlay.windows()) == 5, timeout=3), overlay.windows()
+    assert wait_until(lambda: len(overlay.windows()) == 5 * monitors_n, timeout=3), (monitors_n, overlay.windows())
+    by_card = _windows_by_card(overlay)
+    for k in kinds:
+        assert sorted(w["monitor"] for w in by_card[f"e2e-{k}"]) == list(range(monitors_n)), (k, by_card[f"e2e-{k}"])
     colours = _colours()
-    wins = {_card_id(w): w for w in overlay.windows()}
+    icon_monitor = _icon_monitor_index(overlay)
+    wins = {cid: next(w for w in ws if w["monitor"] == icon_monitor) for cid, ws in by_card.items()}
     icon_top = overlay.ui()["icon"]["rect"][1]
     for k in kinds:
         w = wins[f"e2e-{k}"]
@@ -292,10 +338,22 @@ def test_mute_greys_the_icon_and_queues_cards(overlay):
 
 
 def test_cards_on_every_monitor(overlay):
-    if user32.GetSystemMetrics(SM_CMONITORS) < 2:
-        pytest.skip("one monitor: per-monitor mirroring (AC-OV-3) is verified on a two-monitor setup only")
+    monitors_n = _monitor_count()
+    if monitors_n < 2:
+        pytest.skip("one monitor: per-monitor mirroring (AC-OV-3) is verified on a multi-monitor setup only")
     overlay.post(id="e2e-mirror", title="mirror", kind="custom")
-    assert wait_until(lambda: len([w for w in overlay.windows() if _card_id(w) == "e2e-mirror"]) == 2, timeout=3)
+
+    def mirrored():
+        return sorted(w["monitor"] for w in overlay.windows() if _card_id(w) == "e2e-mirror")
+
+    assert wait_until(lambda: mirrored() == list(range(monitors_n)), timeout=3), mirrored()
+
+
+def test_cards_only_on_the_icons_monitor_when_every_monitor_is_off(overlay, single_monitor_cards):
+    overlay.post(id="e2e-single", title="single", kind="custom")
+    assert wait_until(lambda: overlay.window("e2e-single"), timeout=3)
+    time.sleep(0.5)
+    assert [w["monitor"] for w in overlay.windows() if _card_id(w) == "e2e-single"] == [_icon_monitor_index(overlay)]
 
 
 # ---- M1-6: whole-app behaviour --------------------------------------------------------
