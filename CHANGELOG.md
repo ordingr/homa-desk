@@ -82,8 +82,7 @@
   carries the real `python.exe` path (R5-N11, snippet path only). Why: Review 5 marked R5-F1 to R5-F5 as fix-before-M3.
   - Verification: `tests/test_m2_9.py`, 47 tests, qa PASS by observation (per the tech-lead brief). Full suite reported as
     `396 passed` (349 from M2 plus 47), per the same brief. doc-keeper did not re-run either figure.
-  - Not yet recorded: the security re-check of M2-9. Commit: not committed at the time of writing. Commit hash: placeholder,
-    to be filled in by git-keeper.
+  - Not yet recorded: the security re-check of M2-9. Commit hash: 2814fe5.
   - Dispatched by tech-lead. Drafted by dev (M2-9). Verified by qa. Security closure: in progress.
     Merge: not yet done.
   - Docs: correction notes in `README.md` (Meetings, Features, Settings keys table, Connect Claude over MCP, Security and
