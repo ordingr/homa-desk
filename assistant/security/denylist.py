@@ -21,7 +21,7 @@ NAME_PATTERNS = (
     ".git-credentials", ".netrc", ".npmrc", ".pypirc",
     "kubeconfig", "*.kubeconfig",
     "id_ecdsa*", "id_dsa*", "*.asc", "*.p8", "*.jks", ".pgpass", ".htpasswd",
-    ".claude.json",
+    ".claude.json", "*.keystore",
 )
 
 TAIL_PATTERNS = (
@@ -29,6 +29,8 @@ TAIL_PATTERNS = (
     ".docker/config.json",
     ".kube/config",
     ".claude/settings.json",
+    ".claude/settings.local.json",
+    "appdata/roaming/claude/claude_desktop_config.json",
 )
 
 DIR_PATTERNS = (
@@ -39,6 +41,7 @@ DIR_PATTERNS = (
     ".config/gh",
     "appdata/local/google/chrome/user data",
     "appdata/local/microsoft/edge/user data",
+    "appdata/local/assistant",
     "appdata/local/bravesoftware/brave-browser/user data",
     "appdata/local/vivaldi/user data",
     "appdata/roaming/opera software",

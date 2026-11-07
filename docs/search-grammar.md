@@ -43,6 +43,8 @@ This file describes what the code does. Where the PRD and the code differ, the d
 Caps were added after Review 7 found full-scan queries costing 2.5 to 7 s on a synthetic 2,000,000-entry index (R7-F2).
 The fix is recorded as fixed 2026-11-07 (M3a-11). Security has not yet re-checked it in `docs/security/`.
 
+> **Correction, 2026-11-07 (M3b):** the re-check is recorded in `docs/security/2026-11-07-m3a-review.md`, section "Re-check after M3a-11/12 (2026-11-07)": PASS, with R7-F1 and R7-F2 closed by observation. The sentence above is kept as written.
+
 ## 3. Tokens
 
 The query is split on spaces. These forms are recognised, in this order:
@@ -97,6 +99,8 @@ Matching is case-insensitive throughout (casefold).
 
 A bare word becomes an extension filter only when it is in this list and the query has at least two tokens. The list is
 fixed in the code and not configurable in this build.
+
+> **Correction, 2026-11-07 (M3b):** the list is configurable from M3b-0 (f), as `index.known_exts`. See section 11.3. The sentence above is kept as written.
 
 ```
 md markdown txt rtf pdf docx xls xlsx xlsm csv tsv ppt pptx odt ods json xml yml yaml toml ini cfg log
@@ -194,6 +198,8 @@ With chips and a date filter, the extra parts are appended. A chip adds `type: D
    changed. Only `truncated: true` is shown.
 9. **Ask notes** is not part of AC-FI-8 to AC-FI-12 and has no operators; see section 1.
 
+> **Correction, 2026-11-07 (M3b):** items 1, 3 and 4 are closed (sections 11.2 and 11.3). Item 5 is closed for HTTP, MCP and the full page (section 11.1); the popup's date control still offers presets only. Item 6 is closed per plan 18.3 (h), not re-checked by doc-keeper. Item 7 is closed for the popup header and for MCP `search_files` (`notes`), per plan 18.3 (h) and the code docstring. Item 8 is not checked and is left as written. Items 2 and 9 stay as written. The items are kept as written above.
+
 ## 10. People and agents
 
 - Requirement and examples: PRD by `product` (section 6.4, DEC 5).
@@ -201,3 +207,45 @@ With chips and a date filter, the extra parts are appended. A chip adds `type: D
   given in the brief).
 - Tests: `qa` (M3a-8). Parser security review: `security` (M3a-9, Review 7).
 - Documentation: `doc-keeper` (M3a-10).
+
+---
+
+## 11. M3b additions, as shipped (2026-11-07)
+
+Supersedes: section 5 (the known-extension list is fixed and not configurable; see the correction there), section 4 item 7 (the date filter is presets only; section 11.1 adds a closed range), and section 9 items 1, 3, 4, 5 and 7 in part (the correction under section 9 says which). The earlier text is kept as written.
+
+- Date: 2026-11-07. Written by doc-keeper (M3b-8, TeamAgents) from the code as read on 2026-11-07: `assistant/index/search.py` (`_date_filter`, `_day_range`, `_interpretation`), `assistant/search/modes.py` (`valid_modified`, `MODIFIED_CHOICES`, `SORT_CHOICES`), `assistant/search/saved.py`, `assistant/server/routes_search.py` (`known_exts`), `assistant/server/mcp.py` (`search_files` filters), `assistant/settings.py` (`index.known_exts`), `assistant/overlay/search_ui.py` (popup date and sort controls), `web/src/format.js`, `web/src/components/QueryBar.jsx`.
+- Verification: traced by reading only. doc-keeper ran no tests. The tests that cover these items are in `tests/test_m3b_0.py` and the extensions of `tests/test_search.py`, `tests/test_routes_search.py`, `tests/test_mcp_files.py` and `tests/e2e/test_search_popup.py` (plan 18.3). Their results are not in the brief.
+
+### 11.1 Custom date range
+
+- Form: `YYYY-MM-DD..YYYY-MM-DD`. A closed range of local days, both ends inclusive. The first day must not be after the last.
+- HTTP: `GET /v1/search?modified=2026-01-01..2026-01-31` and the `modified` field of a saved search. A malformed or reversed range returns `422 invalid_parameter` with `field: "modified"`.
+- Interpretation: `modified: <first day> to <last day>` in the results header. The presets keep their own text (`modified: today`, `modified: last 7 days`, `modified: last 30 days`).
+- MCP `search_files`: `filters.modified_after` and `filters.modified_before`, each an ISO date (`YYYY-MM-DD`). A `modified_before` date covers the whole of that day. Either bound alone reads `modified: since <day>` or `modified: until <day>`. The MCP `modified` argument keeps the presets only (section 11.5 of `docs/api.md`).
+- Web page: two date inputs. When only one is filled, the page says `Pick both dates for a custom range.` and does not search.
+- Popup: the date control (Ctrl+D) cycles the presets only. A range cannot be typed in the popup. A saved search that stores a range runs it, and the popup's label shows the stored text.
+
+### 11.2 Sort values
+
+- Values: `best` (default), `name`, `ext`, `date` (newest first). The same values are used by HTTP `sort`, MCP `sort` and the `sort` field of a saved search. An empty saved `sort` means `best`.
+- Popup: a **Sort** control in the results header reads `Sort: Best`, `Sort: Name`, `Sort: Ext` or `Sort: Date`. Ctrl+S cycles it in that order. Recalling a saved search applies its stored sort.
+- Web page: the sort control in the query bar, and Ctrl+S, which also fires for Ctrl+Shift+S in the page (`docs/api.md` section 12.9 item 7).
+
+### 11.3 `index.known_exts`
+
+- Replaces the built-in bare-word list of section 5 for HTTP, MCP and the popup. The default value is that list, with `doc` left out (section 6 still applies).
+- Each entry is letters and digits only, at most 16 characters, without a leading dot. At most 200 entries. Anything else falls back to the default for that key, with a warning in `app.log`.
+- Matching is case-insensitive (`query.parse` casefolds the list).
+- The Search settings page edits the list as space-separated text.
+- Adding `doc` to the list makes `design doc` an extension filter. That is the behaviour section 6 avoids by default. Adding it is a deliberate change of the US-FI-2 example.
+
+### 11.4 `doc` and `docx`
+
+Unchanged. `doc` is not in the default list, and section 6 stands. For Word files use `design -e doc`, `design ext:doc`, the Docs chip, or add `doc` to `index.known_exts` (section 11.3), knowing what that does to `design doc`.
+
+### 11.5 Still open after M3b
+
+- The popup has no range entry (section 11.1).
+- Whether an empty query with `sort=best` reports the change to date order in `notes` was not checked (section 9 item 8 stands).
+- Section 9 item 9 (Ask notes has no operators) is by design.

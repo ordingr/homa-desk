@@ -1,0 +1,395 @@
+.pv-notice {
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+.pv-notice p {
+  margin: 4px 0 0;
+}
+
+.pv-warn {
+  border-left: 3px solid var(--cloud);
+}
+
+.pv-btn {
+  padding: 4px 12px;
+  background: var(--button);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.pv-btn:hover:not(:disabled) {
+  background: var(--button-hover);
+}
+
+.pv-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pv-note {
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.pv-error,
+.pv-reason {
+  color: var(--err-ink);
+}
+
+.pv-more {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.pv-meta dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.pv-meta dt {
+  color: var(--dim);
+}
+
+.pv-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pv-meta .pv-reason {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--cloud-bg);
+  color: var(--ink);
+}
+
+.pv-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.pv-placeholder .pv-notice {
+  align-self: stretch;
+}
+
+.pv-placeholder .pv-meta {
+  align-self: stretch;
+}
+
+.pv-image {
+  display: flex;
+  justify-content: center;
+}
+
+.pv-image img {
+  max-width: 100%;
+  height: auto;
+  background: var(--raised);
+}
+
+.pv-image iframe {
+  display: block;
+  width: 100%;
+  height: 60vh;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--raised);
+}
+
+.pv-code {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  tab-size: 4;
+  white-space: pre;
+}
+
+.pv-code code {
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.pv-code .hljs-comment,
+.pv-code .hljs-quote {
+  color: var(--dim);
+}
+
+.pv-code .hljs-keyword,
+.pv-code .hljs-selector-tag,
+.pv-code .hljs-literal,
+.pv-code .hljs-type {
+  color: var(--c-code);
+}
+
+.pv-code .hljs-string,
+.pv-code .hljs-regexp,
+.pv-code .hljs-addition {
+  color: var(--c-sheets);
+}
+
+.pv-code .hljs-number,
+.pv-code .hljs-symbol,
+.pv-code .hljs-bullet {
+  color: var(--cloud);
+}
+
+.pv-code .hljs-title,
+.pv-code .hljs-section,
+.pv-code .hljs-built_in,
+.pv-code .hljs-attr,
+.pv-code .hljs-name {
+  color: var(--link);
+}
+
+.pv-code .hljs-deletion {
+  color: var(--err-ink);
+}
+
+.pv-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+}
+
+.pv-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.pv-table th,
+.pv-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pv-table th {
+  position: sticky;
+  top: 0;
+  background: var(--raised);
+  font-weight: 600;
+}
+
+.pv-doc p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  tab-size: 4;
+}
+
+.pv-slide {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+.pv-slide h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.pv-slide ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.pv-html iframe {
+  display: block;
+  width: 100%;
+  height: 60vh;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.pv-pdf-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.pv-pdf-page {
+  overflow: auto;
+}
+
+.pv-pdf-page canvas {
+  display: block;
+  margin: 0 auto;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.pv-diagram,
+.pv-markmap {
+  margin: 12px 0;
+  overflow: auto;
+}
+
+.pv-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.pv-markmap svg {
+  display: block;
+  width: 100%;
+  height: 320px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+}
+
+.pv-markmap svg {
+  --markmap-text-color: var(--ink);
+  --markmap-a-color: var(--link);
+  --markmap-code-bg: var(--raised);
+  --markmap-code-color: var(--ink-2);
+}
+
+.pv-markmap .pv-btn {
+  margin-top: 8px;
+}
+
+.pv-hidden {
+  display: none;
+}
+
+.pv-diagram-error {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--danger);
+  border-radius: 6px;
+}
+
+.pv-diagram-error p {
+  margin: 4px 0;
+}
+
+.pv-md {
+  overflow-wrap: anywhere;
+}
+
+.pv-md h1,
+.pv-md h2,
+.pv-md h3,
+.pv-md h4 {
+  margin: 20px 0 8px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.pv-md h1 {
+  font-size: 24px;
+}
+
+.pv-md h2 {
+  font-size: 19px;
+}
+
+.pv-md h3 {
+  font-size: 15px;
+}
+
+.pv-md p,
+.pv-md ul,
+.pv-md ol {
+  margin: 8px 0;
+}
+
+.pv-md a {
+  color: var(--link);
+}
+
+.pv-md blockquote {
+  margin: 8px 0;
+  padding: 0 12px;
+  border-left: 3px solid var(--border);
+  color: var(--dim);
+}
+
+.pv-md pre {
+  margin: 8px 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.pv-md pre code {
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+
+.pv-md :not(pre) > code {
+  padding: 1px 4px;
+}
+
+.pv-md table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+
+.pv-md th,
+.pv-md td {
+  padding: 4px 10px;
+  border: 1px solid var(--hairline);
+}
+
+.pv-md .hljs-comment,
+.pv-md .hljs-quote {
+  color: var(--dim);
+}
+
+.pv-md .hljs-keyword,
+.pv-md .hljs-selector-tag,
+.pv-md .hljs-literal,
+.pv-md .hljs-type {
+  color: var(--c-code);
+}
+
+.pv-md .hljs-string,
+.pv-md .hljs-regexp {
+  color: var(--c-sheets);
+}
+
+.pv-md .hljs-number,
+.pv-md .hljs-symbol {
+  color: var(--cloud);
+}
+
+.pv-md .hljs-title,
+.pv-md .hljs-built_in,
+.pv-md .hljs-attr,
+.pv-md .hljs-name {
+  color: var(--link);
+}

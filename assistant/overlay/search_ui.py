@@ -1,5 +1,7 @@
 """Search popup (AC-SH-1..9, AC-FI-14..17): a rounded box that slides out left of the icon,
 grows into results on Enter, and walks back out with Escape. tkinter, main thread only."""
+import ctypes
+import dataclasses
 import logging
 import os
 import sys
@@ -12,7 +14,8 @@ from typing import Any, Callable, Optional
 
 from .. import uibus
 from ..search import modes as search_modes
-from ..search.modes import MODIFIED_CHOICES, CHIP_LABELS, CHIPS, ModeUnavailable, Row, SearchResult
+from ..search.modes import (MODIFIED_CHOICES, SORT_CHOICES, CHIP_LABELS, CHIPS, ModeUnavailable, Row, SearchResult,
+                            valid_modified)
 from ..search.saved import SavedSearches
 from . import gfx, monitors, panel, win
 
@@ -40,12 +43,30 @@ SLIDE_STEPS = 6
 SLIDE_STEP_MS = 14
 SEARCH_LIMIT_NOTE = 200
 
-ACTIONS = (
+MENU_ITEMS = (
+    ("open", "Open", "Enter"),
+    ("open_with", "Open with…", ""),
+    ("reveal", "Reveal in Explorer", "Ctrl+Enter"),
+    ("copy_path", "Copy path", "Ctrl+C"),
+    ("copy_path_quoted", "Copy path (quoted)", ""),
+    None,
+    ("rename", "Rename…", "F2"),
+    ("properties", "Properties", "Alt+Enter"),
+    ("md_vault", "Open in MD Vault", "Ctrl+M"),
+    ("recycle", "Move to Recycle Bin", "Delete"),
+    None,
+    ("ask_claude", "Ask Claude about this file", ""),
+)
+ACTIONS = tuple(item for item in MENU_ITEMS if item)
+BUTTONS = (
     ("open", "Open", "Enter"),
     ("md_vault", "MD Vault", "Ctrl+M"),
-    ("explorer", "Explorer", "Ctrl+Enter"),
-    ("fastsearch_folder", "Fastsearch folder", "Ctrl+F"),
+    ("reveal", "Explorer", "Ctrl+Enter"),
+    ("folder_listing", "Fastsearch folder", "Ctrl+F"),
 )
+LOCAL_MARK = "● "
+CLAUDE_MARK = "☁ "
+CLAUDE_SUFFIX = "  → Claude"
 
 _EXT_GROUPS = {
     "docs": ("doc", "docx", "md", "txt", "rtf", "odt", "pptx", "ppt"),
@@ -109,6 +130,9 @@ def header_text(result: SearchResult, noun: str, elapsed_ms: Optional[float]) ->
         parts.append(f"{elapsed_ms:.0f} ms")
     if result.interpretation:
         parts.append(result.interpretation)
+    if result.truncated:
+        parts.append("truncated — refine the query")
+    parts.extend(result.notes)
     return " · ".join(parts)
 
 
@@ -122,11 +146,12 @@ class _DictSettings:
 
 class SearchPopup:
     ACTIONS = ACTIONS
+    BUTTONS = BUTTONS
 
     def __init__(self, root: tk.Misc, icon: Any, modes: Any, settings: Any = None,
                  run_search: Optional[Callable[..., Any]] = None, saved: Optional[SavedSearches] = None,
                  on_fullpage: Optional[Callable[[str], None]] = None,
-                 on_action: Optional[Callable[[str, Row], None]] = None,
+                 on_action: Optional[Callable[..., Any]] = None,
                  post: Callable[..., None] = uibus.post,
                  clock: Callable[[], float] = time.perf_counter) -> None:
         self.root = root
@@ -137,7 +162,7 @@ class SearchPopup:
         self.saved = saved or SavedSearches()
         self.on_fullpage = on_fullpage
         self.on_action = on_action
-        self.on_context: Optional[Callable[[Row, Any], None]] = None
+        self.on_context: Optional[Callable[[Row, Any], None]] = self.show_context_menu
         self._post = post
         self._clock = clock
 
@@ -145,12 +170,14 @@ class SearchPopup:
         self.mode_i = 0
         self.chips: set = set()
         self.modified = ""
+        self.sort = ""
         self.result: Optional[SearchResult] = None
         self.rows: list = []
         self.sel = -1
         self.top = 0
         self.header = ""
         self.details = ""
+        self.details_kind = ""
         self.error = ""
         self.pending = False
         self.last_text = ""
@@ -171,6 +198,12 @@ class SearchPopup:
         self._saved_cache: list = []
         self._passage: Optional[tk.Text] = None
         self._passage_dirty = True
+        self._listing_stack: list = []
+        self._menu: Optional[tk.Menu] = None
+        self._menu_items: list = []
+        self.menu_open = False
+        self.last_action: Optional[dict] = None
+        self._dialog: Optional[dict] = None
 
         self.win = tk.Toplevel(root)
         self.win.withdraw()
@@ -243,6 +276,7 @@ class SearchPopup:
         self.mode_i = 0
         self.chips = set()
         self.modified = ""
+        self.sort = ""
         self._reset_results()
         self.var.set("")
         self.state = "input"
@@ -374,7 +408,7 @@ class SearchPopup:
         return NOTE_DETAIL_H if self._notes_view() else DETAIL_H
 
     def _footer(self) -> str:
-        return self.result.footer if self.result else ""
+        return self.result.footer if self.result and not self._listing_stack else ""
 
     def _rect(self) -> tuple:
         w, h = self._sizes()
@@ -405,9 +439,11 @@ class SearchPopup:
         self.top = 0
         self.header = ""
         self.details = ""
+        self.details_kind = ""
         self.error = ""
         self.pending = False
         self.last_text = ""
+        self._listing_stack = []
         self._passage_dirty = True
 
     def _saved_visible(self) -> bool:
@@ -429,7 +465,11 @@ class SearchPopup:
         self._render()
 
     def _escape(self) -> str:
-        if self.state == "results":
+        if self.menu_open:
+            self._close_menu()
+        elif self._listing_stack:
+            self._leave_listing()
+        elif self.state == "results":
             self._token += 1
             self._reset_results()
             self.state = "input"
@@ -442,7 +482,7 @@ class SearchPopup:
         return "break"
 
     def escape(self) -> str:
-        """Esc chain step (results -> normal -> closed); returns the resulting state."""
+        """Esc chain step (menu -> folder listing -> results -> normal -> closed); returns the resulting state."""
         self._escape()
         return self.state
 
@@ -470,24 +510,30 @@ class SearchPopup:
         self.pending = True
         self.error = ""
         self.header = "searching…"
-        self.rows, self.sel, self.top, self.details = [], -1, 0, ""
+        self._listing_stack = []
+        self.rows, self.sel, self.top, self.details, self.details_kind = [], -1, 0, "", ""
         self.result_noun = getattr(mode, "noun", None) or "result(s)"
         self.last_text = self.var.get()
         self._apply_geometry()
         self._render()
-        chips, modified = sorted(self.chips), self.modified
+        chips, modified, sort = sorted(self.chips), self.modified, self.sort
         started = self._clock()
 
         def work() -> None:
             try:
-                res = self._call_run_search(mode, query, chips, modified)
+                res = self._call_run_search(mode, query, chips, modified, sort)
                 self._post(self._finish, token, res, None, (self._clock() - started) * 1000.0)
             except Exception as exc:
                 self._post(self._finish, token, None, exc, 0.0)
 
         threading.Thread(target=work, name="assistant-search", daemon=True).start()
 
-    def _call_run_search(self, mode: Any, query: str, chips: list, modified: str) -> Any:
+    def _call_run_search(self, mode: Any, query: str, chips: list, modified: str, sort: str = "") -> Any:
+        try:
+            return self.run_search(mode, query, chips=chips, modified=modified, sort=sort)
+        except TypeError as exc:
+            if "keyword argument" not in str(exc):
+                raise
         try:
             return self.run_search(mode, query, chips=chips, modified=modified)
         except TypeError as exc:
@@ -519,6 +565,7 @@ class SearchPopup:
         self._render()
 
     def _update_details(self) -> None:
+        self.details_kind = ""
         self.details = details_line(self.rows[self.sel]) if 0 <= self.sel < len(self.rows) else ""
         self._passage_dirty = True
 
@@ -529,7 +576,8 @@ class SearchPopup:
                 if mode.keyword == item.mode:
                     self.mode_i = i
             self.chips = {c for c in item.chips if c in CHIPS}
-            self.modified = item.modified if item.modified in dict(MODIFIED_CHOICES) else ""
+            self.modified = item.modified if valid_modified(item.modified) else ""
+            self.sort = item.sort if item.sort in dict(SORT_CHOICES) else ""
             self.var.set(item.query)
             self.search_now()
         try:
@@ -543,7 +591,7 @@ class SearchPopup:
         if not query:
             return False
         try:
-            self.saved.add((name or query), query, chips=self.chips, modified=self.modified, sort="",
+            self.saved.add((name or query), query, chips=self.chips, modified=self.modified, sort=self.sort,
                            mode=mode.keyword)
         except (OSError, ValueError):
             log.exception("could not save search")
@@ -590,14 +638,24 @@ class SearchPopup:
         self._rerun_if_results()
 
     def set_modified(self, value: str) -> None:
-        if value not in dict(MODIFIED_CHOICES):
+        if not valid_modified(value):
             return
         self.modified = value
         self._rerun_if_results()
 
+    def set_sort(self, value: str) -> None:
+        if value not in dict(SORT_CHOICES):
+            return
+        self.sort = value
+        self._rerun_if_results()
+
+    def cycle_sort(self) -> None:
+        keys = [k for k, _ in SORT_CHOICES]
+        self.set_sort(keys[(keys.index(self.sort) + 1) % len(keys)])
+
     def cycle_modified(self) -> None:
         keys = [k for k, _ in MODIFIED_CHOICES]
-        self.set_modified(keys[(keys.index(self.modified) + 1) % len(keys)])
+        self.set_modified(keys[(keys.index(self.modified) + 1) % len(keys)] if self.modified in keys else "")
 
     def _rerun_if_results(self) -> None:
         if self.state == "results" and self.var.get().strip():
@@ -608,16 +666,210 @@ class SearchPopup:
     def selected_row(self) -> Optional[Row]:
         return self.rows[self.sel] if 0 <= self.sel < len(self.rows) else None
 
-    def invoke(self, verb: str) -> bool:
-        row = self.selected_row()
+    def invoke(self, verb: str, row: Optional[Row] = None) -> bool:
+        row = row or self.selected_row()
         if row is None or self.on_action is None:
             return False
+        kwargs: dict = {}
+        if verb == "rename":
+            new_name = self._ask_text("Rename", "New name", row.name)
+            if new_name is None or new_name == row.name:
+                return True
+            kwargs["new_name"] = new_name
         try:
-            self.on_action(verb, row)
+            result = self.on_action(verb, row, **kwargs)
+            if isinstance(result, dict) and result.get("needs_confirmation"):
+                if self._ask_confirm(str(result.get("message", "")), verb == "ask_claude"):
+                    result = self.on_action(verb, row, **kwargs, confirm=True)
+                else:
+                    result = {"ok": False, "message": "Cancelled.", "cancelled": True}
         except Exception:
             log.exception("result action %s failed", verb)
             return False
+        self._after_action(verb, row, result)
         return True
+
+    def _after_action(self, verb: str, row: Row, result: Any) -> None:
+        self.last_action = {"verb": verb, "name": row.name, "result": result}
+        if not isinstance(result, dict):
+            return
+        if verb == "folder_listing" and result.get("ok") and isinstance(result.get("rows"), list):
+            self._enter_listing(result)
+            return
+        message = str(result.get("message", ""))
+        if verb == "rename" and result.get("ok") and 0 <= self.sel < len(self.rows):
+            new_path = result.get("path")
+            new_name = os.path.basename(str(new_path)) if new_path else ""
+            if new_name:
+                self.rows[self.sel] = dataclasses.replace(row, name=new_name, spans=())
+            self._update_details()
+        if message:
+            self.details = message
+            self.details_kind = "ok" if result.get("ok") else "dim" if result.get("cancelled") else "err"
+        self._render()
+
+    def _enter_listing(self, result: dict) -> None:
+        folder = str(result.get("folder", ""))
+        rows = []
+        for item in result["rows"]:
+            path = str(item.get("path", ""))
+            name = str(item.get("name") or os.path.basename(path))
+            is_dir = bool(item.get("is_dir"))
+            rows.append(Row(name=name, folder=os.path.dirname(path) or folder,
+                            ext="" if is_dir else os.path.splitext(name)[1].lstrip("."), size=item.get("size"),
+                            mtime=item.get("mtime"), is_dir=is_dir, placeholder=bool(item.get("placeholder"))))
+        self._listing_stack.append({"folder": folder, "rows": self.rows, "sel": self.sel, "top": self.top,
+                                    "header": self.header, "details": self.details, "kind": self.details_kind})
+        self.rows, self.top, self.sel = rows, 0, 0 if rows else -1
+        self.header = f"Folder: {folder}"
+        if result.get("truncated"):
+            self.header += f" · showing {len(rows)} of {result.get('total', len(rows))}"
+        self.saved_note = ""
+        self._update_details()
+        self._apply_geometry()
+        self._render()
+
+    def _leave_listing(self) -> None:
+        snap = self._listing_stack.pop()
+        self.rows, self.sel, self.top = snap["rows"], snap["sel"], snap["top"]
+        self.header, self.details, self.details_kind = snap["header"], snap["details"], snap["kind"]
+        self._passage_dirty = True
+        self._apply_geometry()
+        self._render()
+        self.entry.focus_set()
+
+    # ---- context menu and dialogs ------------------------------------
+
+    def show_context_menu(self, row: Row, event: Any = None) -> None:
+        if self.menu_open or self.on_action is None:
+            return
+        menu = tk.Menu(self.win, tearoff=0, bg=gfx.PANEL_BG, fg=gfx.PANEL_FG, activebackground=gfx.BUTTON_BG_HOVER,
+                       activeforeground=gfx.WHITE, bd=1, relief="flat",
+                       font=("Segoe UI", max(9, round(10 * self.scale))))
+        items = []
+        for item in MENU_ITEMS:
+            if item is None:
+                menu.add_separator()
+                continue
+            verb, label, shortcut = item
+            claude = verb == "ask_claude"
+            text = f"{CLAUDE_MARK}{label}{CLAUDE_SUFFIX}" if claude else f"{LOCAL_MARK}{label}"
+            menu.add_command(label=text, accelerator=shortcut, foreground=gfx.AMBER if claude else gfx.PANEL_OK,
+                             command=lambda v=verb, r=row: self.invoke(v, r))
+            items.append({"verb": verb, "label": text, "key": shortcut, "scope": "claude" if claude else "local"})
+        self._menu, self._menu_items, self.menu_open = menu, items, True
+        x = getattr(event, "x_root", None)
+        y = getattr(event, "y_root", None)
+        if x is None or y is None:
+            x, y = self.win.winfo_rootx() + 60, self.win.winfo_rooty() + 120
+        try:
+            menu.tk_popup(int(x), int(y))
+        finally:
+            menu.grab_release()
+            self.menu_open, self._menu = False, None
+
+    def _close_menu(self) -> None:
+        if self._menu is not None:
+            try:
+                self._menu.unpost()
+                ctypes.windll.user32.EndMenu()
+            except (tk.TclError, AttributeError, OSError):
+                pass
+        self.menu_open, self._menu = False, None
+
+    def _menu_at_selection(self) -> None:
+        row = self.selected_row()
+        if row is None or self.state != "results":
+            return
+        s = self.scale
+        top = gfx.px(PAD + BAR_H + 4 + HEADER_H + CHIP_H + 6, s)
+        y = self.win.winfo_rooty() + top + (self.sel - self.top) * gfx.px(ROW_H, s) + gfx.px(ROW_H, s)
+        at = type("At", (), {"x_root": self.win.winfo_rootx() + gfx.px(120, s), "y_root": y})()
+        self.show_context_menu(row, at)
+
+    def _open_dialog(self, kind: str, title: str, message: str) -> tk.Toplevel:
+        dlg = tk.Toplevel(self.win)
+        dlg.withdraw()
+        dlg.title(title)
+        dlg.configure(bg=gfx.PANEL_BG, padx=16, pady=14)
+        dlg.attributes("-topmost", True)
+        dlg.resizable(False, False)
+        self._dialog = {"kind": kind, "title": title, "message": message}
+        return dlg
+
+    def _run_dialog(self, dlg: tk.Toplevel, focus: tk.Misc) -> None:
+        dlg.update_idletasks()
+        x = self.win.winfo_rootx() + max(0, (self.win.winfo_width() - dlg.winfo_reqwidth()) // 2)
+        y = self.win.winfo_rooty() + gfx.px(80, self.scale)
+        dlg.geometry(f"+{x}+{y}")
+        dlg.deiconify()
+        dlg.lift()
+        try:
+            dlg.wait_visibility()
+            dlg.grab_set()
+            focus.focus_force()
+        except tk.TclError:
+            pass
+        dlg.wait_window()
+        self._dialog = None
+        self._focus()
+
+    def _dialog_button(self, parent: tk.Misc, text: str, command: Callable[[], None], accent: str = "") -> tk.Button:
+        return tk.Button(parent, text=text, command=command, bg=accent or gfx.BUTTON_BG, fg=gfx.PANEL_FG,
+                         activebackground=gfx.BUTTON_BG_HOVER, activeforeground=gfx.WHITE, relief="flat", bd=0,
+                         padx=14, pady=5, font=("Segoe UI", 10))
+
+    def _ask_confirm(self, message: str, claude: bool = False) -> bool:
+        dlg = self._open_dialog("confirm", "Confirm", message)
+        answer = {"ok": False}
+        if claude:
+            tk.Label(dlg, text=f"{CLAUDE_MARK}Sends to Claude", bg=gfx.PANEL_BG, fg=gfx.AMBER,
+                     font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+        tk.Label(dlg, text=message, bg=gfx.PANEL_BG, fg=gfx.PANEL_FG, font=("Segoe UI", 11), wraplength=380,
+                 justify="left").pack(anchor="w")
+        row = tk.Frame(dlg, bg=gfx.PANEL_BG)
+        row.pack(anchor="e", pady=(12, 0))
+
+        def finish(value: bool) -> None:
+            answer["ok"] = value
+            dlg.destroy()
+
+        no = self._dialog_button(row, "Cancel", lambda: finish(False))
+        yes = self._dialog_button(row, "Send" if claude else "OK", lambda: finish(True),
+                                  gfx.AMBER if claude else gfx.BLUE)
+        no.pack(side="right", padx=(8, 0))
+        yes.pack(side="right")
+        dlg.bind("<Escape>", lambda _e: finish(False))
+        dlg.bind("<Return>", lambda _e: finish(True))
+        dlg.protocol("WM_DELETE_WINDOW", lambda: finish(False))
+        self._run_dialog(dlg, yes)
+        return answer["ok"]
+
+    def _ask_text(self, title: str, label: str, initial: str = "") -> Optional[str]:
+        dlg = self._open_dialog("input", title, label)
+        answer: dict = {"value": None}
+        tk.Label(dlg, text=label, bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM, font=("Segoe UI", 10)).pack(anchor="w")
+        var = tk.StringVar(value=initial)
+        entry = tk.Entry(dlg, textvariable=var, width=46, bg=gfx.INPUT_BG, fg=gfx.PANEL_FG,
+                         insertbackground=gfx.PANEL_FG, relief="flat", highlightthickness=1,
+                         highlightbackground=gfx.INPUT_BORDER, highlightcolor=gfx.PURPLE, font=("Segoe UI", 12))
+        entry.pack(anchor="w", pady=(4, 0), ipady=3)
+        stem = os.path.splitext(initial)[0]
+        entry.selection_range(0, len(stem) if stem else "end")
+        row = tk.Frame(dlg, bg=gfx.PANEL_BG)
+        row.pack(anchor="e", pady=(12, 0))
+
+        def finish(value: Optional[str]) -> None:
+            answer["value"] = value
+            dlg.destroy()
+
+        self._dialog_button(row, "Cancel", lambda: finish(None)).pack(side="right", padx=(8, 0))
+        self._dialog_button(row, "OK", lambda: finish(var.get()), gfx.BLUE).pack(side="right")
+        dlg.bind("<Escape>", lambda _e: finish(None))
+        dlg.bind("<Return>", lambda _e: finish(var.get()))
+        dlg.protocol("WM_DELETE_WINDOW", lambda: finish(None))
+        self._run_dialog(dlg, entry)
+        return answer["value"]
 
     def fullpage(self) -> None:
         if self.on_fullpage is not None:
@@ -636,7 +888,11 @@ class SearchPopup:
 
         key("<Return>", self.submit)
         key("<KP_Enter>", self.submit)
-        key("<Control-Return>", lambda: self.invoke("explorer"), True)
+        key("<Control-Return>", lambda: self.invoke("reveal"), True)
+        key("<Alt-Return>", lambda: self.invoke("properties"), True)
+        key("<F2>", lambda: self.invoke("rename"), True)
+        key("<Shift-F10>", self._menu_at_selection, True)
+        key("<App>", self._menu_at_selection, True)
         key("<Tab>", self.cycle_mode)
         key("<Shift-Tab>", lambda: self.cycle_mode(-1))
         key("<ISO_Left_Tab>", lambda: self.cycle_mode(-1))
@@ -649,16 +905,31 @@ class SearchPopup:
         key("<Escape>", self._escape)
         key("<F11>", self.fullpage)
         key("<Control-m>", lambda: self.invoke("md_vault"), True)
-        key("<Control-f>", lambda: self.invoke("fastsearch_folder"), True)
-        key("<Control-s>", self.save_current)
+        key("<Control-f>", lambda: self.invoke("folder_listing"), True)
+        key("<Control-s>", self.cycle_sort, True)
+        key("<Control-S>", self.save_current)
         key("<Control-d>", self.cycle_modified, True)
-        key("<Delete>", self._delete_saved_selected)
+        self.entry.bind("<Delete>", self._delete_key)
+        self.entry.bind("<Control-c>", self._copy_key)
 
-    def _delete_saved_selected(self) -> None:
+    def _row_keys_live(self) -> bool:
+        return (self.state == "results" and bool(self.rows) and self.var.get() == self.last_text
+                and not self.entry.selection_present())
+
+    def _delete_key(self, _event) -> str:
         if self._saved_visible():
             self.remove_saved(self._saved_cache[self.saved_sel].name)
+        elif self._row_keys_live():
+            self.invoke("recycle")
         else:
-            self.entry.event_generate("<<Clear>>")
+            return ""
+        return "break"
+
+    def _copy_key(self, _event) -> str:
+        if not self._row_keys_live():
+            return ""
+        self.invoke("copy_path")
+        return "break"
 
     def _hit(self, event) -> str:
         items = self.canvas.find_overlapping(event.x, event.y, event.x, event.y)
@@ -709,8 +980,12 @@ class SearchPopup:
             self.toggle_chip(arg)
         elif kind == "date":
             self.cycle_modified()
+        elif kind == "sort":
+            self.cycle_sort()
         elif kind == "act":
             self.invoke(arg)
+        elif kind == "back":
+            self.escape()
         elif kind == "full":
             self.fullpage()
         elif kind == "save":
@@ -837,7 +1112,19 @@ class SearchPopup:
         small, base = self._font("small"), self._font("base")
         head = self.saved_note or self.header
         colour = gfx.PANEL_ERR if self.error else gfx.PANEL_DIM_CARD
-        c.create_text(p, y + gfx.px(HEADER_H, s) / 2, text=self._fit(head, small, w - 2 * p), anchor="w",
+        head_w = w - 2 * p
+        if self._listing_stack:
+            label = "‹ Back (Esc)"
+            sw = small.measure(label) + gfx.px(14, s)
+            self._button(w - p - sw, y, sw, gfx.px(HEADER_H - 2, s), label, "hit:back:x", "chip")
+            head_w -= sw + gfx.px(8, s)
+        elif not self._notes_view():
+            label = "Sort: " + dict(SORT_CHOICES)[self.sort]
+            sw = small.measure(label) + gfx.px(14, s)
+            sh = gfx.px(HEADER_H - 2, s)
+            self._button(w - p - sw, y, sw, sh, label, "hit:sort:x", "chip", active=bool(self.sort))
+            head_w -= sw + gfx.px(8, s)
+        c.create_text(p, y + gfx.px(HEADER_H, s) / 2, text=self._fit(head, small, head_w), anchor="w",
                       fill=colour, font=small, tags="header")
         y += gfx.px(HEADER_H, s)
 
@@ -847,7 +1134,7 @@ class SearchPopup:
             cw = small.measure(label) + gfx.px(18, s)
             self._button(x, y, cw, ch, label, f"hit:chip:{name}", "chip", active=name in self.chips)
             x += cw + gfx.px(6, s)
-        date_label = "Modified: " + dict(MODIFIED_CHOICES)[self.modified]
+        date_label = "Modified: " + dict(MODIFIED_CHOICES).get(self.modified, self.modified)
         dw = small.measure(date_label) + gfx.px(18, s)
         self._button(x + gfx.px(6, s), y, dw, ch, date_label, "hit:date:x", "chip", active=bool(self.modified))
         sw = small.measure("★ Save") + gfx.px(18, s)
@@ -857,7 +1144,7 @@ class SearchPopup:
         rh = gfx.px(ROW_H, s)
         list_h = rh * VISIBLE_ROWS
         if not self.rows:
-            msg = "" if self.pending else (self.result.notice if self.result and self.result.notice else
+            msg = "This folder is empty" if self._listing_stack else "" if self.pending else (self.result.notice if self.result and self.result.notice else
                                            ("" if self.error else "No matches"))
             c.create_text(w / 2, y + list_h / 2, text=msg, fill=gfx.PANEL_DIM, font=base, tags="empty")
         for n, row in enumerate(self.rows[self.top:self.top + VISIBLE_ROWS]):
@@ -873,20 +1160,21 @@ class SearchPopup:
         dh = gfx.px(self._detail_h(), s)
         panel.rounded_rect(c, p, y, w - p, y + dh, 6 * s, tag="detailbox", fill=gfx.INPUT_BG, outline="")
         row = self.selected_row()
+        detail_colour = {"err": gfx.PANEL_ERR, "ok": gfx.PANEL_OK}.get(self.details_kind, gfx.PANEL_DIM_CARD)
         if self._notes_view() and row is not None:
-            path_line = details_line(Row(**{**row.__dict__, "passage": ""}))
+            path_line = self.details if self.details_kind else details_line(Row(**{**row.__dict__, "passage": ""}))
             c.create_text(p + 8 * s, y + 4 * s, text=self._fit(path_line, small, int(w - 2 * p - 16 * s), tail=True),
-                          anchor="nw", fill=gfx.PANEL_DIM_CARD, font=small, tags="details")
+                          anchor="nw", fill=detail_colour, font=small, tags="details")
             self._show_passage(row, p + 6 * s, y + 24 * s, w - 2 * p - 12 * s, dh - 28 * s)
         else:
             self._hide_passage()
-            c.create_text(p + 8 * s, y + 4 * s, text=self.details, anchor="nw", fill=gfx.PANEL_DIM_CARD, font=small,
+            c.create_text(p + 8 * s, y + 4 * s, text=self.details, anchor="nw", fill=detail_colour, font=small,
                           width=w - 2 * p - 16 * s, tags="details")
         y += dh + gfx.px(6, s)
 
         x = p
         bh = gfx.px(BTN_H, s)
-        for verb, label, shortcut in self.ACTIONS:
+        for verb, label, shortcut in self.BUTTONS:
             text = f"{label} ({shortcut})"
             bw = small.measure(text) + gfx.px(20, s)
             self._button(x, y, bw, bh, text, f"hit:act:{verb}", "act")
@@ -909,11 +1197,15 @@ class SearchPopup:
         dw = self._font("small").measure("0000-00-00") + 6 * s
         c.create_text(x + width - 6 * s, y + rh / 2, text=date, anchor="e", fill=gfx.PANEL_DIM, font=self._font("small"),
                       tags=tag)
+        cloud = 16 * s if row.placeholder else 0
+        if row.placeholder:
+            c.create_text(x + width - dw - 12 * s, y + rh / 2, text="\u2601", anchor="e", fill=gfx.PANEL_DIM,
+                          font=self._font("small"), tags=tag + ("cloud",))
         nx = x + 4 * s + tag_w + 10 * s
-        avail = x + width - dw - 14 * s - nx
+        avail = x + width - dw - 14 * s - cloud - nx
         name_w = self._draw_name(row, nx, y + rh / 2, int(avail * 0.55), tag)
         fx = nx + name_w + 12 * s
-        folder = self._fit(row.folder, self._font("small"), int(x + width - dw - 14 * s - fx), tail=True)
+        folder = self._fit(row.folder, self._font("small"), int(x + width - dw - 14 * s - cloud - fx), tail=True)
         c.create_text(fx, y + rh / 2, text=folder, anchor="w", fill=gfx.PANEL_DIM, font=self._font("small"), tags=tag)
 
     def _draw_name(self, row: Row, x: float, cy: float, maxw: int, tag: tuple) -> float:
@@ -994,9 +1286,16 @@ class SearchPopup:
             "selected_name": sel.name if sel else None,
             "chips": sorted(self.chips),
             "modified": self.modified,
+            "sort": self.sort,
             "header": self.header,
             "interpretation": self.result.interpretation if self.result else "",
             "details": self.details,
+            "details_kind": self.details_kind,
+            "menu_open": self.menu_open,
+            "menu_items": list(self._menu_items) if self.menu_open else [],
+            "folder_listing": self._listing_stack[-1]["folder"] if self._listing_stack else None,
+            "last_action": self.last_action,
+            "dialog": dict(self._dialog) if self._dialog else None,
             "footer": self._footer(),
             "row_kind": sel.kind if sel else None,
             "passage_text": (self._passage.get("1.0", "end-1c") if self._passage is not None

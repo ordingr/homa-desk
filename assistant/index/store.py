@@ -35,7 +35,7 @@ from array import array
 from bisect import bisect_left, bisect_right
 from collections import OrderedDict
 from collections import Counter
-from itertools import accumulate, chain, compress, islice, repeat
+from itertools import accumulate, chain, compress, groupby, islice, repeat
 from typing import Iterable, Iterator, Optional
 
 FLAG_DIR = 1
@@ -82,6 +82,7 @@ class Hits(array):
     """``array('I')`` of entry ids, ascending, that remembers where it came from."""
     store = None
     term = None
+    cut = False
 
 
 class IndexStore:
@@ -100,6 +101,7 @@ class IndexStore:
         self._lock = threading.Lock()
         self._runs: Optional[dict] = None
         self._dir_ids: Optional[dict] = None
+        self._dirs_cf: Optional[list] = None
         self._overlay: Optional[weakref.ref] = None
         self._cache: OrderedDict = OrderedDict()
         _remember(self)
@@ -118,8 +120,10 @@ class IndexStore:
             raise IndexError(i)
         return delta.entry(i - self.entry_count)
 
-    def find_substring(self, term_cf: str, limit: Optional[int] = None) -> Hits:
-        """Ids (ascending) of entries whose casefolded name contains ``term_cf``; ``limit`` stops early."""
+    def find_substring(self, term_cf: str, limit: Optional[int] = None, deadline: Optional[float] = None) -> Hits:
+        """Ids (ascending) of entries whose casefolded name contains ``term_cf``; ``limit`` stops early. Once
+        ``deadline`` (a ``perf_counter`` time) has passed the scan stops between hits and ``cut`` is set on the
+        result; one ``str.find`` call is never interrupted."""
         out = Hits("I")
         out.store, out.term = self, term_cf
         cap = self.entry_count if limit is None else max(0, int(limit))
@@ -138,8 +142,8 @@ class IndexStore:
             out.frombytes(cached[:cap].tobytes())
             return out
         if not self._gram_hits(term_cf, cap, out):
-            self._scan(term_cf, cap, out)
-        if limit is None and len(out) >= CACHE_MIN_HITS and len(out) <= CACHE_MAX_IDS:
+            self._scan(term_cf, cap, out, deadline)
+        if limit is None and not out.cut and len(out) >= CACHE_MIN_HITS and len(out) <= CACHE_MAX_IDS:
             self._remember_hits(term_cf, out)
         return out
 
@@ -189,9 +193,10 @@ class IndexStore:
             while len(self._cache) > CACHE_TERMS or sum(map(len, self._cache.values())) > CACHE_MAX_IDS:
                 self._cache.popitem(last=False)
 
-    def _scan(self, term: str, cap: int, out: Hits) -> None:
+    def _scan(self, term: str, cap: int, out: Hits, deadline: Optional[float] = None) -> None:
         cf, offs, n = self._cf, self._cf_offs, self.entry_count
         find, append = cf.find, out.append
+        clock = time.perf_counter
         pos = find(term)
         i = found = 0
         while pos >= 0 and found < PER_HIT_LIMIT:
@@ -199,6 +204,9 @@ class IndexStore:
             append(i)
             found += 1
             if found >= cap:
+                return
+            if deadline is not None and clock() > deadline:
+                out.cut = True
                 return
             pos = find(term, offs[i + 1])
         nul = "\x00"
@@ -217,6 +225,9 @@ class IndexStore:
                 return
             window = int(min(WINDOW_MAX, max(WINDOW_MIN, WINDOW_HITS * e / len(out))))
             i = e
+            if deadline is not None and clock() > deadline:
+                out.cut = True
+                return
             pos = find(term, offs[e])
 
     def name(self, i: int) -> str:
@@ -273,12 +284,12 @@ class IndexStore:
     name_at, path_of, parent_at, size_at, mtime_at, flags_at = name, path, parent_path, size, mtime, flags
 
     def rank_best_literal(self, ids, end: int, term_cf: str, show_denied: bool, deadline: Optional[float],
-                          want: int):
+                          want: int, hide: int = 0, skip_roots: bool = False):
         """``(top, total, truncated)`` for ``ids[:end]`` (store ids, all containing ``term_cf``): the best ``want``
         as ``((tier, tier, len, name), id, tier)`` in order, and how many were ranked. Same tiers and key as
         ``rank.name_tier`` / ``rank.best_key`` for a lone literal name term under ``sort=best``."""
-        cf, o, flags = self._cf, self._cf_offs, self._flags
-        deny = 0 if show_denied else FLAG_DENIED
+        cf, o, flags, parent = self._cf, self._cf_offs, self._flags, self._parent
+        deny = (0 if show_denied else FLAG_DENIED) | hide
         m = len(term_cf)
         flat: list = []
         append = flat.append
@@ -289,7 +300,7 @@ class IndexStore:
                 truncated = True
                 break
             for i in ids[base:min(end, base + step)]:
-                if flags[i] & deny:
+                if flags[i] & deny or (skip_roots and parent[i] < 0):
                     continue
                 n = cf[o[i]:o[i + 1] - 1]
                 s = n.find(term_cf)
@@ -335,21 +346,73 @@ class IndexStore:
             ids = keep
         return ids
 
-    def _build_lookups(self) -> None:
+    def is_root(self, i: int) -> bool:
+        """True for the entry a root directory itself is stored as."""
+        return i < self.entry_count and self._parent[i] < 0
+
+    def _ensure_runs(self) -> dict:
         with self._lock:
-            if self._runs is not None:
-                return
-            runs: dict = {}
-            prev, start = -2, 0
-            for i, p in enumerate(self._parent):
-                if p != prev:
-                    if prev >= 0:
-                        runs.setdefault(prev, []).append((start, i))
-                    prev, start = p, i
-            if prev >= 0:
-                runs.setdefault(prev, []).append((start, len(self._parent)))
-            self._dir_ids = {_key(d): n for n, d in enumerate(self._dirs)}
-            self._runs = runs
+            if self._runs is None:
+                runs: dict = {}
+                start = 0
+                for p, group in groupby(self._parent):
+                    end = start + len(list(group))
+                    if p >= 0:
+                        runs.setdefault(p, []).append((start, end))
+                    start = end
+                self._runs = runs
+            return self._runs
+
+    def _build_lookups(self) -> None:
+        self._ensure_runs()
+        with self._lock:
+            if self._dir_ids is None:
+                self._dir_ids = {_key(d): n for n, d in enumerate(self._dirs)}
+
+    def _folded_dirs(self) -> list:
+        with self._lock:
+            if self._dirs_cf is None:
+                self._dirs_cf = [d.casefold() for d in self._dirs]
+            return self._dirs_cf
+
+    def count_under(self, root: str) -> int:
+        """Entries stored under ``root`` (the root's own entry included)."""
+        runs = self._ensure_runs()
+        base = os.path.normcase(os.path.normpath(root)).casefold().rstrip("\\/")
+        prefix = base + "\\"
+        total = 1
+        for n, d in enumerate(self._folded_dirs()):
+            if d == base or d.startswith(prefix):
+                total += sum(b - a for a, b in runs.get(n, ()))
+        return total
+
+    def find_via_dirs(self, name_cf: str, path_cf: str, max_ids: int,
+                      deadline: Optional[float] = None) -> Optional[Hits]:
+        """Candidates for a query whose name term is too common to scan on but whose path term is selective: ids
+        (ascending) of every entry whose full path contains ``path_cf`` (no separators or wildcards). That is the
+        entries sitting in a directory whose path contains it, plus those whose own name does. ``None`` when that
+        is more than ``max_ids`` entries, so the caller scans on the name instead. ``term`` is ``name_cf`` so a
+        delta overlay filters its adds the way it does for a name scan."""
+        hit_dirs = [n for n, d in enumerate(self._folded_dirs()) if path_cf in d]
+        runs = self._ensure_runs() if hit_dirs else {}
+        total = 0
+        spans = []
+        for n in hit_dirs:
+            for span in runs.get(n, ()):
+                total += span[1] - span[0]
+                if total > max_ids:
+                    return None
+                spans.append(span)
+        named = self.find_substring(path_cf, max_ids + 1, deadline)
+        if len(named) > max_ids:
+            return None
+        ids = set(named)
+        for a, b in spans:
+            ids.update(range(a, b))
+        ids.update(i for i, p in self._root_paths.items() if path_cf in p.casefold())
+        out = Hits("I", sorted(ids))
+        out.store, out.term, out.cut = self, name_cf, named.cut
+        return out
 
     def dir_index(self, dir_path: str) -> Optional[int]:
         self._build_lookups()
@@ -366,7 +429,7 @@ class IndexStore:
         key = _key(path)
         found = [i for i, p in self._root_paths.items() if _key(p) == key]
         parent, leaf = os.path.split(key)
-        d = self._dir_ids.get(parent) if self._runs is not None else self.dir_index(parent)
+        d = self._dir_ids.get(parent) if self._dir_ids is not None else self.dir_index(parent)
         if d is not None:
             found.extend(i for a, b in self._runs.get(d, ()) for i in range(a, b) if self.name_cf(i) == leaf)
         return found

@@ -14,6 +14,7 @@ from starlette.routing import Route
 
 from ..index import query as iquery
 from ..index import search as isearch
+from ..settings import DEFAULT_KNOWN_EXTS
 from .routes_cards import ApiError, read_json
 
 log = logging.getLogger("assistant.server.routes_search")
@@ -23,12 +24,7 @@ SAVED_BODY_MAX = 4_096
 MAX_LIMIT = 500
 MAX_OFFSET = 100_000
 
-# `doc` is left out on purpose: the PRD's own example `design doc` is a path term, not an extension filter.
-KNOWN_EXTS = frozenset(
-    "md markdown txt rtf pdf docx xls xlsx xlsm csv tsv ppt pptx odt ods json xml yml yaml toml ini cfg log "
-    "py js mjs ts tsx jsx html htm css scss java kt cs cpp c h go rs rb php sh ps1 bat sql "
-    "png jpg jpeg gif bmp svg webp ico zip".split()
-)
+KNOWN_EXTS = frozenset(DEFAULT_KNOWN_EXTS)
 
 
 def _int_param(request: Request, name: str, default: int, maximum: Optional[int] = None) -> int:
@@ -51,11 +47,31 @@ def _chips(request: Request) -> list:
     return out
 
 
-def show_protected(settings: Any) -> bool:
+def _index_settings(settings: Any) -> dict:
     if settings is None:
-        return False
-    index = settings.get("index") or {}
-    return isinstance(index, dict) and index.get("show_protected_by_name") is True
+        return {}
+    try:
+        index = settings.get("index") or {}
+    except Exception:
+        return {}
+    return index if isinstance(index, dict) else {}
+
+
+def show_protected(settings: Any) -> bool:
+    return _index_settings(settings).get("show_protected_by_name") is True
+
+
+def include_hidden(settings: Any) -> bool:
+    return _index_settings(settings).get("include_hidden") is True
+
+
+def known_exts(settings: Any) -> frozenset:
+    """Extensions a bare query word turns into a filter (``index.known_exts``); the built-in list when the
+    setting is missing or unusable. Shared by this route, MCP and the popup."""
+    raw = _index_settings(settings).get("known_exts")
+    if not isinstance(raw, list) or not all(isinstance(e, str) for e in raw):
+        return KNOWN_EXTS
+    return frozenset(e.casefold().lstrip(".") for e in raw if e.strip())
 
 
 def _search_sync(index: Any, settings: Any, text: str, chips: list, modified: str, sort: str,
@@ -63,10 +79,11 @@ def _search_sync(index: Any, settings: Any, text: str, chips: list, modified: st
     store, delta = index.current()
     if store is None:
         raise ApiError(503, "index_unavailable", "The file index is not ready yet.")
-    parsed = iquery.parse(text, KNOWN_EXTS)
+    parsed = iquery.parse(text, known_exts(settings))
     try:
         result = isearch.run(parsed, store, delta, chips, modified or None, sort, limit, offset,
-                             show_denied=show_protected(settings))
+                             show_denied=show_protected(settings), show_hidden=include_hidden(settings),
+                             skip_roots=True)
     except ValueError as exc:
         message = str(exc)
         field = "chips" if "chip" in message else "sort" if "sort" in message else \

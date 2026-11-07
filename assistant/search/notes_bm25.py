@@ -327,7 +327,7 @@ class NotesIndex:
             placeholders = large = 0
             for path, mtime, size, attrs in self._walk():
                 rel = os.path.relpath(path, self.dir)
-                if attrs & _PLACEHOLDER_MASK:
+                if attrs & _PLACEHOLDER_MASK or _denied(path):
                     placeholders += 1
                     continue
                 if size > MAX_FILE_BYTES:
@@ -494,6 +494,7 @@ class AskNotesMode:
     keyword = "?"
     label = "Ask notes"
     local = True
+    noun = "passage(s)"
     footer = FOOTER
 
     def __init__(self, settings: Any = None, scheduler: Any = None, index_path: Optional[Any] = None) -> None:

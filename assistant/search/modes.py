@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional, Protocol, Sequence, runtime_checkable
 
@@ -16,6 +17,24 @@ CHIPS = ("docs", "sheets", "pdf", "images", "code", "folders")
 CHIP_LABELS = {"docs": "Docs", "sheets": "Sheets", "pdf": "PDF", "images": "Images",
                "code": "Code", "folders": "Folders"}
 MODIFIED_CHOICES = (("", "Any time"), ("today", "Today"), ("7d", "7 days"), ("30d", "30 days"))
+SORT_CHOICES = (("", "Best"), ("name", "Name"), ("ext", "Ext"), ("date", "Date"))
+_DAY_RANGE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$")
+
+
+def valid_modified(value: Any) -> bool:
+    """A preset key, or a closed range of local days written YYYY-MM-DD..YYYY-MM-DD."""
+    if not isinstance(value, str):
+        return False
+    if value in dict(MODIFIED_CHOICES):
+        return True
+    found = _DAY_RANGE.match(value)
+    if not found:
+        return False
+    try:
+        first, last = (datetime.strptime(d, "%Y-%m-%d") for d in found.groups())
+    except ValueError:
+        return False
+    return first <= last
 
 
 class ModeUnavailable(Exception):
@@ -34,6 +53,7 @@ class Row:
     passage: str = ""
     title: str = ""
     kind: str = "file"
+    placeholder: bool = False
 
     @property
     def path(self) -> str:
@@ -51,6 +71,8 @@ class SearchResult:
     built_at: Optional[float] = None
     notice: str = ""
     footer: str = ""
+    notes: list = field(default_factory=list)
+    truncated: bool = False
 
 
 @runtime_checkable
@@ -111,7 +133,8 @@ def to_row(obj: Any) -> Row:
                size=int(size) if isinstance(size, (int, float)) else None,
                mtime=float(mtime) if isinstance(mtime, (int, float)) else None,
                is_dir=is_dir, spans=tuple(tuple(s) for s in spans),
-               passage=str(_get(obj, "snippet", default="")))
+               passage=str(_get(obj, "snippet", default="")),
+               placeholder=_get(obj, "placeholder", default=False) is True)
 
 
 def to_result(obj: Any, elapsed_ms: Optional[float] = None) -> SearchResult:
@@ -127,7 +150,9 @@ def to_result(obj: Any, elapsed_ms: Optional[float] = None) -> SearchResult:
         rows=rows, total=int(total), elapsed_ms=_get(obj, "elapsed_ms", default=elapsed_ms),
         interpretation=str(_get(obj, "interpretation", default="")),
         built_at=_get(obj, "built_at"), notice=str(_get(obj, "notice", default="")),
-        footer=str(_get(obj, "footer", default="")))
+        footer=str(_get(obj, "footer", default="")),
+        notes=[str(n) for n in (_get(obj, "notes", default=[]) or [])],
+        truncated=_get(obj, "truncated", default=False) is True)
 
 
 _FLAG_WITH_ARG = {"-e", "-p", "-x"}
@@ -239,6 +264,13 @@ class FilesMode:
             return False
         return isinstance(index, dict) and index.get("show_protected_by_name") is True
 
+    def _show_hidden(self) -> bool:
+        try:
+            index = self._settings.get("index") if self._settings is not None else None
+        except Exception:
+            return False
+        return isinstance(index, dict) and index.get("include_hidden") is True
+
     def search(self, text: str) -> list:
         return self.run(text).rows
 
@@ -255,8 +287,9 @@ class FilesMode:
         parsed = iquery.parse(text, known_exts)
         started = time.perf_counter()
         raw = isearch.run(parsed, store, delta, list(chips), modified or None, sort or None, limit, offset,
-                          show_denied=self._show_denied())
+                          show_denied=self._show_denied(), show_hidden=self._show_hidden())
         result = to_result(raw, elapsed_ms=(time.perf_counter() - started) * 1000.0)
+        result.notes = list(parsed.notes)
         for row in result.rows:
             if not row.spans:
                 row.spans = highlight_spans(row.name, text)

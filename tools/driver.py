@@ -8,7 +8,7 @@
     python tools/driver.py hover <card-id|icon> | click <card-id|icon> [<button>] [--right]
     python tools/driver.py hotkey | type "<text>" | key <name>
     python tools/driver.py screenshot --out <png>
-    python tools/driver.py fullpage --query "<q>" --screenshot <png>
+    python tools/driver.py fullpage --query "<q>" --screenshot <png> [--via-api]
 
 Coordinates are physical pixels, the same space as the rectangles in GET /v1/_debug/ui. Nothing here
 writes inside the repository: the driver's own state (pid, port, home) lives in %TEMP%\\assistant-driver.
@@ -406,8 +406,23 @@ def cmd_screenshot(args) -> int:
     return 0
 
 
+def _fullpage_via_api(args, state: dict) -> int:
+    """Ask the running app to open the full page itself (it mints the launch nonce), screenshot, then close it."""
+    status, body = http("POST", "/v1/fullpage/open", {"query": args.query}, state=state)
+    if status in (404, 405):
+        sys.exit("driver: this build has no POST /v1/fullpage/open (M3b-9); use F11 from the popup instead")
+    if status >= 400:
+        sys.exit(f"driver: /v1/fullpage/open answered {status}: {body}")
+    time.sleep(args.wait)
+    grab(Path(args.screenshot))
+    http("POST", "/v1/fullpage/close", {}, state=state)
+    return 0
+
+
 def cmd_fullpage(args) -> int:
     state = require_state()
+    if getattr(args, "via_api", False):
+        return _fullpage_via_api(args, state)
     from urllib.parse import quote
     status, _ = http("GET", "/app/", state=state)
     if status == 404:
@@ -505,6 +520,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--query", required=True)
     p.add_argument("--screenshot", required=True)
     p.add_argument("--wait", type=float, default=4.0)
+    p.add_argument("--via-api", action="store_true", help="let the app open the window (needs a launch nonce)")
     p.set_defaults(fn=cmd_fullpage)
     return ap
 

@@ -196,6 +196,14 @@ def test_persisted_index_serves_immediately_with_its_old_built_at_then_rescans(t
     old_built_at = first.manager.status()["built_at"]
     first.stop()
     time.sleep(1.1)
+    # M3b-0 (b): a persisted index younger than index.scan_if_older_hours is
+    # served without a start scan, so age it past the threshold on disk first.
+    from assistant.index.store import IndexStore  # noqa: E402
+
+    aged = IndexStore.load(str(tmp_path / "idx" / "files.idx"))
+    old_built_at = aged.built_at - 13 * 3600
+    aged.built_at = old_built_at
+    aged.save(str(tmp_path / "idx" / "files.idx"))
     second = Rig(root, tmp_path / "idx" / "files.idx")
     try:
         second.manager.start()

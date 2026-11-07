@@ -833,3 +833,52 @@ def default_exclude_patterns() -> list:
     if not found:
         pytest.skip("default exclude list not available yet (M3a-1: settings.DEFAULTS['index']['excludes'])")
     return list(found)
+
+
+# ---- M3b-6: preview / actions app --------------------------------------------------------------------------
+
+class PreviewApp(SearchApp):
+    def __init__(self, base_url, token, root, home, files):
+        super().__init__(base_url, token, root, home)
+        self.files = files
+
+    def preview(self, key_or_path, **params):
+        path = self.files[key_or_path] if key_or_path in self.files else key_or_path
+        qs = urllib.parse.urlencode({"path": str(path), **params})
+        return self.api.get(f"/v1/files/preview?{qs}")
+
+    def raw(self, method: str, path: str, headers=None, token=True, body=None):
+        """Like Api.request but returns (status, headers, bytes) so byte streams can be inspected."""
+        import http.client
+        hdrs = dict(headers or {})
+        if token:
+            hdrs["Authorization"] = f"Bearer {self.token}"
+        payload = None
+        if body is not None:
+            payload = json.dumps(body).encode("utf-8")
+            hdrs["Content-Type"] = "application/json"
+        conn = http.client.HTTPConnection(self.api.host, int(self.api.port), timeout=30)
+        try:
+            conn.request(method, path, body=payload, headers=hdrs)
+            resp = conn.getresponse()
+            return resp.status, {k.lower(): v for k, v in resp.getheaders()}, resp.read()
+        finally:
+            conn.close()
+
+    def act(self, verb: str, path, **extra):
+        return self.api.post(f"/v1/actions/{verb}", {"path": str(path), **extra})
+
+
+@pytest.fixture(scope="session")
+def preview_app(tmp_path_factory):
+    """Private test-mode app whose one root holds tests/fixtures/preview samples (generated here)."""
+    from tests.fixtures.preview import build_preview_tree
+    base = tmp_path_factory.mktemp("preview_app")
+    root = base / "root"
+    files = build_preview_tree(root)
+    settings = {"index": {"roots": [str(root)], "show_protected_by_name": False}}
+    with launch_app(base / "home", _free_port(), settings, test_mode=True) as (base_url, token):
+        index = wait_index(base_url, token, minimum=len(files) - 2)
+        if not (isinstance(index, dict) and index.get("entries", 0) >= len(files) - 2):
+            pytest.skip(f"/v1/health index never reached {len(files) - 2} entries (got {index!r})")
+        yield PreviewApp(base_url, token, root, base / "home", files)

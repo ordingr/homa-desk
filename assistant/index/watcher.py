@@ -38,10 +38,13 @@ NOTIFY_FILTER = (
 
 class Watcher:
     def __init__(self, root: str, on_hint: Callable[[int, str], None],
-                 on_overflow: Optional[Callable[[], None]] = None) -> None:
+                 on_overflow: Optional[Callable[[], None]] = None,
+                 on_missing: Optional[Callable[[], None]] = None) -> None:
         self.root = os.path.abspath(root)
         self.on_hint = on_hint
         self.on_overflow = on_overflow
+        self.on_missing = on_missing
+        self.missing = False
         self.overflows = 0
         self.last_error: Optional[str] = None
         self._stop_evt = win32event.CreateEvent(None, True, False, None)
@@ -70,6 +73,21 @@ class Watcher:
             except Exception:
                 log.exception("overflow callback failed")
 
+    def _root_gone(self) -> bool:
+        """True (and reported once through ``on_missing``) when the watched folder no longer exists; the loop
+        then ends instead of asking the owner for a rescan on every retry."""
+        if os.path.isdir(self.root):
+            return False
+        self.missing = True
+        self.last_error = "missing"
+        log.warning("a watched folder is gone; its watcher stopped")
+        if self.on_missing is not None:
+            try:
+                self.on_missing()
+            except Exception:
+                log.exception("missing-root callback failed")
+        return True
+
     def _run(self) -> None:
         while not self._stopped.is_set():
             try:
@@ -80,10 +98,14 @@ class Watcher:
                     continue
                 self.last_error = f"{exc.winerror}"
                 log.warning("watcher on a root stopped (win32 error %s); retrying", exc.winerror)
+                if self._root_gone():
+                    return
                 self._overflow()
             except Exception as exc:
                 self.last_error = type(exc).__name__
                 log.exception("watcher failed")
+                if self._root_gone():
+                    return
                 self._overflow()
             if self._stopped.wait(RETRY_S):
                 return

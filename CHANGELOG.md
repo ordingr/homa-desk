@@ -136,3 +136,42 @@
     security facts and troubleshooting, with dated correction notes where M1 and M2 text is now wrong. `docs/api.md` section 11
     gives the search, roots, saved-search and health routes, the MCP file tools with every refusal text, and the differences from
     the PRD. `docs/search-grammar.md` is new.
+
+## 2026-11-07
+- M3b (full page, previews, result actions): built on the working tree 2026-11-07, uncommitted when this entry was written.
+  No pull request exists (the repo has no remote). Commit: **[placeholder: git-keeper to fill in]**. Merge: pending git-keeper.
+  Security review of M3b: **pending (M3b-7)**. Why: plan section 7.4, so the full page replaces the `fastsearch` full view, files
+  can be previewed in the page, and results can be opened, revealed, renamed, moved to the Recycle Bin or listed without another app.
+  - Pieces: M3b-0 leftovers (plan 18.3, items (a) to (p)): hidden and system entries excluded by default (`index.include_hidden`);
+    the start scan runs only when the persisted index is older than `index.scan_if_older_hours` (default 12); cloud placeholder marker in
+    HTTP rows and the popup; closed date range `YYYY-MM-DD..YYYY-MM-DD`; popup sort control and Ctrl+S; `index.known_exts` setting;
+    `hotkey_skip_fullscreen` in the defaults with validation; MCP `filters.ext` normalised and `filters.modified_before`; the root's own
+    row left out of results; **Restore defaults** for excludes (a saved list replaces the defaults); drive-relative default excludes;
+    deny-list names added (`.claude/settings.local.json`, `claude_desktop_config.json`, `*.keystore`); Ask notes index skips denied
+    paths; `\\?\` paths accepted; open-then-verify before a text read. Code read by doc-keeper; not run.
+    M3b-1: the full-page web app (`web/`, React 19 and Vite; `scripts/build-web.ps1` builds it with Node at build time only).
+    M3b-2: preview renderers (`web/src/preview/`) and the built output under `assistant/static/app/` (commit status not checked by doc-keeper).
+    M3b-3: `assistant/server/routes_files.py` (preview route, ranges, caps, sniffing, deny-list, placeholder check, open-then-verify),
+    `assistant/server/static.py` (`/app/`), the launch nonce exchange in `assistant/server/auth.py`, `assistant/preview/extract.py`
+    (DOCX, XLSX, PPTX and CSV text, with caps), `assistant/overlay/fullpage.py` (Edge app mode with its own profile).
+    M3b-4: `assistant/actions/{names,shell}.py` and `assistant/server/routes_actions.py` (open, open with, reveal, copy path, rename,
+    properties, Recycle Bin only, MD Vault, folder listing, Ask Claude as a stub).
+    M3b-5: `assistant/overlay/search_ui.py` (context menu, action keys, Full page button and F11, full Esc chain).
+    M3b-9: wiring in `assistant/app.py`.
+  - Dispatched by tech-lead. Planned roles (plan 7.4 and 18.3 to 18.4): ui (M3b-1, M3b-2), dev (M3b-0, M3b-3, M3b-4, M3b-5, M3b-9),
+    qa (M3b-6). The brief does not name the agent that ran each task: **[placeholder: agent per task]**. Verifiers: qa M3b-6,
+    result **[placeholder: not in the brief]**; security M3b-7, pending.
+  - Reported numbers (from the tech-lead's M3b brief; not repo artifacts, not re-measured by doc-keeper): M3b-1 browser checks 70 of 70
+    passed; M3b-2 headless-Edge checks 40 of 40 passed, including hostile preview fixtures with no alert and no navigation; popup queries of
+    one letter plus a path term 25 to 85 ms; heavy queries on a 2,000,000-entry store at most 445 ms. No work-laptop result.
+    The bundle is reported at 7.3 MB, with Mermaid and pdf.js loaded on demand.
+  - Found by doc-keeper while reading the code (recorded, not fixed; `docs/api.md` section 12.9):
+    the popup's action results and Ctrl+F folder listing do not reach the popup (`app._on_action` returns no result), and the page's
+    **Download and preview** button does not download (the route ignores its `hydrate` parameter; the file stays a placeholder).
+  - Not yet observed: the M3b security review; unlocked-desktop checks (clipboard, the real Ctrl, Delete, F2 and Alt+Enter keys in the
+    popup); the work-laptop P2 probe (Edge app mode), which gates previews on that laptop (plan 7.4); the qa full-suite result for M3b.
+  - Docs: `README.md` gains Full page and previews, Actions on a file, the M3b settings keys, the M3b security facts, troubleshooting
+    entries, the Status line and dated correction notes. `docs/api.md` section 12 gives the new routes, the preview kinds and refusals,
+    the range rules, the nonce exchange, the action verbs and errors, the settings keys and the differences from the PRD, with correction
+    notes in sections 3.6, 8, 11.7 and 11.9. `docs/search-grammar.md` section 11 gives the custom date range, the sort values and
+    `index.known_exts`, with correction notes in sections 5 and 9.

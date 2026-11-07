@@ -10,7 +10,7 @@ import time
 from array import array
 from bisect import bisect_left
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import rank
 from .query import ALL_FILES, Query
@@ -22,12 +22,16 @@ except ImportError:
     _store_mod = None
 
 FLAG_DIR = getattr(_store_mod, "FLAG_DIR", 1)
+FLAG_HIDDEN = getattr(_store_mod, "FLAG_HIDDEN", 2)
+FLAG_SYSTEM = getattr(_store_mod, "FLAG_SYSTEM", 4)
+FLAG_PLACEHOLDER = getattr(_store_mod, "FLAG_PLACEHOLDER", 8)
 FLAG_DENIED = getattr(_store_mod, "FLAG_DENIED", 16)
 
 MAX_LIMIT = 10_000
 DENSE_CAP = 100_000
 NEWEST_CAP = 10_000
 TIME_BUDGET_S = 0.4
+VIA_DIRS_MAX = 50_000
 
 CHIP_LABELS = {
     "docs": "Docs", "sheets": "Sheets", "pdf": "PDF",
@@ -58,12 +62,13 @@ class FileRow:
     is_dir: bool
     tier: int
     spans: list = field(default_factory=list)
+    placeholder: bool = False
 
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "path": self.path, "parent": self.parent,
             "ext": self.ext, "size": self.size, "mtime": self.mtime, "is_dir": self.is_dir,
-            "tier": self.tier, "spans": [list(s) for s in self.spans],
+            "tier": self.tier, "spans": [list(s) for s in self.spans], "placeholder": self.placeholder,
         }
 
 
@@ -95,8 +100,8 @@ def _fmt_day(ts) -> str:
 def _resolve_date(date_filter, now: float):
     """Return (lo, hi, label) with open ends as None, or None when unfiltered.
 
-    Accepts "today", "7d", "30d" (also "last7", "last30"), a (lo, hi) pair of
-    epoch seconds (either may be None), or a dict with "from"/"to".
+    Accepts "today", "7d", "30d" (also "last7", "last30"), "YYYY-MM-DD..YYYY-MM-DD" (a closed range of
+    local days), a (lo, hi) pair of epoch seconds (either may be None), or a dict with "from"/"to".
     """
     if not date_filter:
         return None
@@ -109,6 +114,8 @@ def _resolve_date(date_filter, now: float):
             return now - 7 * 86400, None, "last 7 days"
         if key in ("30d", "last30", "last30days", "30days"):
             return now - 30 * 86400, None, "last 30 days"
+        if ".." in key:
+            return _day_range(key, date_filter)
         raise ValueError(f"unknown date filter: {date_filter!r}")
     if isinstance(date_filter, dict):
         lo, hi = date_filter.get("from"), date_filter.get("to")
@@ -125,6 +132,20 @@ def _resolve_date(date_filter, now: float):
     else:
         label = f"until {_fmt_day(hi)}"
     return lo, hi, label
+
+
+def _day_range(key: str, given) -> tuple:
+    first, _, last = key.partition("..")
+    try:
+        lo_day = datetime.strptime(first, "%Y-%m-%d")
+        hi_day = datetime.strptime(last, "%Y-%m-%d")
+        lo = lo_day.timestamp()
+        hi = (hi_day + timedelta(days=1)).timestamp() - 0.001
+    except (ValueError, OverflowError, OSError):
+        raise ValueError(f"invalid date range {given!r}: expected YYYY-MM-DD..YYYY-MM-DD") from None
+    if hi < lo:
+        raise ValueError(f"invalid date range {given!r}: the first day is after the last")
+    return lo, hi, f"{_fmt_day(lo)} to {_fmt_day(hi)}"
 
 
 def _interpretation(query: Query, chips: list[str], date) -> str:
@@ -162,8 +183,8 @@ def _norm_path(p: str) -> str:
 
 
 def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str = "best",
-        limit: int = 50, offset: int = 0, *, show_denied: bool = False, now: float | None = None,
-        budget_s: float | None = TIME_BUDGET_S):
+        limit: int = 50, offset: int = 0, *, show_denied: bool = False, show_hidden: bool = False,
+        skip_roots: bool = False, now: float | None = None, budget_s: float | None = TIME_BUDGET_S):
     t0 = time.perf_counter()
     sort = (sort or "best").casefold()
     if sort not in SORTS:
@@ -194,7 +215,13 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
 
     capped = len(name_required) == 1 and not (exts or need_path or use_chips or date)
     everything = not (exts or need_path) and not any(m.longest_literal() for m in name_required)
-    ids, truncated = _candidates(store, name_required, exts, capped, everything)
+    deadline = t0 + budget_s if budget_s else None
+    via_dirs = None
+    if name_required and all(len(m.text) == 1 and m.longest_literal() == m.text for m in name_required):
+        near = [m.text for m in part_m + path_req if len(m.text) >= 2 and not set("*?\\/") & set(m.text)]
+        if near:
+            via_dirs = (name_required[0].text, max(near, key=len))
+    ids, truncated = _candidates(store, name_required, exts, capped, everything, via_dirs, deadline)
     if everything and truncated and sort == "best":
         sort = "date"
     if delta is not None:
@@ -202,7 +229,8 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
 
     flags_of, name_of, path_of, mtime_of = store.flags, store.name, store.path, store.mtime
     lo, hi = (date[0], date[1]) if date else (None, None)
-    deadline = t0 + budget_s if budget_s else None
+    hide = 0 if show_hidden else FLAG_HIDDEN | FLAG_SYSTEM
+    is_root = store.is_root if skip_roots else None
     items: list = []
     append = items.append
     pre_top, pre_total = [], 0
@@ -211,7 +239,7 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
             and not (exts or need_path or use_chips or date)):
         cut = bisect_left(ids, store.entry_count)
         pre_top, pre_total, cut_off = store.rank_best_literal(ids, cut, lit, show_denied, deadline,
-                                                              offset + limit)
+                                                              offset + limit, hide, skip_roots)
         truncated = truncated or cut_off
         ids = [] if cut_off else ids[cut:]
     for seen, i in enumerate(ids):
@@ -220,6 +248,8 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
             break
         fl = flags_of(i)
         if fl & FLAG_DENIED and not show_denied:
+            continue
+        if fl & hide or (is_root is not None and is_root(i)):
             continue
         is_dir = bool(fl & FLAG_DIR)
         name = name_of(i)
@@ -296,6 +326,7 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
             id=i, name=name, path=store.path(i), parent=store.parent_path(i),
             ext="" if is_dir else rank.ext_of(ncf), size=store.size(i), mtime=store.mtime(i),
             is_dir=is_dir, tier=tier, spans=_spans(ncf, name, highlight),
+            placeholder=bool(fl & FLAG_PLACEHOLDER),
         ))
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     return SearchResult(rows=rows, total=total, elapsed_ms=elapsed_ms,
@@ -303,16 +334,22 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
                         truncated=truncated)
 
 
-def _candidates(store, name_required, exts, capped=False, everything=False):
+def _candidates(store, name_required, exts, capped=False, everything=False, via_dirs=None, deadline=None):
     """(ids, truncated). ``capped`` limits a lone plain term to DENSE_CAP hits; ``everything`` (nothing to match
-    on) yields only the newest NEWEST_CAP entries."""
-    for m in name_required:
-        lit = m.longest_literal()
-        if lit:
-            if capped:
-                hits = store.find_substring(lit, DENSE_CAP)
-                return hits, len(hits) >= DENSE_CAP
-            return store.find_substring(lit), False
+    on) yields only the newest NEWEST_CAP entries; ``via_dirs`` (one-character name term, selective path term)
+    asks the directory table first. Otherwise the fetch runs on the longest literal of any name term, the most
+    selective one, and stops at ``deadline``."""
+    if via_dirs is not None:
+        hits = store.find_via_dirs(via_dirs[0], via_dirs[1], VIA_DIRS_MAX, deadline)
+        if hits is not None:
+            return hits, hits.cut
+    lit = max((m.longest_literal() for m in name_required), key=len, default="")
+    if lit:
+        if capped:
+            hits = store.find_substring(lit, DENSE_CAP, deadline)
+            return hits, len(hits) >= DENSE_CAP or hits.cut
+        hits = store.find_substring(lit, None, deadline)
+        return hits, hits.cut
     if exts:
         merged: set = set()
         for e in exts:

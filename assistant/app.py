@@ -26,10 +26,14 @@ from .search import modes as search_modes
 from .search.notes_bm25 import AskNotesMode
 from .search.saved import SavedSearches
 from .security import token as token_store
+from .actions import shell
+from .server import auth, routes_actions
 from .server.app import ServerThread, create_app
 from .server.mcp import build_mcp
-from .server.routes_search import KNOWN_EXTS
-from .overlay import sounds
+from .server.routes_files import register_files_routes
+from .server.routes_search import known_exts
+from .server.static import register_static
+from .overlay import fullpage, sounds
 from .settings import Settings
 
 log = logging.getLogger("assistant.app")
@@ -38,6 +42,7 @@ TEST_MODE_VAR = "ASSISTANT_TEST_MODE"
 DEBUG_TIMEOUT_S = 3.0
 TICK_SLACK_S = 0.05
 MCP_PATH = "/mcp"
+
 
 
 class _ProactorResetFilter(logging.Filter):
@@ -146,6 +151,10 @@ class App:
         _, mcp_asgi = build_mcp(self.store, self.reminders, index=self.index)
         web_app = create_app(self._current_token, self.store, self.reminders, self.scheduler, mcp_app=mcp_asgi,
                              index=self.index, settings=self.settings, saved=self.saved)
+        register_files_routes(web_app, self.index, self.settings, closer=fullpage.close,
+                              opener=self._open_fullpage)
+        register_static(web_app)
+        web_app.router.routes.extend(routes_actions.routes)
         web_app.router.routes.insert(0, Route("/v1/health", self._health_route, methods=["GET"]))
         web_app.router.routes.append(Route(MCP_PATH, _ExactMount(mcp_asgi, MCP_PATH)))
         web_app.router.routes.append(Route("/v1/shutdown", self._shutdown_route, methods=["POST"]))
@@ -250,7 +259,7 @@ class App:
         store, delta = self.index.current()
         if store is None:
             return None
-        return store, delta, KNOWN_EXTS
+        return store, delta, known_exts(self.settings)
 
     def _start_index(self) -> None:
         started = time.monotonic()
@@ -274,7 +283,8 @@ class App:
         try:
             from .overlay import hotkey as hotkey_mod, search_ui
             self.popup = search_ui.SearchPopup(self.root, self.icon, self.search_modes, self.settings,
-                                               saved=self.saved)
+                                               saved=self.saved, on_fullpage=self._on_fullpage,
+                                               on_action=self._on_action)
             self.hotkey = hotkey_mod.Hotkey(
                 str(self.settings.get("hotkey", "") or ""),
                 lambda: uibus.post(self.popup.toggle, self.hotkey.last_press),
@@ -289,6 +299,26 @@ class App:
             log.warning("hotkey %r: %s; the icon still opens search", self.hotkey.combo, status)
         else:
             log.info("hotkey %r registered", self.hotkey.combo)
+
+    def _on_fullpage(self, query: str) -> None:
+        threading.Thread(target=self._open_fullpage, args=(query,), name="fullpage-open", daemon=True).start()
+
+    def _open_fullpage(self, query: str) -> bool:
+        try:
+            opened = fullpage.open(query, self.server.port, auth.mint_nonce)
+        except Exception:
+            log.exception("could not open the full page")
+            return False
+        if not opened:
+            log.warning("the full page did not open")
+        return opened
+
+    def _on_action(self, verb: str, row, confirm: bool = False, new_name: Optional[str] = None) -> dict:
+        return shell.dispatch(verb, row.path, new_name=new_name, confirm=confirm, index=self.index,
+                              settings=self.settings)
+
+    def _fullpage_open(self) -> bool:
+        return fullpage.is_open()
 
     def _on_hotkey_changed(self, key: str, value) -> None:
         if self.hotkey is None or self.stop.is_set():
@@ -488,6 +518,8 @@ class App:
         snapshot["strips"] = self.cards_ui.strip_state()
         if self.popup is not None:
             snapshot["search"] = self.popup.debug_state()
+        snapshot["actions"] = shell.action_log()[-50:]
+        snapshot["fullpage"] = {"open": self._fullpage_open()}
         if self.hotkey is not None:
             snapshot["hotkey"] = self.hotkey.status()
             snapshot["hotkey_combo"] = self.hotkey.combo
@@ -528,6 +560,10 @@ class App:
             self.meetings.stop()
         if self.hotkey is not None:
             self.hotkey.stop()
+        try:
+            fullpage.close()
+        except Exception:
+            log.exception("could not close the full page")
         if self.index is not None:
             self.index.stop()
         if self.notes_mode is not None:

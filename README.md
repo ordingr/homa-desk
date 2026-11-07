@@ -15,6 +15,8 @@ executables. Nothing leaves your PC.
 > **Correction, 2026-11-06:** M2 shipped on 2026-11-06 and M3 is next. The status sentence above is the M1 wording, kept as written. See [Status](#status).
 
 > **Correction, 2026-11-07 (M3a):** M3a shipped 2026-11-07: Files search in the popup, Ask notes, and the read-only file tools for Claude over MCP. M3b (the full page and previews) is next. See [Status](#status).
+>
+> **Correction, 2026-11-07 (M3b):** M3b shipped 2026-11-07 with the full page (Microsoft Edge in app mode), previews and result actions. Its security review is still pending, and M4 (Ask Claude, which is a stub in this build) is next. See [Full page and previews](#full-page-and-previews), [Actions on a file](#actions-on-a-file) and [Status](#status).
 
 ## Contents
 
@@ -30,6 +32,8 @@ executables. Nothing leaves your PC.
 - [Connect Claude over MCP](#connect-claude-over-mcp)
 - [Search files](#search-files)
 - [Ask notes](#ask-notes)
+- [Full page and previews](#full-page-and-previews)
+- [Actions on a file](#actions-on-a-file)
 - [Roots, excludes and protected files](#roots-excludes-and-protected-files)
 - [Claude and your files](#claude-and-your-files)
 - [Settings](#settings)
@@ -56,6 +60,8 @@ about a file (M4). The menu entries for Search and Settings are placeholders for
 > **Correction, 2026-11-06 (M2):** meetings and MCP tools are in this version (see [Meetings](#meetings) and [Connect Claude over MCP](#connect-claude-over-mcp)). The Settings menu entry opens a window from M2. Search (M3) is still a placeholder, and previews, plugins and Ask Claude are still to come.
 
 > **Correction, 2026-11-07 (M3a):** Files search and Ask notes are in this version (see [Search files](#search-files) and [Ask notes](#ask-notes)). Previews, plugins and Ask Claude are still to come.
+>
+> **Correction, 2026-11-07 (M3b):** the full page, previews and result actions are in this version (see [Full page and previews](#full-page-and-previews) and [Actions on a file](#actions-on-a-file)). Plugins (M5) are still to come. Ask Claude (M4) is a confirmation stub in this build and sends nothing.
 
 ## Install (Windows, no admin)
 
@@ -366,6 +372,8 @@ The buttons under the results are **Open (Enter)**, **MD Vault (Ctrl+M)**, **Exp
 page do nothing yet**. They are connected in M3b. Pressing Enter on an Ask notes result also does nothing yet, for the same
 reason.
 
+> **Correction, 2026-11-07 (M3b):** the buttons are connected in M3b. **Open** runs the Enter action; **MD Vault** and **Explorer** run their actions; **Full page** opens the full page (F11 does the same from the box). **Fastsearch folder** asks for the folder listing, but the popup does not show that listing in this build (see [Actions on a file](#actions-on-a-file)). Enter on an Ask notes result is wired to **Open** as well (not observed by doc-keeper). The paragraph above is kept as written.
+
 **The grammar.** Words are ANDed. The first word must appear in the file name, and later words may appear anywhere in the
 full path. A word that is a known extension (`md`, `pdf`, `py`, `docx` and so on) filters by extension. Five examples,
 with the interpretation the box shows:
@@ -388,6 +396,8 @@ for Word files. The full grammar, the caps and every interpretation string are i
 M3a; results are ranked exact name, then name start, then word start, then inside the name, then path only, with shorter
 names first among equals.
 
+> **Correction, 2026-11-07 (M3b):** the popup now has a **Sort** control in its results header (Best, Name, Ext, Date; Ctrl+S cycles it), and a saved search's sort is applied when you recall it. The popup's date control still offers presets only; a custom date range can be entered on the full page. The text above is kept as written.
+
 **Saved searches** are stored in `~/.assistant/saved_searches.json`, per machine. When the box is open and empty they are
 listed; click one or press Enter on the highlighted one to run it. Press **Delete** on a highlighted saved search to remove
 it. Saving the same name replaces the old one. There is a limit of 200. Saved searches keep the query, the chips and the
@@ -395,6 +405,8 @@ date filter. They also keep a sort value, but the popup does not apply it yet.
 
 **Esc** steps back: from results to the empty box (your text stays), then from the box to closed. The full-page step
 arrives in M3b.
+
+> **Correction, 2026-11-07 (M3b):** the full-page step is in the Edge window, not in the popup. In the page, Esc clears the selection, then the query and results, and closes the window when the page is empty. The popup's Esc goes from the action menu or folder listing, to results, to the box, to closed. Saved searches apply their stored sort when recalled. The text above is kept as written.
 
 **Where the box appears.** Settings, Search, "Where the search box appears": beside the icon (the default), on the monitor
 with the mouse, on the monitor with the focused window, on the primary monitor, or where it was last. Drag the box to
@@ -439,6 +451,142 @@ highlighted. Press **Tab** in the box to switch to it, or start the query with `
   [Roots, excludes and protected files](#roots-excludes-and-protected-files)). Their text is still stored in the notes index
   file in your Assistant folder. That file is user-only, but the note text is in it. This is an open item (R7-N5).
 
+## Full page and previews
+
+The full page is the larger search window. It opens the query from the popup in Microsoft Edge in app mode, a window with no
+address bar or tabs. Files are previewed only there. The popup never shows a preview (PRD AC-PV-7).
+
+**How to open it.** Press **F11** in the search box, or choose **Full page (F11)** under the results. Assistant starts Edge with
+its own profile folder, `%LOCALAPPDATA%\Assistant\edge-profile`, so your own browser profile is not used. Opening the full page
+again closes the window it opened before and opens a new one.
+
+**How to close it.** Press **F11** or **Esc** in the page. Esc first clears the selection, then the query and the results, and
+closes the window when the page is empty. Assistant closes only the window it opened.
+
+**What it needs.** Microsoft Edge in the standard Program Files folder. If Edge is not found, nothing opens; see
+[Troubleshooting](#troubleshooting). The work-laptop check of Edge app mode (probe P2) is still to run, so previews there are not
+confirmed yet.
+
+**What the page has.** A status line with the result count, the index freshness, the elapsed time in milliseconds, the mode badge
+and the query's interpretation. A query bar with the chips, a modified-date filter (any time, today, 7 days, 30 days, or a custom
+range from two dates), a sort control (Best, Name, Ext, Date) and saved searches. Result rows as in the popup. A preview pane beside
+the list when a row is selected. A narrow layout applies below 800 pixels of width; it has not been checked on a phone. Light and
+dark themes; the page remembers the choice. The Settings and About links in the header say that those settings are in the
+Assistant app.
+
+**Mouse.** Click a row to select it and show its preview. Double-click opens the file. Ctrl+double-click reveals it in Explorer.
+Ctrl+click adds or removes a row from the selection, and Shift+click selects a range. Right-click opens the action menu;
+Ctrl+right-click copies the path.
+
+**Keys.** Up and Down move, and Shift with them extends the selection. Home and End jump to the ends. Enter opens. Ctrl+Enter
+reveals. Ctrl+M opens in MD Vault. Ctrl+S, and Ctrl+Shift+S, change the sort. Shift+F10 or the Menu key opens the action menu. Esc
+and F11 are described above. The page has no Ctrl+C, Delete, F2, Alt+Enter, Ctrl+F or Ctrl+D. Use the menu for Copy path, Move to
+Recycle Bin, Rename and Properties. The folder listing is in the popup only.
+
+**What each file type shows.**
+
+| File | What the pane shows |
+|---|---|
+| Markdown (`.md`, `.markdown`) | Formatted text, with Mermaid diagrams and Markmap mind maps. Raw HTML in the Markdown is not rendered as HTML (no raw-HTML plugin is used). Images are shown as their alt text, not loaded. The first 256 KB, then **Show more** (1 MB at a time). |
+| HTML (`.html`, `.htm`, `.xhtml`) | The HTML after sanitising (scripts removed), inside a sandboxed frame. The same windows as Markdown. |
+| Text and code (`.txt`, `.log`, `.py`, `.json`, `.ipynb` as JSON, and other text files) | Syntax highlighting for the languages it knows (off above 1 MB). The first 256 KB, then **Show more**. |
+| CSV and TSV | A table of up to 500 rows. The server reads up to 1,000 rows and says when there are more. |
+| XLSX and XLSM | A table of the first sheet, up to 500 rows. The sheet names are listed. |
+| DOCX | The text. |
+| PPTX | The slide text and the names of the embedded images. Slides are not drawn. |
+| PDF | Rendered by pdf.js, loaded from the same address (no CDN). |
+| PNG, JPEG, GIF, WebP, AVIF, BMP, ICO | The image. |
+| SVG | The image, with no scripts and no outside loads. Up to 8 MB. |
+| Anything else (for example `.zip`, `.doc`, `.odt`, `.tif`) | A card with the name, path, size, dates, type and the reason. |
+
+**Never previewed, and why.**
+
+- **Protected files**, the names and folders listed under [Roots, excludes and protected files](#roots-excludes-and-protected-files).
+  The pane says `Protected file - not previewed`. Their content is not sent to the page (SEC-3).
+- **A file whose content has a private-key header** in the part being shown. The same message.
+- **Cloud placeholders that are not downloaded.** Assistant never opens them. See **Download and preview** below.
+- **Executables and scripts** (`.exe`, `.dll`, `.sys`, `.msi`, `.msp`, `.bat`, `.cmd`, `.ps1`, `.scr`, `.com`). The card gives the
+  reason `executable file: not previewed`. They are not run and not rendered.
+- **Other binary files**, and files whose content looks binary: a card. **HEIC and HEIF** give the reason `HEIC images are not
+  supported`.
+- **Folders**, and files inside Assistant's own folder.
+- **Files over the cap** (below).
+
+The rule behind this list is that a preview shows what a file contains and never runs it. Scripts in SVG, HTML and Markdown do not
+run. Mermaid runs in its strict mode, and its output is cleaned before it is shown.
+
+**The 50 MB cap.** A file larger than `preview.max_bytes` is not loaded. The pane says `File too large to preview` and gives the
+cap. The default is 50,000,000 bytes (about 50 MB). You can set it from 1 MiB to 4 GiB by editing `settings.json` (there is no
+Settings field); the change applies within about 5 seconds. SVG files have their own limit of 8 MiB. Office files are unpacked in
+memory and stop at 50 MiB unpacked.
+
+**Download and preview.** A cloud placeholder is a file that a sync service keeps online only (for example with OneDrive Files
+On-Demand). The pane shows `Cloud placeholder - not downloaded` with a **Download and preview** button. In this build the button
+does not download anything. Assistant never fetches a placeholder, so the card then says that a download was requested and that
+Assistant did not download the file. Download the file with your sync app, then search again.
+
+## Actions on a file
+
+Actions run on the selected result, in the popup or in the full page. They run on this PC only. Assistant has no action that deletes
+a file for good (see **Recycle Bin only** below).
+
+| Action | Popup | Full page | Notes |
+|---|---|---|---|
+| Open | Enter | Enter, double-click | Programs and scripts ask first. |
+| Open with… | menu | menu | The Windows "Open with" dialog. |
+| Reveal in Explorer | Ctrl+Enter | Ctrl+Enter, Ctrl+double-click | Uses an Explorer window that already shows the folder; otherwise opens one. |
+| Copy path | Ctrl+C | Ctrl+right-click | The plain path, without the `\\?\` prefix. |
+| Copy path (quoted) | menu | menu | The path in double quotes. |
+| Rename… | F2 | menu | The name rules are below. |
+| Properties | Alt+Enter | menu | The Windows Properties window. |
+| Move to Recycle Bin | Delete | menu | Asks first. Recycle Bin only. |
+| Open in MD Vault | Ctrl+M | Ctrl+M | See **MD Vault** below. |
+| Folder listing | Ctrl+F (button labelled "Fastsearch folder") | not in the page | Popup only. Lists the items in the selected file's folder, with protected names left out. See the note below. |
+| Ask Claude about this file | menu | menu | Marked "sends to Claude". A stub in this build: nothing is sent. |
+
+**Results.** The page shows each action's result as a short message. The popup does not show results in this build. An action's
+outcome goes to `~/.assistant/logs/app.log`, and only failures are written there. The folder listing from Ctrl+F does not appear
+in the popup yet, for the same reason. Both are recorded in `docs/api.md` section 12.9.
+
+**Confirmations.** These ask first and name the file:
+
+- Open on a program or script. The list is `.lnk .url .exe .com .scr .bat .cmd .ps1 .vbs .vbe .js .jse .wsf .hta .msi .msp .reg .jar .cpl .pif`.
+  Opening runs it.
+- Move to Recycle Bin.
+- MD Vault on a program or script, when no MD Vault address is set.
+- Ask Claude. It shows how many bytes would be sent.
+
+**Recycle Bin only.** Move to Recycle Bin uses the Windows shell, so the item stays in the Recycle Bin and can be restored there.
+Assistant has no permanent delete and no code path that deletes a file for good. The move is refused, with the reason shown, on:
+
+- network paths (a UNC path, or a mapped network drive), and removable, optical, RAM disk and unknown drive types;
+- any drive whose file system is not NTFS or ReFS (FAT32 and exFAT, for example).
+
+Indexed root folders cannot be renamed or moved to the Recycle Bin from here (`that is an indexed root folder`).
+
+**Rename rules.** A new name is refused, with the reason shown, when it is empty or only spaces; longer than 255 characters; has a
+control character; contains any of `< > : " / \ | ? *`; ends with a space or a period; or is a reserved device name (`CON`, `PRN`,
+`AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1` to `COM9` and `LPT1` to `LPT9`, with or without an extension). It is also refused when a
+file of that name already exists in the folder.
+
+**Protected files.** The code treats these files as your own, so Open, Open with, Reveal, Copy path, Rename, Properties, Move to
+Recycle Bin, MD Vault and the folder listing work on them. Two things stop: Ask Claude refuses them, and folder listings leave them
+out. Opening a protected file hands it to its default app, which is outside Assistant's previews. Whether actions should work on
+protected files is a decision still to confirm.
+
+**MD Vault.** Ctrl+M, and the menu item, use the MD Vault address in `settings.json`, if you set one:
+
+```
+"md_vault": {"url": "https://..."}
+```
+
+With an `http://` or `https://` address, the action opens that address in your default browser. MD Vault has no open-file link in
+this build, so you pick the note inside MD Vault. Without an address, the note opens with its default app. There is no Settings
+field for this key, and Assistant checks only that the address starts with `http://` or `https://`.
+
+**Ask Claude about this file.** A stub. The menu item and the confirmation exist. After you confirm, the page says `Sending to Claude
+is not available in this build; nothing was sent.` The popup writes that message to the log instead. Nothing leaves the PC.
+
 ## Roots, excludes and protected files
 
 Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists what is indexed.
@@ -466,6 +614,10 @@ Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists 
   Note that `bin`, `obj`, `build` and `dist` are excluded wherever they appear, including in your own project folders.
 - **Hidden and system files are indexed** in this build. The PRD asks for them to be excluded by default with a toggle, and
   that is not built yet. Add `*` rules or folder rules if you want to leave some out.
+
+> **Correction, 2026-11-07 (M3b):** hidden and system files are **left out** of results by default now (`index.include_hidden` is `false`). Turn on **Include hidden and system files in results** on the Roots & excludes page to see them; the change applies to results at once, with no rescan. The sentence above is kept as written.
+>
+> **Correction, 2026-11-07 (M3b), excludes:** a list you save on the Roots & excludes page **replaces** the default list; it does not add to it. **Restore defaults** on that page puts the built-in list back. The Windows entries in the built-in list are written for any drive (for example `*:\Windows\`), so they match on every drive letter. The "Default excludes" paragraph above describes the built-in list.
 - **Your Assistant folder is never indexed.** The folder `~/.assistant` (or the folder named by `ASSISTANT_HOME`) and any
   `.assistant` folder are left out, even when a root contains your whole user profile. Claude cannot read them either.
 - **Protected files.** Files whose names or folders match the secrets list are flagged when the index is built. They are
@@ -597,6 +749,21 @@ Notes on the table:
 > `root_timeout_s`, default 60, 0.1 to 3600; `pause_on_battery`, default `true`) and `notes` (`dir`, empty or an absolute folder
 > path). A bad `index` or `notes` value falls back for that key only, with a warning in the log.
 
+**Keys added in M3b (2026-11-07).** These are in `settings.json`. The defaults and limits are read from `assistant/settings.py`, and a bad
+value falls back for that key only, with a warning in the log.
+
+| Key | Default | Allowed | Notes |
+|---|---|---|---|
+| `index.include_hidden` | `false` | `true` or `false` | Hidden and system files and folders are left out of results unless this is `true`. The Roots & excludes page has the toggle. |
+| `index.scan_if_older_hours` | `12` | whole number, 1 to 168 | At start, a full scan runs only when the saved index is older than this. |
+| `index.known_exts` | the built-in list | up to 200 entries, each letters and digits, at most 16 characters | The extensions a bare word such as `design md` turns into a filter. `doc` is not in the built-in list. The Search page edits it. |
+| `hotkey_skip_fullscreen` | `false` | `true` or `false` | In the defaults from M3b. The Search page has the option. |
+| `preview.max_bytes` | `50000000` | whole number, 1048576 to 4294967296 | The preview size cap. No Settings field; edit the file by hand. Applies within about 5 seconds. |
+| `md_vault.url` | not set | an `http://` or `https://` address | Used by Ctrl+M (see [Actions on a file](#actions-on-a-file)). No Settings field. Not checked beyond the scheme. |
+
+**Restore defaults.** On the Roots & excludes page, a saved excludes list replaces the built-in list. **Restore defaults** puts the
+built-in list back.
+
 ## Settings and files
 
 Everything lives in `~/.assistant` (set the `ASSISTANT_HOME` environment variable to use another folder). Copying that folder
@@ -705,11 +872,31 @@ folder that reads `missing` does not exist or is not reachable, and one that rea
 answer within 60 seconds. A search that finds nothing in a folder can also mean the folder is excluded: each rule shows its
 count, so a rule with a large count is the one to look at. Hidden and system files are indexed in this build.
 
+> **Correction, 2026-11-07 (M3b):** hidden and system files are left out of results unless you turn on **Include hidden and system files in results** (Roots & excludes). The sentence above is kept as written.
+
 **Search is slow on a very large root.** A single plain term examines at most 100,000 candidates. The scan also stops after
 0.4 seconds. Either way the result carries `truncated`, and the popup's header count is then partial. Narrow the query: add a
 second word for the path, an extension (`md`, or `-e md`), a chip, or a modified filter. The empty query shows only the newest
 10,000 entries. If you have a very large folder under a root, consider leaving it out with an exclude rule, for example
 `C:\Users\<user>\Archive\` as a drive-letter rule.
+
+**Full page shows "Open this page from Assistant".** The page opened without a launch code. This happens when the page is reloaded
+(a reload loses the session), when the `/app/` address was opened by hand, or when the code was used already. If the code is older
+than 30 seconds, or was used, the page says `Could not start the session` with `The launch code is missing, used or expired.`
+Press **F11** in the search box to open a new window.
+
+**Full page does nothing, and the log says "msedge.exe not found".** Assistant looks for `msedge.exe` in the standard Program Files
+folders (`Program Files (x86)\Microsoft\Edge` and `Program Files\Microsoft\Edge`). If neither exists, F11 and the button do nothing
+visible, and `logs/app.log` says `msedge.exe not found; the full page cannot open`. Install or repair Microsoft Edge. The popup
+shows no message for this. If Edge starts but its window is not found within 15 seconds, the log says so and Esc in the page does
+not close it; close the window by hand.
+
+**A preview says "protected", "too large" or "not downloaded".** `Protected file - not previewed` means the file's name or folder
+is on the secrets list (for example `.env` files, `*.pem` or `*.key` keys, or password-manager folders). It is not a fault, and the
+page never shows its content. `File too large to preview` means the file is over `preview.max_bytes` (default 50,000,000 bytes).
+Raise it in `settings.json`, to a value from 1048576 to 4294967296; it applies within about 5 seconds. `Cloud placeholder - not
+downloaded` is not an error: download the file with your sync app, then search again. The **Download and preview** button does not
+download (see [Full page and previews](#full-page-and-previews)).
 
 ## Uninstall
 
@@ -785,6 +972,18 @@ What M3a adds:
 - **Settings:** Roots & excludes and Search pages.
 - **`--doctor`:** hotkey status, index size and age, index roots, and the notes folder state.
 - **Health:** `/v1/health` `index` is an object with roots, scan state and counters (see [docs/api.md](docs/api.md) section 11.4).
+
+What M3b adds (2026-11-07):
+
+- **Full page:** Edge in app mode with its own profile, opened with F11 or the **Full page** button and closed with F11 or Esc
+  (see [Full page and previews](#full-page-and-previews)).
+- **Previews:** Markdown with Mermaid and Markmap, text and code, CSV, TSV, XLSX, DOCX and PPTX text, PDF, and images (PNG, JPEG,
+  GIF, WebP, AVIF, BMP, ICO and SVG). A card for everything else, and cards for protected, placeholder and too-large files.
+- **Actions:** open, open with, reveal, copy path (plain and quoted), rename, properties, Move to Recycle Bin (Recycle Bin only),
+  MD Vault, the folder listing (popup) and Ask Claude (a stub). See [Actions on a file](#actions-on-a-file).
+- **Popup:** a sort control, a cloud marker on placeholder rows, the note text when a query is shortened, and the action shortcuts.
+- **Roots & excludes:** a toggle for hidden and system files, and **Restore defaults** for the excludes list. **Search:** an editable
+  list of known extensions. The new keys are in [Settings](#settings).
 
 ## Security & privacy
 
@@ -908,6 +1107,8 @@ Pillow is present in the development environment but is not a dependency of this
 
 > **Correction, 2026-11-06 (M2):** `mcp` is imported from M2 (the MCP server), and `tzdata` is used for calendar time zones. The count of 29 packages above is the M1 count, and `requirements.txt` was not recounted for M2.
 
+> **Correction, 2026-11-07 (M3b):** M3b adds no pip package. The preview code uses the standard library (`zipfile`, `csv`, `re`, `html`). The Recycle Bin call uses `pywin32`, which is already pinned. `requirements.txt` as read on 2026-11-07 has 30 pinned lines, not 29; the count above is not corrected here. The full-page web app is built with npm at build time only (`scripts/build-web.ps1`). Its run-time packages, from `web/package.json`, are d3, dompurify, highlight.js, markmap-lib, markmap-view, mermaid, pdfjs-dist, react, react-dom, react-markdown, rehype-highlight and remark-gfm; vite and @vitejs/plugin-react are build-time only. The built output is the static files under `assistant/static/app/`, which the app serves. Node is not needed to run Assistant.
+
 ### M3a additions (2026-11-07)
 
 Source: the M3a security review, `docs/security/2026-11-07-m3a-review.md` (Review 7: PASS, zero BLOCK, R7-F1 and R7-F2 as
@@ -942,6 +1143,42 @@ FIX-BEFORE-M3B, twelve NOTEs), unless a point says otherwise.
 - **Not yet observed for M3a:** the popup on a live desktop with the hotkey registered; the quiet-machine re-measure of the
   numbers (the numbers were taken under load); the work-laptop probes (run by you, not yet pasted).
 
+> **Correction, 2026-11-07 (M3b):** the security re-check of the M3a fixes is recorded. `docs/security/2026-11-07-m3a-review.md`,
+> section "Re-check after M3a-11/12 (2026-11-07)", reports PASS, with R7-F1 and R7-F2 closed by observation. The sentence above
+> that says security has not re-checked the fixes is kept as written.
+
+### M3b additions (2026-11-07)
+
+Source: the code as read on 2026-11-07 (`assistant/server/auth.py`, `routes_files.py`, `static.py`, `assistant/preview/extract.py`,
+`assistant/actions/shell.py`, `web/src/api.js`, `web/src/preview/`). The M3b security review (M3b-7) is **pending**. Until it is
+recorded in `docs/security/`, the points below describe the design and the code, and are not a security verdict.
+
+- **The page opens with a one-time launch code.** Assistant starts Edge with a launch code in the address. The code lasts 30
+  seconds and works once. The page trades it for the bearer token through `/v1/session/exchange`. The token stays in the page's
+  memory. It is not in any URL (the page removes the code from the address after reading it) and not in browser storage (the only
+  stored value is the theme choice). The launch code is in the Edge command line for those 30 seconds, so a program running as the
+  same Windows user could read it in that time.
+- **Static files need no token.** The `/app/` files are served without the bearer for GET and HEAD. They hold no data. Every
+  `/v1/` route still needs the token.
+- **Previews never run content.** The server returns Markdown and HTML as JSON text for the page to render; it never sends HTML as
+  `text/html`. HTML is cleaned with DOMPurify and shown in a frame with `sandbox`. SVG is served as an image with a
+  Content-Security-Policy that blocks scripts and outside loads. Raw HTML in Markdown is not rendered. Mermaid runs with
+  `securityLevel: 'strict'`, and its output is cleaned. Markmap labels are cleaned with a list of allowed tags that has no script.
+- **PDF rendering stays on the same address.** The PDF.js worker is served from `/app/`. The page source has no CDN references.
+- **Previews read only what they show.** A text preview reads the requested window (at most 1 MB per request), and the private-key
+  scan covers that window. A cloud placeholder is checked from its file attributes before it is opened, so its content is never
+  read. Each open file is checked against the roots and the deny-list before its bytes are read.
+- **Actions never delete for good.** The only deletion in the actions code is the move to the Recycle Bin (`SHFileOperation` with
+  allow-undo). Rename uses the file system's rename.
+- **Ask Claude sends nothing** in this build. It asks for confirmation, shows how many bytes it would send, and then reports that
+  sending is not available.
+- **Outbound.** Previews and actions make no network request of their own. Two actions open a web address in your browser when you
+  ask: an `https` address in MD Vault (`md_vault.url`), and a `.url` file.
+- **Edge.** Assistant starts `msedge.exe` with its own profile folder under `%LOCALAPPDATA%\Assistant\edge-profile`, and closes only
+  the window it opened.
+- **Known issues, recorded.** The popup does not show action results or the folder listing (see
+  [Actions on a file](#actions-on-a-file)). The page's **Download and preview** button does not download.
+
 ## Status
 
 - **M1 shipped 2026-11-06:** the overlay, the card model and store, Claude Code hooks, the HTTP card and reminder API,
@@ -974,6 +1211,15 @@ FIX-BEFORE-M3B, twelve NOTEs), unless a point says otherwise.
   in the popup (PRD gaps listed in [docs/api.md](docs/api.md) section 11.9).
 - **M3b next:** the full page (Edge in app mode), previews of Markdown, PDF, Office and images, and result actions (open, reveal,
   Recycle Bin only). Plan section 7.4.
+  > **Correction, 2026-11-07 (M3b):** M3b shipped the same day. The next bullet says what it contains. The bullet above is kept as written.
+- **M3b shipped 2026-11-07, pending the security review:** the full page in Edge app mode, previews, the result actions, the M3b-0
+  leftovers and the settings keys in [Settings](#settings). Plan: `docs/plans/2026-11-06-assistant-v1-plan.md` (sections 7.4 and
+  18). Requirements: `docs/prds/2026-11-06-assistant-v1.md` (sections 6.3, 6.6 and 6.7). The M3a review
+  (`docs/security/2026-11-07-m3a-review.md`) and its re-check report PASS. The M3b security review is **pending (M3b-7)**. Not yet
+  observed: the unlocked-desktop checks (clipboard, and the real Ctrl, Delete, F2 and Alt+Enter keys in the popup); the popup's
+  action feedback, which does not reach the popup in this build; the work-laptop probe of Edge app mode (P2); and the qa full-suite
+  result for M3b. Commit: **[placeholder: git-keeper]**.
+- **M4 next:** Ask Claude, where the stub becomes a real send after the confirmation, and polish.
 - **Later:** M3 files search and Ask notes, M4 Ask Claude and polish, M5 plugins (PRD section 15).
 
 ## Documentation

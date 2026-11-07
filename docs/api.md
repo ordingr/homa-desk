@@ -238,6 +238,8 @@ PRD section 8 lists these for later milestones. They are not registered in M1, s
 
 > **Correction, 2026-11-07 (M3a):** `GET /v1/search`, `GET /v1/roots` and the `/v1/saved` routes are registered from M3a. The
 > preview and action routes are still not registered (M3b). See section 11.
+>
+> **Correction, 2026-11-07 (M3b):** the preview, full-page and action routes are registered from M3b. See section 12. The text above is kept as written.
 - MCP endpoint (M2)
 
 ### 3.7 Test-mode debug route (not a contract)
@@ -452,6 +454,8 @@ These are recorded so the trail stays visible. The PRD is not edited.
 12. **Missing routes for the browser UI.** No HTTP route to press an action button or mark a card seen. The PRD does not require them in section 8.
 13. **Missing field name.** A structured reminder without `title` returns `missing_field` with `field: "text"`.
 14. **Not in M1.** `GET /v1/search`, `GET /v1/files/{...}/preview`, `POST /v1/actions/...` and the MCP endpoint are not registered (section 3.6).
+
+> **Correction, 2026-11-07 (M3b):** item 14 is out of date. `GET /v1/files/preview`, `POST /v1/fullpage/open`, `POST /v1/fullpage/close`, `POST /v1/actions/{verb}` and `POST /v1/session/exchange` are registered from M3b (section 12). The MCP endpoint has been registered since M2. The item is kept as written.
 
 ---
 
@@ -998,6 +1002,8 @@ written. Example shape: `<stamp> tools/call tool=read_text_preview args=[path=st
   and shown as ordinary rows. This is short of AC-FI-6, which asks for a "not downloaded" marker.
 - `search_files` rows and `get_file_info` carry `placeholder: true|false`.
 
+> **Correction, 2026-11-07 (M3b-0):** `GET /v1/search` rows now carry `placeholder: true|false` as well, and the popup draws a cloud marker on those rows. The bullet above is kept as written. See section 12.8.
+
 ### 11.8 `show_protected_by_name` and the deny-list
 
 - Setting: `index.show_protected_by_name` (default `false`), set on the Search settings page. The popup and `GET /v1/search`
@@ -1039,3 +1045,213 @@ written. Example shape: `<stamp> tools/call tool=read_text_preview args=[path=st
     log noise), R7-N10 (`\\?\` paths refused as UNC). R7-N3, R7-N4, R7-N6 and R7-N9 are carried by the brief, but the code now
     contains what those notes asked for (deny-list DIR_PATTERNS and NAME_PATTERNS, `OSError` catch in `search_files`, route caps,
     the reserved-combo list in `hotkey.py`). Security to confirm which are closed.
+
+> **Correction, 2026-11-07 (M3b):** items 1, 2, 4, 6, 7, 8 and 9 above are closed in M3b (section 12). Item 3 (sort control in the popup) is closed for the popup header, but see 12.9 item 4 for the popup's action feedback. Item 5 (custom date range) is closed for HTTP, MCP and the full page, but the popup has no way to type a range (12.9 item 5). Item 10 is partly closed: R7-N1 is closed by code read in the M3a re-check (`docs/security/2026-11-07-m3a-review.md`, "Re-check after M3a-11/12"), R7-F1 and R7-F2 are closed there too, and R7-N2, R7-N5 and R7-N10 are shipped under plan 18.3 (n) to (p). R7-N7 and R8 items are not closed by this note. The items above are kept as written.
+
+---
+
+## 12. M3b additions, as shipped (2026-11-07)
+
+Supersedes: section 3.6 (the preview and action routes listed as not registered), section 8 item 14 (the same), section 11.5 (`filters.modified_after` as the only date bound, which M3b-0 (d) and (h) changed), section 11.7 (no placeholder flag in the HTTP route and the popup, which M3b-0 (c) changed), section 11.1 (the HTTP `modified` parameter accepts only `today`, `7d` and `30d`, which M3b-0 (d) changed), and section 11.9 items 1, 2, 4 to 9 (closed as the correction at the end of section 11.9 says). The earlier text is kept as written, with correction notes at the places above.
+
+- Date: 2026-11-07. Written by doc-keeper (M3b-8, TeamAgents) from the code as read on 2026-11-07.
+- Sources read (read only): `assistant/server/routes_files.py`, `assistant/server/static.py`, `assistant/server/auth.py`, `assistant/preview/extract.py`, `assistant/overlay/fullpage.py`, `assistant/actions/{names,shell}.py`, `assistant/server/routes_actions.py`, `assistant/overlay/search_ui.py`, `assistant/app.py` (wiring), `assistant/settings.py`, `assistant/server/mcp.py` (`_vet`, `read_text_preview`, `search_files`), `assistant/search/modes.py`, `assistant/index/search.py`, `assistant/index/excludes.py`, `assistant/security/denylist.py`, `web/src/{api.js,App.jsx,components/ContextMenu.jsx,preview/*.jsx}`, `web/package.json`, `scripts/build-web.ps1`.
+- Verification: doc-keeper ran no tests and did not run the server. Every statement below is traced to the code named. Sections marked "reported" come from the caller's M3b brief and are not in repo files. The M3b security review (M3b-7) is **pending**: nothing in this section is a security verdict.
+
+### 12.1 Routes added in M3b
+
+| Route | Auth | Body | Success | Failure |
+|---|---|---|---|---|
+| `GET /v1/files/preview` | bearer | none | `200` JSON, or a stream with `206`, `416` | see 12.2 |
+| `POST /v1/fullpage/open` | bearer | `{"query": "<text>"}`, 4 KiB cap, query at most 1,000 characters | `200` `{"ok": true, "opened": <bool>}` | `422 invalid_parameter` (`field: "query"`), `413` |
+| `POST /v1/fullpage/close` | bearer | ignored | `200` `{"ok": true, "closed": <bool>}` | none listed |
+| `POST /v1/actions/{verb}` | bearer | JSON object, 4 KiB cap (12.6) | `200` (12.6) | 12.6 |
+| `POST /v1/session/exchange` | none (nonce) | `{"nonce": "<text>"}`, 1 KiB cap | `200` `{"token": "<token>"}` | `403 invalid_nonce`, `413` |
+| `GET /app/`, `GET /app/{path}`, `GET /app`, `GET /favicon.ico` (and `HEAD`) | none | none | the static file | `404` text, `307` for `/app` |
+
+Host and Origin checks (section 1) still run on every route, including the exempt ones. The `/v1/fullpage/*` and `/v1/actions/*` routes are registered only in the running app (`app.py` passes an opener and the index). A route answers `404` when the index is not passed to `create_app`.
+
+### 12.2 `GET /v1/files/preview`
+
+Query: `path` (absolute path, required) and `range` (optional, text kinds only; form `start-end`, both ends inclusive, or `start-` for the default window).
+
+Checks, in order (`routes_files._preview_sync`; the first two steps are `mcp._vet`, the same as the MCP file tools):
+
+1. `_vet`: the path must be a string, non-empty, without NUL, absolute, inside an indexed root, not inside the Assistant's own folder, not on the secrets deny-list, and an index entry.
+2. `os.lstat` on the resolved path. A folder is refused. A cloud placeholder (`FILE_ATTRIBUTE_OFFLINE`, `FILE_ATTRIBUTE_RECALL_ON_OPEN` or `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`) is answered before the file is opened, so its content is never read.
+3. The size is compared with the cap (12.2.2). Executable and binary extensions are answered as `meta` before the file is opened.
+4. The file is opened, then the open handle is checked (`GetFinalPathNameByHandle`, `pathcheck._plain`) against the roots, the deny-list and the Assistant's folder. A failed check is `403 refused` (`R_MOVED`).
+5. The kind is chosen by extension (12.2.1) and the answer is built from the requested range only, with a private-key scan over the range plus 64 bytes on each side.
+
+**12.2.1 Kinds.** The `200` JSON body always has `kind`.
+
+| `kind` | Extensions | Fields |
+|---|---|---|
+| `markdown` | `md`, `markdown` | `text`, `truncated`, `size`, `start`, `end`, `name`, `mtime` |
+| `html` | `html`, `htm`, `xhtml` | as `markdown`. The text is returned as JSON text; the server never sends `text/html`. |
+| `text` | every other text type, including `txt`, `log`, `py`, `json`, `ipynb` (shown as JSON text) | as `markdown` |
+| `table` | `csv`, `tsv` | `rows` (at most 1,000 rows and 50 columns, cells cut at 1,000 characters), `truncated`, `size`, `start`, `end`, `name`, `mtime` |
+| `xlsx` | `xlsx`, `xlsm` | `rows` (first sheet, at most 1,000 rows), `sheets` (names), `shown_sheet` (always `0`), `truncated`, `size`, `name`, `mtime` |
+| `docx` | `docx` | `text` (cut at 1,000,000 characters), `truncated`, `size`, `name`, `mtime` |
+| `pptx` | `pptx` | `text` (slide blocks, at most 200 slides), `slide_count`, `media` (names, at most 200), `truncated`, `size`, `name`, `mtime` |
+| `protected` | any name on the deny-list | `reason` (200, not an error) |
+| `placeholder` | any cloud placeholder not downloaded | `name`, `size`, `mtime`, `reason` |
+| `too_large` | any file over the cap | `name`, `size`, `mtime`, `cap` |
+| `meta` | executables, binaries, HEIC, Office parse errors, binary content | `name`, `size`, `mtime`, `reason` |
+
+Streamed (not JSON):
+
+- `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif`, `image/bmp`, `image/x-icon` (`png jpg jpeg gif webp avif bmp ico`): the file bytes. `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`.
+- `image/svg+xml` (`svg`): the file bytes, at most 8 MiB (`SVG_MAX_BYTES`), with the same CSP. Larger SVG is answered as `too_large` with `cap` 8,388,608.
+- `application/pdf` (`pdf`): the file bytes.
+
+`meta` reasons, as coded: `executable file: not previewed` (`exe dll sys msi msp bat cmd ps1 scr com`); `HEIC images are not supported` (`heic`, `heif`); `binary file type: not previewed` (the MCP binary list, for example `doc odt ods odp zip 7z rar tif psd mp3 mp4 db`); `refused: the file content looks binary, only text is previewed` (NUL, a binary signature, or more than 5 % control characters in the first 8 KiB); and the `extract.ExtractError` texts (`not a readable Office file (damaged, encrypted or an old format)`, `the workbook has no worksheets`, `the file unpacks to more than the 50 MB safety limit`, `the archive member is larger than it declares`).
+
+**12.2.2 Size cap.** `preview.max_bytes` (default `50000000`; allowed 1,048,576 to 4,294,967,296; read by `_cap` on every request, so a change applies without a restart). A file larger than the cap is `too_large`. Office files also stop at 50 MiB unpacked (`extract.UNPACK_CAP`).
+
+**12.2.3 `range` parameter (text kinds).**
+
+- Form `start-end`, both inclusive. `start-` (or no parameter) returns the default window: 262,144 bytes for text, markdown and html, and 1,048,576 bytes for tables.
+- The window is at most 1,048,576 bytes. A longer request is cut to that.
+- `422 invalid_parameter` with `field: "range"` for a malformed value (`range must look like 0-65535.`), a start at or past the end of the file (`range starts past the end of the file.`), or an end before the start (`range ends before it starts.`).
+- Answer fields: `start` (first byte returned), `end` (the offset after the last byte returned), `truncated` (`true` when bytes remain). A UTF-8 character split at either edge of the window is not shown; `end` still counts its bytes.
+
+**12.2.4 HTTP `Range` header.**
+
+- For `image/*` and `application/pdf`: `bytes=a-b`, `bytes=a-` and `bytes=-n` give `206` with `Content-Range`. An unsatisfiable range gives `416` with `Content-Range: bytes */<size>` and no body. A malformed or multi-range header is ignored and the whole file is sent with `200`.
+- For text kinds (markdown, html, text, table): a satisfiable header gives `206 text/plain; charset=utf-8` with the bytes, at most 4,194,304 bytes, and `Content-Range`. A binary or private-key result is still answered as JSON (`meta` or `protected`).
+- For SVG, Office files and `meta`/`protected`/`placeholder`/`too_large`: the header is ignored.
+
+**12.2.5 Headers.** Streams carry `Accept-Ranges: bytes`, `Content-Disposition: inline`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. JSON answers carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+
+**12.2.6 Errors.** Object shape (section 2.2).
+
+| Status and code | When |
+|---|---|
+| `401 unauthorized` | no bearer (section 1) |
+| `403 forbidden_host`, `403 forbidden_origin` | section 1 |
+| `422 invalid_parameter` (`field: "path"`) | `refused: not a usable path`; `refused: give an absolute path`; `refused: that is a folder, not a file` |
+| `422 invalid_parameter` (`field: "range"`) | the three `range` messages in 12.2.3 |
+| `403 refused` (`field: "path"`) | `refused: the path is outside the indexed roots`; `refused: the Assistant's own data`; `refused: the file is no longer where it was checked (outside the indexed roots or protected)` |
+| `404 not_found` (`field: "path"`) | `refused: the path is not in the index (excluded or not indexed yet)`; the file cannot be stat'ed or opened (`unavailable: the file could not be read`) |
+| `503 index_unavailable` (`field: "path"`) | `unavailable: the file index is not ready yet` |
+| `416` (no body) | an unsatisfiable HTTP `Range` (12.2.4) |
+
+The deny-list refusal is **not** an error: it is `200` with `kind: "protected"` and `reason: "refused: protected file (secrets deny-list)"`, or `refused: the file contains a private key (secrets deny-list)` when the content matches. Placeholders are likewise `200` with `kind: "placeholder"`.
+
+**12.2.7 The `hydrate` parameter.** The page sends `hydrate=1` when the user presses **Download and preview** (`web/src/preview/load.js`). The route does not read it. The placeholder is never fetched. See 12.9 item 1.
+
+### 12.3 `POST /v1/fullpage/open` and `POST /v1/fullpage/close`
+
+- Open: `overlay/fullpage.open(query, port, mint_nonce)`. It mints a launch nonce, closes the window opened earlier by Assistant, and starts `msedge.exe --app=http://127.0.0.1:<port>/app/?launch=<nonce>&q=<query>` with `--user-data-dir` set to `%LOCALAPPDATA%\Assistant\edge-profile` (or `<home>\edge-profile` when `LOCALAPPDATA` is unset), `--no-first-run` and `--no-default-browser-check`. It then waits up to 15 seconds for a visible top-level window of class `Chrome_WidgetWin_1` that has a title, and records its handle and process id.
+- The Edge paths checked are the two standard install locations under `Program Files (x86)` and `Program Files`. If neither exists, the route answers `opened: false` and `app.log` says `msedge.exe not found; the full page cannot open`.
+- If Edge starts but its window is not found in 15 seconds, the route still answers `opened: true`, and `app.log` says the window was not found (Esc in the page cannot close it).
+- Close: `overlay/fullpage.close()` posts `WM_CLOSE` to the window Assistant recorded, and nothing else. `closed: false` when there is no such window.
+
+### 12.4 Static app: `/app/`, `/favicon.ico`
+
+- Served from `assistant/static/app/`, or from the folder in `ASSISTANT_STATIC_DIR` when that environment variable is set (dev and qa only; `static.static_dir`).
+- Only `GET` and `HEAD` are exempt from the bearer check (`auth.static_path_exempt`). Paths with `..`, a backslash, or a dot-file segment get `404`. A directory, a missing file or a link out of the folder gets `404`. `/app` redirects to `/app/` with `307`.
+- Headers on every answer: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`. `index.html` is `no-store`; other files are `no-cache`.
+- Every `/v1/*` route still needs the bearer. Static files contain no user data.
+
+### 12.5 Launch nonce: `POST /v1/session/exchange`
+
+- Mint: `auth.mint_nonce()` returns `secrets.token_urlsafe(32)`, valid 30 seconds (`NONCE_TTL_S`), at most 16 outstanding (`NONCE_MAX_OUTSTANDING`). Redeemable once (`consume_nonce` deletes it on a match).
+- Exchange: body `{"nonce": "..."}` (at most 1,024 bytes). A missing, used or expired nonce gives `403 invalid_nonce`, message `The launch code is missing, used or expired.`, `field: null`. A valid nonce gives `200 {"token": "<the bearer token>"}` with `Cache-Control: no-store`.
+- The page (`web/src/api.js`) keeps the token in a module variable only. It reads `launch` and `q` from the URL once and removes both with `history.replaceState`. A reload loses the token, so the page then shows "Open this page from Assistant".
+- The nonce is in the Edge command line for the window's launch (visible to processes that can list the command lines of the same Windows user). It is single use and lasts 30 seconds.
+
+### 12.6 `POST /v1/actions/{verb}`
+
+Verbs (`actions/shell.VERBS`): `open`, `open_with`, `properties`, `reveal`, `copy_path`, `copy_path_quoted`, `rename`, `recycle`, `md_vault`, `folder_listing`, `ask_claude`. An unknown verb gives `404 unknown_action` (`field: "verb"`).
+
+Body (object; at most 4,096 bytes; `routes_actions._body`):
+
+- `path`: non-empty string, required (`422 invalid_parameter`, `field: "path"`).
+- `new_name`: string, required for `rename` (`422 invalid_parameter`, `field: "new_name"` when not a string).
+- `confirm`: boolean, default `false` (`422 invalid_parameter`, `field: "confirm"` when not a boolean).
+- A non-object body: `422 invalid_body`.
+- Index not ready: `503 index_unavailable`.
+
+Result shape, `200`: `{"ok": true, "message": "..."}`, plus per verb: `copy_path` and `copy_path_quoted` add `plain` and `quoted`; `rename` adds `path` (the new full path); `folder_listing` adds `folder`, `rows` (up to 500 by default, at most 5,000 when asked), `total`, `truncated` and `hidden_protected` (the count of protected children left out).
+
+Confirmation: a result that needs confirmation is `200` with `"ok": false, "needs_confirmation": true, "message": "..."` and the action has not run. Repeat with `"confirm": true`. This applies to `open` on an executable or script, `recycle`, `md_vault` on an executable with no MD Vault URL, and `ask_claude`. `ask_claude` also returns a `summary` with `path`, `bytes_to_send` (at most 32,768), `file_bytes`, `whole_file` and `what`.
+
+Failure mapping (`routes_actions`):
+
+| Internal kind | HTTP | `error.code` | `field` | Typical message |
+|---|---|---|---|---|
+| `refused` | `403` | `refused` | null | `refused: the path is outside the indexed roots`; `refused: the Assistant's own data`; `refused: that is an indexed root folder, not a file inside one`; `refused: the path is not in the index (excluded or not indexed yet)`; `Not moved: it is on a network location, so there is no Recycle Bin to hold it. Assistant never deletes permanently.` |
+| `invalid` (not `rename`) | `422` | `invalid_parameter` | `path` | `Open with needs a file, not a folder.`; `MD Vault opens files, not folders.` |
+| `invalid` (`rename`) | `422` | `invalid_name` | `new_name` | `The name contains a character Windows does not allow: ...` (see the list below) |
+| `not_found` | `404` | `not_found` | null | `That file or folder no longer exists.` |
+| `error` | `500` | `error` | null | `The action failed: <reason>` |
+| `not_implemented` | `501` | `not_implemented` | null | `Sending to Claude is not available in this build; nothing was sent.` (`ask_claude` after confirmation) |
+
+Name rules (`actions/names.validate`), each with its own message: empty; only spaces; longer than 255 characters; a control character (code below 32, or 127); any of `< > : " / \ | ? *`; ends with a space or a period; a reserved device name (`CON PRN AUX NUL CONIN$ CONOUT$ COM1`–`COM9 LPT1`–`LPT9`, with or without an extension). Renaming onto an existing name is refused with `Something with that name already exists in this folder.`
+
+Recycle Bin (`actions/shell.recycle`): the only deletion-type call in `assistant/actions/` is `SHFileOperation` with `FO_DELETE` and `FOF_ALLOWUNDO`. It is refused (`refused`, 403) with `Not moved: <reason>, so there is no Recycle Bin to hold it.` when the path is a UNC path, or when the drive type is not fixed (removable, network, optical, RAM disk or unknown), or when the file system is not NTFS or ReFS (FAT32, exFAT and others).
+
+Reveal (`actions/shell.reveal`): if an Explorer window already shows the folder (found through `Shell.Application`), that window selects the item and is shown; otherwise `SHOpenFolderAndSelectItems` opens one. A drive root is refused (`invalid`).
+
+Copy path: the value is the path with `\\?\` removed. The clipboard is written with `CF_UNICODETEXT`. If the clipboard is unavailable, the result is `error` with `plain` and `quoted` in the body.
+
+`md_vault` (`actions/shell.md_vault`): if `settings["md_vault"]["url"]` is an `http://` or `https://` string, that address is opened with `ShellExecuteEx`. Otherwise the file is opened with `os.startfile`, after the executable confirmation.
+
+`ask_claude`: refuses folders, binary extensions, cloud placeholders, files whose first 1 MiB has a private key, and protected files (`protected_ok=False`). Without confirmation it returns the summary. With confirmation it returns `501` and sends nothing.
+
+Action log: every call appends `{"t", "verb", "path", "result"}` to an in-memory log of 500 entries (`shell.action_log()`). The debug snapshot (`app.py`, `snapshot["actions"]`, last 50 entries) includes it. The log is not written to disk.
+
+### 12.7 Settings keys added in M3b
+
+Read from `assistant/settings.py` (validation in `_check_index`, `_check_preview`, `_check`).
+
+| Key | Default | Allowed | Applies | Notes |
+|---|---|---|---|---|
+| `index.include_hidden` | `false` | `true` or `false` | at once, at query time | Hidden and system entries are dropped by `search.run` unless true. Toggle on Roots & excludes. |
+| `index.scan_if_older_hours` | `12` | whole number, 1 to 168 | next start | The start scan runs only when the persisted index is older than this. |
+| `index.known_exts` | the built-in list (12.8) | list of alphanumeric strings, each at most 16 characters, at most 200 entries | at once | Replaces the built-in list. `doc` is not in the built-in list. |
+| `hotkey_skip_fullscreen` | `false` | `true` or `false` | at once | In `DEFAULTS` from M3b (R7-N11). |
+| `preview.max_bytes` | `50000000` | whole number, 1,048,576 to 4,294,967,296 | next request | No Settings field. Edit `settings.json` by hand. |
+| `md_vault.url` | not set | `http://` or `https://` text, read as given | next action | **Not in `DEFAULTS` and not validated.** No Settings field. Read as `settings["md_vault"]["url"]`. |
+
+Under `index.excludes`, a list that the user saves **replaces** the defaults, and **Restore defaults** on Roots & excludes puts the default list back. The default list is `DEFAULT_EXCLUDES` in `index/excludes.py`; its Windows entries are drive-relative (`*:\Windows\`, `*:\ProgramData\Microsoft\Search\`) since M3b-0 (m). The index is not rebuilt for a change in `index.known_exts`; the next query uses the new list.
+
+### 12.8 Changes to the M3a search routes (M3b-0, as built)
+
+Sources: plan 18.3 (c) to (k), code read in `index/search.py`, `server/routes_search.py`, `search/modes.py`, `server/mcp.py`. Where a claim is from the code docstring only, it is marked.
+
+- `GET /v1/search` rows carry `placeholder` (`to_dict`).
+- `modified` accepts `YYYY-MM-DD..YYYY-MM-DD` (a closed range of local days, first day not after the last), in addition to the presets in section 11.1. A malformed range is `422` with `field: "modified"`. The interpretation reads `modified: <first day> to <last day>`.
+- `sort` values are unchanged: `best`, `name`, `ext`, `date`.
+- The root folder's own row is not returned (plan (k); not re-checked by doc-keeper).
+- MCP `search_files`: `filters` accepts `ext`, `modified_after`, `modified_before` (ISO dates; a `modified_before` date covers the whole day) and `folders_only`; `ext` values are normalised like the query (plan (h); docstring only). The result carries `notes` (the same strings as HTTP) (docstring only).
+- `index.show_protected_by_name` still applies only to HTTP and the popup. MCP never shows protected names.
+
+### 12.9 Differences from the PRD and the plan (M3b; recorded, not fixed)
+
+1. **Download and preview (AC-PV-5).** The button in the placeholder card sends `hydrate=1`, which the route ignores. It fetches nothing and the file stays a placeholder. The card then says `Download was requested: ... Assistant did not download the file.` The PRD's "Download and preview" behaviour is not built. Consistent with the rule that indexing and previews never trigger a download (AC-FI-6), but the button does not do what its label says.
+2. **Text window (AC-PV-2).** The PRD asks for the first 1 to 2 MB of code and text. The default window is 256 KiB; "Show more" then loads 1 MiB at a time. Syntax highlighting is off above 1 MB (`TextView`).
+3. **Table rows (AC-PV-2).** The server reads up to 1,000 rows and 50 columns (`extract.ROW_CAP`, `COL_CAP`). The page shows the first 500 (`TableView.ROW_CAP`) and says so. The PRD gives no number.
+4. **Popup action feedback and folder listing (AC-AC-1, plan 18.4 item 2).** `app._on_action` starts the action in a thread and returns `None`, so `search_ui.invoke` never receives a result. Effects as wired at 2026-11-07: (a) the popup does not show an action's result text; failures are written to `app.log` at INFO and successes are not logged; (b) the **Ctrl+F folder listing** does not appear in the popup, because `_enter_listing` is reached only with a synchronous result; (c) the confirmation for `recycle` and `open` of an executable is the message box in `app._action_done`, and the page's own dialog is not used. This needs a fix in `app.py` and `search_ui.py`. Not fixed here.
+5. **Custom date range (AC-FI-15).** Works on HTTP, MCP (`filters.modified_before` and `modified_after`) and the full page (two date inputs; the page says `Pick both dates for a custom range.` when only one is set). The popup's date control (Ctrl+D) cycles presets only, so a range cannot be typed in the popup. A saved search that stores a range is shown with the raw text in the popup's label.
+6. **Reveal shortcut (AC-PV-1).** The PRD says Ctrl+double-click "opens its folder". The page's Ctrl+double-click reveals the file in Explorer, which selects it in its folder.
+7. **Keyboard parity (AC-AC-7).** The page has no Ctrl+C, Delete, F2, Alt+Enter, Ctrl+F or Ctrl+D. Copy path (right-click, Ctrl+right-click), Rename, Properties, Move to Recycle Bin and Ask Claude are in the page's menu. The folder listing is not in the page at all. In the page, Ctrl+Shift+S changes the sort (the handler matches `s` and `S`); in the popup, Ctrl+Shift+S saves the search.
+8. **Esc chain (AC-SH-6).** The popup's Esc chain is menu, folder listing, results, box, closed. It does not include the full page. In the page, Esc clears the selection, then the query and results, and closes the window only when the page is empty. Closing the page does not re-show or re-focus the popup (no code path found).
+9. **Ask Claude (AC-AC-2, DEC 10).** A stub: the menu item, the "sends to Claude" marker and the confirmation exist; nothing is sent; the result is `501 not_implemented`. The popup does not show that message (item 4).
+10. **Protected files and actions (SEC-3).** The PRD asks the deny-list to apply to search results, previews and MCP (and `CLAUDE.md` says the same). It does not say whether actions apply. In this build, Open, Open with, Reveal, Copy path, Rename, Properties, Move to Recycle Bin, MD Vault and the folder listing **do** run on protected files (they are `protected_ok=True` in `shell._vet`). Ask Claude refuses them, and folder listings hide them. Opening a protected file hands it to its default app, outside Assistant. This is a product and security decision to confirm; the README says what the code does.
+11. **Action names.** The popup's folder listing is labelled `Fastsearch folder` (the button label, from the old tool). The verb is `folder_listing`. AC-AC-1 calls it "list that folder's contents".
+12. **Preview size.** AC-PV-6 gives 50 MB without a unit. The default is 50,000,000 bytes. The setting has no Settings field.
+13. **Recycle Bin file systems.** AC-AC-5 names network and removable volumes. The code also refuses any file system other than NTFS or ReFS; the refusal names the file system the drive reports (for example FAT32 or exFAT).
+14. **Edge failures are silent in the popup.** F11 (or the button) with Edge missing, or with the window not found, gives no message in the popup; the reason is in `app.log` only (12.3).
+15. **Nonce and command line.** See 12.5. The plan (M3b-3 and M3b-7) asks for a single-use nonce; the code is single use. The nonce also appears in the Edge command line for up to 30 seconds, which the plan does not mention.
+16. **Preview and action routes in the PRD (section 8).** PRD section 8 lists `GET /v1/files/{...}/preview` and `POST /v1/actions/...`. The routes here are `GET /v1/files/preview` (the path is a query parameter) and `POST /v1/actions/{verb}`. The PRD says the planner defines the fields; they are defined in 12.2 and 12.6.
+
+### 12.10 Still open after M3b
+
+- The M3b security review (M3b-7). It must cover the preview pipeline, static serving, the nonce exchange, the shell actions (`\\?\` handling, nonce single use, no permanent delete call sites), and the items in 12.9 items 1, 10 and 15.
+- qa's full-suite result for M3b (M3b-6): not in the brief.
+- Unlocked-desktop checks: clipboard, the real Ctrl, Delete, F2 and Alt+Enter keys in the popup, and the popup feedback in 12.9 item 4.
+- The work-laptop P2 probe (Edge app mode). Until it passes, previews on the work laptop are not confirmed (plan 7.4).
+- Reported, not measured by doc-keeper: the page bundle size (7.3 MB) and the browser check counts (70 and 40), listed in CHANGELOG.

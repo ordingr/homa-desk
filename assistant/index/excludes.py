@@ -8,6 +8,8 @@ Syntax is a gitignore subset, matched case-insensitively (NTFS):
 * A pattern without ``/`` matches the entry name; a pattern with ``/`` matches the root-relative
   path (forward slashes), or the tail of it.
 * A drive-letter pattern (``C:\\Windows\\``) matches that absolute path and everything under it.
+  ``*:\\Windows\\`` is the drive-relative form: it matches ``Windows`` at the top of whichever drive
+  the entry is on, so one line covers every root drive.
 * Lines that are blank, start with ``#`` or start with ``!`` (re-include) are ignored; re-include
   is not supported.
 
@@ -26,10 +28,10 @@ import re
 from typing import Iterable, Optional, Union
 
 DEFAULT_EXCLUDES = (
-    "C:\\Windows\\",
+    "*:\\Windows\\",
     "$RECYCLE.BIN/",
     "System Volume Information/",
-    "C:\\ProgramData\\Microsoft\\Search\\",
+    "*:\\ProgramData\\Microsoft\\Search\\",
     "pagefile.sys",
     "hiberfil.sys",
     "swapfile.sys",
@@ -102,7 +104,9 @@ class Excludes:
             dir_only = label.endswith(("/", "\\"))
             line = label.rstrip("/\\")
             if len(line) > 1 and line[1] == ":":
-                self._absolute.append((os.path.normcase(os.path.normpath(line)), dir_only, label))
+                any_drive = line[0] == "*"
+                rest = line[2:] if any_drive else line
+                self._absolute.append((os.path.normcase(os.path.normpath(rest or "\\")), dir_only, label, any_drive))
                 self.labels.append(label)
                 continue
             line = line.replace("\\", "/")
@@ -143,8 +147,9 @@ class Excludes:
                 return label
         if self._absolute:
             f = os.path.normcase(os.path.normpath(full))
-            for absolute, dir_only, label in self._absolute:
-                if (is_dir or not dir_only) and (f == absolute or f.startswith(absolute + os.sep)):
+            for absolute, dir_only, label, any_drive in self._absolute:
+                target = f[2:] if any_drive and f[1:2] == ":" else f
+                if (is_dir or not dir_only) and (target == absolute or target.startswith(absolute + os.sep)):
                     return label
         if self._paths:
             r = rel.lower()

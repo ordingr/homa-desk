@@ -24,6 +24,17 @@ MAX_INDEX_EXCLUDES = 200
 MAX_PATH_CHARS = 1024
 MAX_EXCLUDE_CHARS = 512
 
+# `doc` is left out on purpose: the PRD's own example `design doc` is a path term, not an extension filter.
+DEFAULT_KNOWN_EXTS = tuple(
+    "md markdown txt rtf pdf docx xls xlsx xlsm csv tsv ppt pptx odt ods json xml yml yaml toml ini cfg log "
+    "py js mjs ts tsx jsx html htm css scss java kt cs cpp c h go rs rb php sh ps1 bat sql "
+    "png jpg jpeg gif bmp svg webp ico zip".split()
+)
+PREVIEW_MIN_BYTES = 1024 * 1024
+PREVIEW_MAX_BYTES = 4 * 1024 ** 3
+MAX_KNOWN_EXTS = 200
+MAX_EXT_CHARS = 16
+
 MUTE_SOURCES = ("hooks", "http", "mcp", "file", "reminders", "calendar")
 
 DEFAULTS: dict[str, Any] = {
@@ -36,14 +47,17 @@ DEFAULTS: dict[str, Any] = {
     "cards_every_monitor": True,
     "mute_sources": {name: False for name in MUTE_SOURCES},
     "calendars": {"ics_urls": [], "labels": {}, "outlook": False, "lead_minutes": 5, "poll_minutes": 5},
+    "hotkey_skip_fullscreen": False,
     "claude_code": {},
     "mcp": {},
-    "index": {"roots": [], "excludes": list(DEFAULT_EXCLUDES), "show_protected_by_name": False},
+    "index": {"roots": [], "excludes": list(DEFAULT_EXCLUDES), "show_protected_by_name": False,
+              "include_hidden": False, "scan_if_older_hours": 12, "known_exts": list(DEFAULT_KNOWN_EXTS)},
     "notes": {"dir": ""},
+    "preview": {"max_bytes": 50_000_000},
 }
 
-_NESTED = ("mute_sources", "calendars", "claude_code", "mcp", "index", "notes")
-_BOOLS = ("sound_on", "cards_every_monitor")
+_NESTED = ("mute_sources", "calendars", "claude_code", "mcp", "index", "notes", "preview")
+_BOOLS = ("sound_on", "cards_every_monitor", "hotkey_skip_fullscreen")
 
 
 def _valid_port(value: Any) -> bool:
@@ -105,6 +119,14 @@ def _check_index(value: Any) -> None:
             raise ValueError(f"index.{key} must be a number from {low:g} to {high:g}")
     if not isinstance(value.get("pause_on_battery", True), bool):
         raise ValueError("index.pause_on_battery must be true or false")
+    if not isinstance(value.get("include_hidden", False), bool):
+        raise ValueError("index.include_hidden must be true or false")
+    if not _int_in(value.get("scan_if_older_hours", 12), 1, 168):
+        raise ValueError("index.scan_if_older_hours must be a whole number from 1 to 168")
+    exts = value.get("known_exts", [])
+    if (not isinstance(exts, list) or len(exts) > MAX_KNOWN_EXTS
+            or not all(isinstance(e, str) and 0 < len(e) <= MAX_EXT_CHARS and e.isalnum() for e in exts)):
+        raise ValueError("index.known_exts must be a list of extensions such as md or pdf")
 
 
 def _check_notes(value: Any) -> None:
@@ -113,6 +135,13 @@ def _check_notes(value: Any) -> None:
     folder = value.get("dir", "")
     if folder != "" and not _abs_path(folder):
         raise ValueError("notes.dir must be empty or an absolute folder path")
+
+
+def _check_preview(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("preview must be an object")
+    if not _int_in(value.get("max_bytes", PREVIEW_MIN_BYTES), PREVIEW_MIN_BYTES, PREVIEW_MAX_BYTES):
+        raise ValueError("preview.max_bytes must be a whole number from 1 MiB to 4 GiB")
 
 
 def _check(key: str, value: Any) -> None:
@@ -130,6 +159,8 @@ def _check(key: str, value: Any) -> None:
         _check_index(value)
     if key == "notes":
         _check_notes(value)
+    if key == "preview":
+        _check_preview(value)
     if key == "hotkey" and not (isinstance(value, str) and len(value) <= 64):
         raise ValueError("hotkey must be text such as ctrl+alt+space")
     if key == "search_placement" and not (isinstance(value, str) and 0 < len(value) <= 32):
@@ -150,7 +181,7 @@ def _merged(loaded: dict[str, Any]) -> dict[str, Any]:
             if key == "calendars" and isinstance(merged[key], dict):
                 _repair_calendars(merged[key])
                 continue
-            if key in ("index", "notes") and isinstance(merged[key], dict):
+            if key in ("index", "notes", "preview") and isinstance(merged[key], dict):
                 _repair_nested(key, merged[key])
                 continue
             log.warning("invalid %s in settings; using default", key)
@@ -172,7 +203,7 @@ def _repair_calendars(value: dict) -> None:
             value[sub] = copy.deepcopy(default)
 
 
-_NESTED_CHECKS = {"index": _check_index, "notes": _check_notes}
+_NESTED_CHECKS = {"index": _check_index, "notes": _check_notes, "preview": _check_preview}
 
 
 def _repair_nested(key: str, value: dict) -> None:

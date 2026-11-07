@@ -6,7 +6,7 @@ import os
 import re
 import threading
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from mcp.server.mcpserver import MCPServer
@@ -18,11 +18,10 @@ from .. import paths
 from ..cards.model import Card, CardValidationError, strip_control
 from ..cards.store import CardNotFound, CardStore
 from ..reminders.store import ReminderStore
-from ..index.store import FLAG_PLACEHOLDER
 from ..security import denylist, pathcheck
 from .routes_cards import ApiError
 from .routes_reminders import _parse_text
-from .routes_search import KNOWN_EXTS
+from .routes_search import include_hidden, known_exts
 
 log = logging.getLogger("assistant.server.mcp")
 
@@ -171,6 +170,7 @@ def _vet(index, path: Any) -> tuple:
     """(resolved_path, "") when a tool may touch the path, else (None, reason). SEC-3, SEC-4, AC-MC-5."""
     if not isinstance(path, str) or not path.strip() or "\x00" in path:
         return None, "refused: not a usable path"
+    path = pathcheck._plain(path)
     store, delta = index.current()
     if store is None:
         return None, "unavailable: the file index is not ready yet"
@@ -205,7 +205,7 @@ def _root_spellings(resolved: str, roots: list) -> list:
 
 
 def _metadata(resolved: str) -> dict:
-    st = os.stat(resolved)
+    st = os.lstat(resolved)
     attrs = getattr(st, "st_file_attributes", 0)
     return {"path": resolved, "name": os.path.basename(resolved.rstrip("\\/")) or resolved,
             "size": st.st_size, "mtime": st.st_mtime, "is_dir": bool(attrs & 0x10),
@@ -220,7 +220,7 @@ def _looks_binary(chunk: bytes) -> bool:
     return bool(sample) and odd / len(sample) > 0.05
 
 
-def _read_preview(resolved: str, max_bytes: int, max_lines: Optional[int]) -> str:
+def _read_preview(resolved: str, max_bytes: int, max_lines: Optional[int], recheck=None) -> str:
     ext = os.path.splitext(resolved)[1].lstrip(".").casefold()
     if ext in _BINARY_EXTS:
         raise ToolError(f"refused: .{ext} is a binary file type, only text is previewed")
@@ -234,6 +234,10 @@ def _read_preview(resolved: str, max_bytes: int, max_lines: Optional[int]) -> st
         raise ToolError("refused: the file is a cloud placeholder that is not downloaded; it is never fetched")
     try:
         with open(resolved, "rb") as fh:
+            final = pathcheck.final_path(fh)
+            if final is None or (os.path.normcase(final) != os.path.normcase(resolved)
+                                 and not (recheck is not None and recheck(final))):
+                raise ToolError("refused: the file changed while it was being opened")
             data = fh.read(PREVIEW_SCAN_BYTES)
     except OSError:
         raise ToolError("unavailable: the file could not be read") from None
@@ -254,6 +258,20 @@ def _read_preview(resolved: str, max_bytes: int, max_lines: Optional[int]) -> st
     return f"{header}\n{text}\n<<<END UNTRUSTED FILE CONTENT>>>"
 
 
+def _iso_bound(value: Any, name: str, end_of_day: bool) -> Optional[float]:
+    """Epoch seconds for an ISO date filter bound; a date without a time covers its whole day."""
+    if not value:
+        return None
+    text = str(value).strip()
+    try:
+        moment = datetime.fromisoformat(text)
+        if end_of_day and len(text) <= 10:
+            moment += timedelta(days=1) - timedelta(milliseconds=1)
+        return moment.timestamp()
+    except (ValueError, OverflowError, OSError):
+        raise ToolError(f"filters.{name}: expected an ISO date such as 2025-01-31") from None
+
+
 def _add_file_tools(server: MCPServer, index) -> None:
     @server.tool(annotations=_READ)
     def search_files(query: str, limit: int = 50, offset: int = 0, sort: str = "best",
@@ -261,10 +279,11 @@ def _add_file_tools(server: MCPServer, index) -> None:
                      modified: Optional[str] = None) -> dict[str, Any]:
         """Search the indexed files with the Files-mode grammar: space is AND, 'design md' filters by extension,
         -e ext, -p pathpart, !word excludes, "quoted" is literal, * and ? are wildcards. limit is at most 500.
-        sort is best, name, ext or date. filters may hold ext (list), modified_after (ISO date) and
-        folders_only. chips are docs, sheets, pdf, images, code, folders; modified is today, 7d or 30d.
+        sort is best, name, ext or date. filters may hold ext (list), modified_after and modified_before (ISO
+        dates; a date alone covers the whole day) and folders_only. chips are docs, sheets, pdf, images, code,
+        folders; modified is today, 7d, 30d or a closed range YYYY-MM-DD..YYYY-MM-DD.
         Protected files (keys, .env, password stores) are never listed. Returns path, name, size, mtime,
-        is_dir and placeholder per row."""
+        is_dir and placeholder per row, plus notes (how the query was shortened, if it was)."""
         from ..index import query as iquery
         from ..index import search as isearch
         if not 1 <= limit <= SEARCH_MAX_LIMIT:
@@ -272,41 +291,43 @@ def _add_file_tools(server: MCPServer, index) -> None:
         if not 0 <= offset <= SEARCH_MAX_OFFSET:
             raise ToolError(f"offset: must be between 0 and {SEARCH_MAX_OFFSET}")
         filters = filters or {}
-        unknown = set(filters) - {"ext", "modified_after", "folders_only"}
+        unknown = set(filters) - {"ext", "modified_after", "modified_before", "folders_only"}
         if unknown:
-            raise ToolError("filters: only ext, modified_after and folders_only are supported")
+            raise ToolError("filters: only ext, modified_after, modified_before and folders_only are supported")
         chip_list = list(chips or [])
         if filters.get("folders_only") is True:
             chip_list.append("folders")
         date_filter: Any = modified or None
-        if filters.get("modified_after"):
-            try:
-                date_filter = (datetime.fromisoformat(str(filters["modified_after"])).timestamp(), None)
-            except (ValueError, OverflowError, OSError):
-                raise ToolError("filters.modified_after: expected an ISO date such as 2025-01-31") from None
+        if filters.get("modified_after") or filters.get("modified_before"):
+            date_filter = (_iso_bound(filters.get("modified_after"), "modified_after", False),
+                           _iso_bound(filters.get("modified_before"), "modified_before", True))
         store, delta = index.current()
         if store is None:
             raise ToolError("unavailable: the file index is not ready yet")
-        parsed = iquery.parse(query, KNOWN_EXTS)
+        settings = getattr(index, "settings", None)
+        parsed = iquery.parse(query, known_exts(settings))
         ext_filter = filters.get("ext")
         if isinstance(ext_filter, str):
             ext_filter = [ext_filter]
         if ext_filter:
             if not isinstance(ext_filter, list) or not all(isinstance(e, str) for e in ext_filter):
                 raise ToolError("filters.ext: expected a list of extensions")
-            parsed.exts.extend(ext_filter)
+            for e in ext_filter:
+                parsed.exts.extend(iquery._split_exts(e))
+            parsed.exts = iquery._dedupe(parsed.exts)
+            parsed.interpretation = iquery._describe(parsed)
         try:
             result = isearch.run(parsed, store, delta, chip_list, date_filter, sort, limit, offset,
-                                 show_denied=False)
+                                 show_denied=False, show_hidden=include_hidden(settings), skip_roots=True)
         except ValueError as exc:
             raise ToolError(str(exc)) from None
         own = pathcheck._resolve(str(paths.home()))
         rows = [{"path": r.path, "name": r.name, "size": r.size, "mtime": r.mtime, "is_dir": r.is_dir,
-                 "placeholder": bool(store.flags(r.id) & FLAG_PLACEHOLDER)}
+                 "placeholder": r.placeholder}
                 for r in result.rows
                 if not denylist.matches(r.path) and not (own and pathcheck._inside(r.path, own))]
         return {"rows": rows, "total": result.total, "interpretation": result.interpretation,
-                "built_at": result.built_at, "truncated": result.truncated}
+                "built_at": result.built_at, "truncated": result.truncated, "notes": list(parsed.notes)}
 
     @server.tool(annotations=_READ)
     def get_file_info(paths: list[str]) -> dict[str, Any]:
@@ -340,7 +361,7 @@ def _add_file_tools(server: MCPServer, index) -> None:
         resolved, reason = _vet(index, path)
         if resolved is None:
             raise ToolError(reason)
-        return _read_preview(resolved, max_bytes, max_lines)
+        return _read_preview(resolved, max_bytes, max_lines, lambda final: _vet(index, final)[0] is not None)
 
     @server.tool(annotations=_READ)
     def list_indexed_roots() -> dict[str, Any]:

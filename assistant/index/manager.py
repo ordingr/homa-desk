@@ -4,7 +4,10 @@ and keeps ``built_at`` equal to the completion time of the last full walk.
 
 Settings read (all optional, defensive): ``index.roots`` (strings or
 ``{"path": ...}``), ``index.excludes`` (pattern lines), ``index.rescan_hours``
-(24), ``index.root_timeout_s`` (60), ``index.pause_on_battery`` (true).
+(24), ``index.root_timeout_s`` (60), ``index.pause_on_battery`` (true; start,
+daily and overflow scans wait while on battery, a manual rescan never does),
+``index.scan_if_older_hours`` (12; a persisted index younger than this, built for
+the same roots, is served without a start scan).
 """
 import collections
 import ctypes
@@ -16,6 +19,7 @@ import time
 from typing import Any, Callable, Optional
 
 from .. import paths
+from ..security import pathcheck
 from . import crawler as crawler_mod
 from . import watcher as watcher_mod
 
@@ -29,6 +33,7 @@ HINT_IDLE_WAIT_S = 5.0
 HINT_BATCH_S = 0.25
 HINT_BATCH_MAX = 5000
 BATTERY_RETRY_S = 900.0
+BATTERY_REASONS = ("start", "daily", "overflow")
 
 
 def _default_builder_factory() -> Callable[[], Any]:
@@ -81,6 +86,7 @@ class IndexManager:
         self._delta_factory = delta_factory or _default_delta_factory
 
         self._stop = threading.Event()
+        self._lifecycle = threading.Lock()
         self._cond = threading.Condition()
         self._requested: Optional[str] = None
         self._due = 0.0
@@ -108,6 +114,7 @@ class IndexManager:
         self._last_walk_seconds: Optional[float] = None
         self._exclude_counts: dict = {}
         self._root_status: dict = {}
+        self._lost: set = set()
         self._dirs: Optional[int] = None
         self._loaded_from_disk = False
         self._built_at: Optional[float] = None
@@ -122,26 +129,59 @@ class IndexManager:
             self._loaded_from_disk = True
         self._built_at = getattr(store, "built_at", None) if self._loaded_from_disk else None
         self._state = (store, self._delta_factory())
-        self._settings.on_change("index", self._on_settings)
-        self._hint_thread = threading.Thread(target=self._hint_loop, name="index-hints", daemon=True)
-        self._hint_thread.start()
-        self._walk_thread = threading.Thread(target=self._walk_loop, name="index-walk", daemon=True)
-        self._walk_thread.start()
-        self.request_rescan("start")
+        with self._lifecycle:
+            if self._stop.is_set():
+                return
+            self._settings.on_change("index", self._on_settings)
+            self._hint_thread = threading.Thread(target=self._hint_loop, name="index-hints", daemon=True)
+            self._hint_thread.start()
+            self._walk_thread = threading.Thread(target=self._walk_loop, name="index-walk", daemon=True)
+            self._walk_thread.start()
+        self.request_rescan(self._start_reason(store))
+
+    def _start_reason(self, store) -> str:
+        """"start" when the index must be rebuilt now; "config" to only apply the settings (watchers, daily
+        timer) because the persisted index is recent enough and was built for the configured roots."""
+        cfg = self._config()
+        if not self._loaded_from_disk or self._built_at is None:
+            return "start"
+        if time.time() - self._built_at > cfg["scan_if_older_hours"] * 3600.0:
+            return "start"
+        built_for = {os.path.normcase(r) for r in getattr(store, "roots", ())}
+        if built_for != {os.path.normcase(r) for r in cfg["roots"]}:
+            return "start"
+        return "config"
+
+    @property
+    def settings(self):
+        return self._settings
 
     def stop(self) -> None:
         self._stop.set()
         self._hints.put(None)
         with self._cond:
             self._cond.notify_all()
-        if self._daily is not None:
-            self._daily.cancel()
-        for w in list(self._watchers.values()):
-            w.stop()
-        self._watchers.clear()
-        for th in (self._walk_thread, self._hint_thread):
-            if th is not None and th is not threading.current_thread():
+        with self._lifecycle:
+            threads = (self._walk_thread, self._hint_thread)
+        for th in threads:
+            if th is None or th is threading.current_thread():
+                continue
+            try:
                 th.join(timeout=3)
+            except RuntimeError:
+                pass
+        daily, self._daily = self._daily, None
+        if daily is not None:
+            try:
+                daily.cancel()
+            except Exception:
+                log.exception("daily scan handle could not be cancelled")
+        for w in list(self._watchers.values()):
+            try:
+                w.stop()
+            except Exception:
+                log.exception("watcher could not be stopped")
+        self._watchers.clear()
 
     def current(self) -> tuple:
         return self._state
@@ -212,14 +252,20 @@ class IndexManager:
             v = raw.get(key, default)
             return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= low else default
 
+        hours = raw.get("scan_if_older_hours", 12)
+        valid = isinstance(hours, (int, float)) and not isinstance(hours, bool) and 1 <= hours <= 168
+        fresh_hours = float(hours) if valid else 12.0
         return {"roots": list(dict.fromkeys(roots)), "patterns": patterns,
                 "rescan_hours": num("rescan_hours", 24.0, 0.01),
                 "root_timeout_s": num("root_timeout_s", 60.0, 0.1),
-                "pause_on_battery": raw.get("pause_on_battery", True) is not False}
+                "pause_on_battery": raw.get("pause_on_battery", True) is not False,
+                "scan_if_older_hours": fresh_hours}
 
     @staticmethod
-    def _own_data_rules() -> list:
-        """The Assistant's data folder is never indexed, whatever the user's exclude settings say."""
+    def _own_data_rules(roots=()) -> list:
+        """The Assistant's data folder is never indexed, whatever the user's exclude settings say. A root that
+        is a junction or symlink over (a parent of) the folder reaches it under that root's own spelling, so
+        the rule is emitted in that spelling too."""
         rules = ["**/.assistant/"]
         try:
             home = os.path.realpath(str(paths.home())).rstrip("\\/")
@@ -227,6 +273,13 @@ class IndexManager:
             return rules
         if len(home) > 1 and home[1] == ":":
             rules.append(home)
+            for root in roots:
+                real = pathcheck._resolve(root)
+                if not real or not pathcheck._inside(home, real):
+                    continue
+                spelling = os.path.abspath(root).rstrip("\\/") + home[len(real.rstrip("\\/")):]
+                if os.path.normcase(spelling) != os.path.normcase(home) and spelling not in rules:
+                    rules.append(spelling)
         return rules
 
     def _apply_config(self) -> dict:
@@ -234,11 +287,12 @@ class IndexManager:
         self._scan_sig = (tuple(cfg["roots"]), tuple(cfg["patterns"]))
         self._patterns = cfg["patterns"]
         try:
-            self._excludes = self._excludes_factory(cfg["patterns"] + self._own_data_rules())
+            self._excludes = self._excludes_factory(cfg["patterns"] + self._own_data_rules(cfg["roots"]))
         except Exception:
             log.exception("excludes could not be built; crawling without excludes is refused")
             self._excludes = None
             cfg["roots"] = []
+        self._lost &= set(cfg["roots"])
         self._root_timeout = cfg["root_timeout_s"]
         self._pause_on_battery = cfg["pause_on_battery"]
         self._roots = cfg["roots"]
@@ -249,13 +303,22 @@ class IndexManager:
             if path in self._watchers or crawler_mod.is_remote(path) or not os.path.isdir(path):
                 continue
             w = watcher_mod.Watcher(path, lambda action, p, root=path: self._hints.put((action, p, root)),
-                                    self._on_overflow)
+                                    self._on_overflow, lambda root=path: self._on_missing(root))
             self._watchers[path] = w
+            self._lost.discard(path)
             w.start()
         if self._daily is not None:
             self._daily.cancel()
         self._daily = self._scheduler.every(cfg["rescan_hours"] * 3600.0, lambda: self.request_rescan("daily"))
         return cfg
+
+    def _on_missing(self, root: str) -> None:
+        """A watched folder disappeared: show it as missing and stop watching; no rescan is requested. The next
+        scan (daily or manual) re-applies the settings, which re-arms the watcher if the folder is back."""
+        self._watchers.pop(root, None)
+        self._lost.add(root)
+        prev = self._root_status.get(root) or {}
+        self._root_status[root] = {**prev, "state": "missing", "error": "folder not found"}
 
     def _on_overflow(self) -> None:
         self._overflow_count += 1
@@ -276,15 +339,33 @@ class IndexManager:
                 reason, self._requested, self._due = self._requested, None, 0.0
                 reconfigure, self._reconfigure = self._reconfigure, False
             try:
-                if reconfigure:
+                if reconfigure or self._lost:
                     self._apply_config()
-                if reason == "daily" and self._pause_on_battery and _on_battery():
-                    self._scheduler.at(time.time() + BATTERY_RETRY_S, lambda: self.request_rescan("daily"))
+                if reason == "config":
+                    self._seed_status()
+                    continue
+                if reason in BATTERY_REASONS and self._pause_on_battery and _on_battery():
+                    self._scheduler.at(time.time() + BATTERY_RETRY_S, lambda r=reason: self.request_rescan(r))
                     continue
                 self._walk(reason)
             except Exception:
                 log.exception("index walk failed")
                 self._walking = False
+
+    def _seed_status(self) -> None:
+        """Per-root state for an index that was loaded from disk and not rewalked."""
+        store, _ = self._state
+        counter = getattr(store, "count_under", None)
+        for path in self._roots:
+            if path in self._root_status:
+                continue
+            if os.path.isdir(path) or crawler_mod.is_remote(path):
+                entries = counter(path) if counter is not None else 0
+                self._root_status[path] = {"state": "ok", "entries": entries, "last_walk_s": None, "error": None}
+            else:
+                self._root_status[path] = {"state": "missing", "entries": 0, "last_walk_s": None,
+                                           "error": "folder not found"}
+        self._dirs = getattr(store, "dir_count", None)
 
     def _walk(self, reason: str) -> None:
         roots = list(self._roots)

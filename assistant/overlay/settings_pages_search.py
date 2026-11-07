@@ -5,11 +5,13 @@
 """
 import logging
 import os
+import re
 import time
 import tkinter as tk
 from tkinter import filedialog
 from typing import Any, Callable, Optional
 
+from ..index.excludes import DEFAULT_EXCLUDES
 from . import gfx
 
 log = logging.getLogger("assistant.overlay.settings_pages_search")
@@ -26,6 +28,9 @@ PLACEMENT_CHOICES = (("icon", "Beside the icon"), ("mouse", "On the monitor with
 PROTECTED_WARNING = ("Lists files whose names match the secrets list (.env, *.pem, *.key, id_rsa and similar) "
                      "in local search, by name only. They are still never previewed, never returned over MCP "
                      "and never sent to Claude. Leave this off unless you need to find them.")
+HIDDEN_HELP = "Hidden and system files and folders are left out of results unless this is on. No rescan needed."
+KNOWN_EXTS_HELP = ("Extensions, separated by spaces or commas. A word in a query that matches one of them filters by "
+                   "that type: 'design md' finds md files named design; 'design doc' still searches for the words.")
 HOTKEY_HELP = ("Examples: ctrl+alt+space, ctrl+alt+f10, win+shift+s. Leave empty to turn the hotkey off. "
                "If another app already holds the combination, choose another one; the icon always opens search.")
 
@@ -139,12 +144,17 @@ class SearchPages:
         rescan = tk.Frame(page, bg=gfx.PANEL_BG)
         rescan.pack(fill="x")
         w._button(rescan, "Rescan now", self.rescan_now).pack(side="left")
-        w._text(page, "Exclude rules, one per line (a trailing / matches folders only). Applied on the next scan.",
-                pady=(8, 2))
+        self.hidden_var = w._check(
+            page, "Include hidden and system files in results", self._index().get("include_hidden", False) is True,
+            lambda v: self._save_index(ROOTS_PAGE, include_hidden=v))
+        w._text(page, HIDDEN_HELP)
+        w._text(page, "Exclude rules, one per line (a trailing / matches folders only). This list is the whole "
+                      "list: what you save replaces the built-in rules. Applied on the next scan.", pady=(8, 2))
         self.excludes_text = self._textbox(page, 6, True)
         self.excludes_text.pack(fill="x")
         self.excludes_text.bind("<KeyRelease>", lambda _e: w._debounce("index_excludes", self.apply_excludes))
         self.excludes_text.bind("<FocusOut>", lambda _e: w.flush())
+        w._button(page, "Restore defaults", self.restore_default_excludes).pack(anchor="w", pady=(4, 0))
         w._text(page, "Entries each rule excluded in the last scan", pady=(8, 2))
         box = tk.Frame(page, bg=gfx.PANEL_BG)
         box.pack(fill="both", expand=True)
@@ -195,6 +205,14 @@ class SearchPages:
         self.w._ok(ROOTS_PAGE, "Scan requested")
         self.w.win.after(HOTKEY_SETTLE_MS, self.refresh)
 
+    def restore_default_excludes(self) -> None:
+        lines = list(DEFAULT_EXCLUDES)
+        if self._save_index(ROOTS_PAGE, excludes=lines):
+            self.excludes_text.delete("1.0", "end")
+            self.excludes_text.insert("1.0", "\n".join(lines))
+            self._shown_excludes = lines
+            self.w._ok(ROOTS_PAGE, "Default exclude rules restored")
+
     def apply_excludes(self) -> None:
         raw = self.excludes_text.get("1.0", "end")
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
@@ -238,6 +256,12 @@ class SearchPages:
             self._index().get("show_protected_by_name", False) is True,
             lambda v: self._save_index(SEARCH_PAGE, show_protected_by_name=v))
         w._text(page, PROTECTED_WARNING)
+        row = w._row(page, "File types")
+        self.exts_var = tk.StringVar(value=" ".join(self._known_exts_setting()))
+        self.exts_entry = w._entry(row, self.exts_var, 40)
+        self.exts_entry.pack(side="left", fill="x", expand=True)
+        self.exts_var.trace_add("write", lambda *_: w._debounce("known_exts", self.apply_known_exts))
+        w._text(page, KNOWN_EXTS_HELP)
         w._error_line(SEARCH_PAGE)
 
     def _placement(self) -> str:
@@ -248,6 +272,20 @@ class SearchPages:
         notes = self.settings.get("notes") or {}
         value = notes.get("dir", "") if isinstance(notes, dict) else ""
         return value if isinstance(value, str) else ""
+
+    def _known_exts_setting(self) -> list:
+        value = self._index().get("known_exts")
+        if not isinstance(value, list):
+            from ..settings import DEFAULT_KNOWN_EXTS
+            return list(DEFAULT_KNOWN_EXTS)
+        return [e for e in value if isinstance(e, str)]
+
+    def apply_known_exts(self) -> None:
+        words = [re.sub(r"^\*?\.", "", part).casefold() for part in re.split(r"[,;\s]+", self.exts_var.get())]
+        exts = list(dict.fromkeys(word for word in words if word))
+        if exts == self._known_exts_setting():
+            return
+        self._save_index(SEARCH_PAGE, known_exts=exts)
 
     def apply_hotkey(self) -> None:
         text = self.hotkey_var.get().strip()
