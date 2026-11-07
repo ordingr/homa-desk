@@ -724,3 +724,42 @@ Plan: C:\AI Projects\Assistant\docs\plans\2026-11-06-assistant-v1-plan.md (§14.
 New planner default: **A16** — `MAX_BODY_BYTES = 1_048_576` server-wide, per-route caps may only lower it, the hooks route may raise it with recorded-payload evidence (14.6).
 
 Open items created by this Revision: M0-5 (dispatch any time before M3a); interactive P6 (user-run); work-laptop P1–P9 (user-run); cold P7 (user-run after reboot); Revision 2 after the P7 re-measure.
+
+## 15. Revision 2 2026-11-06 (after M0-5 re-measure)
+
+- Date: 2026-11-06 (later). Author: planner. Trigger: M0-5 warm re-runs recorded in `docs/probes/2026-11-06-m0-probes-personal.md`, section "P7 re-measure after M0-5 excludes" (two dev runs, one independent qa run; qa PASS on the probe change). This is the Revision 2 that 14.2 item 2 promised. Nothing above is edited.
+
+### 15.1 Measured (warm, no reboot, same command and roots as the original run, probe excludes extended per 14.2 item 1)
+
+| Run | Entries | Dirs | Seconds | µs per entry | 0.3M warm projection |
+|---|---|---|---|---|---|
+| Original (Revision 1, 14.2) | 552,245 | 70,169 | 74.50 | 134.9 | ≈ 40.5 s |
+| Dev run 1 | 393,459 | 38,216 | 15.47 | 39.3 | ≈ 11.8 s |
+| Dev run 2 | 393,467 | 38,217 | 8.78 | 22.3 | ≈ 6.7 s |
+| qa independent run | 393,477 | 38,217 | 9.75 | 24.8 | ≈ 7.4 s |
+
+Peak working set 18.7–18.9 MB in all three; 1 permission error and 26 reparse points not followed, as before. The new rules removed 158,786 entries (28.8 %). The three post-change runs differ by 1.8x on a near-identical entry set, so disk-cache state explains part of the gain; only the entry reduction is attributable to the excludes with certainty.
+
+### 15.2 Verdict against PRD section 12
+
+- **0.3M warm (≤ 15 s): PASS on projection, 6.7–11.8 s.** The section 6 P7 trigger ("miss by > 2x") is **cleared**; the slowest run is 0.79x of the target, not 2.7x. Noted, not a fail: dev run 1 took 15.47 s unscaled at 393k entries — above 15 s at a size 31 % larger than the target's.
+- **2M warm (≤ 2.5 min): not re-measured.** Linear projection from the slowest run is ≈ 79 s; M3a-2's Done cell ("crawl of the real personal-laptop roots re-measured and recorded against P7") is where the real number lands.
+- **Cold run: outstanding.** User-run after a reboot, as in section 6; it does not gate M3a.
+
+### 15.3 Decisions
+
+1. **Excludes-first stands** (14.2 items 1–2 done for the probe; item 1's product list is still M3a-1's to write).
+2. **`scandir-rs` is not scheduled.** It remains the section 10.1 optional accelerator — personal laptop only, behind a setting, off by default — and M3a-2 does not build the setting. The condition in 14.2 item 3 ("still misses by > 2x") was not met.
+3. **M3a-1's `assistant/index/excludes.py` default list must include the same AppData cache categories** the probe now excludes (`Code Cache`, `Cache`, `Cache_Data`, `GPUCache`, `Service Worker`, `Shared Dictionary` under `AppData/Local|Roaming/*/`; `Microsoft/Office/*/OfficeFileCache`; `npm-cache`; NuGet `v3-cache`/`plugins-cache`), each with its AC-FI-7 counter, and must keep a `Cache` directory outside `AppData` (qa's `proj\Cache` case) un-excluded. The glob text is still M3a-1's; the categories are fixed.
+4. **M3a-1 pins the "`*` crosses `/`" behaviour deliberately, with a test** in `tests/test_excludes.py` (M3a-8): `fnmatch`'s `*` matches across path separators, which is what lets `AppData/Local/*/Cache/` catch `Microsoft/Office/16.0/OfficeFileCache` at depth. Whether the product matcher keeps that semantics or restricts `*` to one segment and adds `**`, the choice is written in the module docstring and asserted by a test on exactly that Office path and on a one-level case.
+5. **PRD section 12 warm targets are restored as written** (0.3M ≤ 15 s, 2M ≤ 2.5 min); they are no longer "to be re-measured after excludes". The cold targets and the 300 MB index-RAM target are unchanged (the latter still owned by M3a-1's 2M synthetic test).
+
+### 15.4 What this Revision supersedes
+
+- **14.2 item 2** (re-measure pending): done for the warm half; the cold half stays an open user-run item.
+- **14.2 item 3 and 14.9 §6 P7 bullet** ("accelerator only if the re-measure still misses by > 2x"): condition evaluated, not met; no accelerator task.
+- **14.2 item 4 and 14.9 PRD §12 bullet** ("to be re-measured after excludes"): superseded by 15.3 item 5.
+- **14.9 §7.3 gate bullet** ("verdict on the targets waits for the M0-5 re-measure and Revision 2"): this is that verdict; the 7.3 gate for M3a-2 is satisfied on the personal laptop. Work-laptop gates (14.5) are untouched.
+- **§13**: P7 is now decided (warm); only the cold run remains a probe-decided item.
+
+Open items after this Revision: cold P7 (user-run after reboot); 2M warm number (M3a-2 Done cell); interactive P6 and work-laptop P1–P9 (unchanged from 14.9).
