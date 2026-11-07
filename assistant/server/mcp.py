@@ -8,9 +8,10 @@ from typing import Any, Optional
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from starlette.responses import Response
 
 from .. import paths
-from ..cards.model import Card, CardValidationError
+from ..cards.model import Card, CardValidationError, strip_control
 from ..cards.store import CardNotFound, CardStore
 from ..reminders.store import ReminderStore
 from .routes_cards import ApiError
@@ -37,6 +38,10 @@ def _describe(value: Any) -> str:
     return type(value).__name__
 
 
+def _one_line(value: Any, limit: int) -> str:
+    return strip_control(str(value)[:limit]).replace("\n", " ").replace("\t", " ")
+
+
 def _append_log(line: str) -> None:
     try:
         target = paths.logs_dir() / LOG_NAME
@@ -58,9 +63,9 @@ async def _call_logger(ctx, call_next):
     if ctx.method not in _LOGGED_METHODS:
         return await call_next(ctx)
     params = ctx.params or {}
-    tool = str(params.get("name", "-"))[:64] if ctx.method == "tools/call" else "-"
+    tool = _one_line(params.get("name", "-"), 64) if ctx.method == "tools/call" else "-"
     arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
-    shape = ",".join(f"{str(k)[:32]}={_describe(v)}" for k, v in arguments.items())
+    shape = ",".join(f"{_one_line(k, 32)}={_describe(v)}" for k, v in arguments.items())
     stamp = datetime.now().astimezone().isoformat(timespec="seconds")
     try:
         result = await call_next(ctx)
@@ -113,6 +118,9 @@ class _McpApp:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "lifespan":
+            return
+        if scope["type"] == "http" and scope.get("method") != "POST":
+            await Response("Method not allowed", status_code=405, headers={"Allow": "POST"})(scope, receive, send)
             return
         await self._ensure_started()
         await self._inner(scope, receive, send)

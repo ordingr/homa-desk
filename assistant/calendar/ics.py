@@ -17,6 +17,10 @@ log = logging.getLogger("assistant.calendar.ics")
 FETCH_TIMEOUT_S = 15.0
 MAX_FEED_BYTES = 8 * 1024 * 1024
 MAX_DAY_STEPS = 20000
+MAX_DURATION = timedelta(days=366)
+MIN_YEAR, MAX_YEAR = 1970, 2100
+MAX_REDIRECTS = 3
+MAX_WARNED_TZIDS = 50
 
 _WEEKDAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 _WINDOWS_ZONES = {
@@ -39,6 +43,20 @@ _WINDOWS_ZONES = {
     "AUS Eastern Standard Time": "Australia/Sydney",
     "UTC": "UTC",
 }
+
+
+class _HttpRedirects(urllib.request.HTTPRedirectHandler):
+    max_redirections = MAX_REDIRECTS
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl).scheme.lower() not in ("http", "https"):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# Unlike send.py, this opener keeps the default ProxyHandler on purpose: the feed fetch is the one
+# sanctioned outbound call and the corporate proxy is the only way out.
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler(), _HttpRedirects())
 
 
 class IcsSource:
@@ -75,7 +93,7 @@ class IcsSource:
     def _download(self) -> str:
         request = urllib.request.Request(self._url, headers={"User-Agent": "Assistant/1", "Accept": "text/calendar, */*"})
         try:
-            with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_S) as resp:
+            with _opener.open(request, timeout=FETCH_TIMEOUT_S) as resp:
                 raw = resp.read(MAX_FEED_BYTES + 1)
         except urllib.error.HTTPError as exc:
             raise SourceError(f"HTTP {exc.code}") from None
@@ -112,7 +130,11 @@ def _parse_feed(text: str, window_start: datetime, window_end: datetime, label: 
             me.add(value.strip().lower())
     masters, overrides = [], {}
     for props in props_by_event:
-        info = _event_info(props)
+        try:
+            info = _event_info(props)
+        except (ValueError, OverflowError, OSError):
+            log.warning("skipping a calendar event that could not be read (%s)", _describe_event(props))
+            continue
         if info is None:
             continue
         if info["recurrence_id"] is not None:
@@ -131,6 +153,11 @@ def _parse_feed(text: str, window_start: datetime, window_end: datetime, label: 
                 out.append(_make_event(info, start, end, label, me, recurring=False))
     out.sort(key=lambda e: (e.start, e.subject))
     return out
+
+
+def _describe_event(props: list) -> str:
+    lengths = {name: len(value) for name, _params, value in props if name in ("UID", "SUMMARY")}
+    return f"uid length {lengths.get('UID', 0)}, subject length {lengths.get('SUMMARY', 0)}"
 
 
 def _overlaps(start: datetime, end: datetime, ws: datetime, we: datetime) -> bool:
@@ -253,8 +280,12 @@ def _tz_for(tzid: Optional[str]):
     if tzid.upper() in ("UTC", "GMT"):
         return timezone.utc
     if tzid not in _WARNED_TZIDS:
-        _WARNED_TZIDS.add(tzid)
-        log.warning("calendar feed uses time zone %r which cannot be resolved; treating its times as UTC", tzid)
+        if len(_WARNED_TZIDS) < MAX_WARNED_TZIDS:
+            _WARNED_TZIDS.add(tzid)
+            log.warning("calendar feed uses time zone %r which cannot be resolved; treating its times as UTC",
+                        tzid[:64])
+            if len(_WARNED_TZIDS) == MAX_WARNED_TZIDS:
+                log.warning("further unknown calendar time zones are not logged")
     return timezone.utc
 
 
@@ -396,10 +427,12 @@ def _parse_time(value: str, params: dict):
     try:
         if all_day:
             d = datetime.strptime(value[:8], "%Y%m%d")
-            return d, None, True
+            return (d, None, True) if MIN_YEAR <= d.year <= MAX_YEAR else None
         utc = value.endswith(("Z", "z"))
         wall = datetime.strptime(value.rstrip("Zz"), "%Y%m%dT%H%M%S")
     except ValueError:
+        return None
+    if not MIN_YEAR <= wall.year <= MAX_YEAR:
         return None
     if utc:
         return wall, timezone.utc, False
@@ -411,8 +444,14 @@ def _parse_duration(value: str) -> Optional[timedelta]:
     if not m:
         return None
     sign = -1 if m.group(1) == "-" else 1
+    if any(len(g) > 9 for g in m.groups()[1:] if g):
+        return MAX_DURATION
     w, d, h, mi, s = (int(g or 0) for g in m.groups()[1:])
-    return sign * timedelta(weeks=w, days=d, hours=h, minutes=mi, seconds=s)
+    try:
+        total = timedelta(weeks=w, days=d, hours=h, minutes=mi, seconds=s)
+    except OverflowError:
+        total = MAX_DURATION
+    return sign * min(total, MAX_DURATION)
 
 
 def _event_info(props: list) -> Optional[dict]:
@@ -431,6 +470,9 @@ def _event_info(props: list) -> Optional[dict]:
         return None
     parsed = _parse_time(first["DTSTART"][1], first["DTSTART"][0])
     if parsed is None:
+        year = re.match(r"\d{4}", first["DTSTART"][1].strip())
+        if year and not MIN_YEAR <= int(year.group()) <= MAX_YEAR:
+            raise ValueError("DTSTART year out of range")
         return None
     wall, tz, all_day = parsed
     start = _localize(wall, tz)

@@ -89,6 +89,7 @@ class App:
         self.settings_window = None
         self._started_at = time.monotonic()
         self._token = ""
+        self._token_stamp = None
         self._sources_key: tuple = ()
         self._shown: set[str] = set()
         self._tick_lock = threading.Lock()
@@ -217,7 +218,11 @@ class App:
 
     def _current_token(self) -> str:
         try:
-            self._token = token_store.read()
+            st = paths.token_file().stat()
+            stamp = (st.st_mtime_ns, st.st_size)
+            if stamp != self._token_stamp:
+                self._token = token_store.read()
+                self._token_stamp = stamp
         except (OSError, ValueError):
             pass
         return self._token
@@ -236,11 +241,11 @@ class App:
                 sources.append(IcsSource.from_url(url))
             except ValueError:
                 log.warning("ignoring a calendar address that is not an http(s) URL")
-        if cal.get("outlook", True):
+        if cal.get("outlook", False):
             outlook = OutlookSource()
             if outlook.available():
                 sources.append(outlook)
-        self._sources_key = (tuple(cal.get("ics_urls", [])), bool(cal.get("outlook", True)))
+        self._sources_key = (tuple(cal.get("ics_urls", [])), bool(cal.get("outlook", False)))
         return sources
 
     def _on_calendars_changed(self, key: str, value) -> None:

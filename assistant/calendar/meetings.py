@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional, Protocol
+from urllib.parse import urlsplit
 
 from ..cards.model import MAX_DETAIL, MAX_TITLE, MAX_URL, Card, CardValidationError, strip_control
 from ..cards.store import CardNotFound
@@ -25,9 +26,11 @@ STALE_AFTER_S = 3600.0
 DEDUPE_TOLERANCE_S = 60.0
 MAX_LOCATION_SHOWN = 80
 
+JOIN_DOMAINS = ("zoom.us", "zoom.com", "zoomgov.com", "teams.microsoft.com", "teams.live.com",
+                "meet.google.com", "webex.com")
 _JOIN_RE = re.compile(
-    r"https?://(?:[A-Za-z0-9-]+\.)*(?:zoom\.us|zoom\.com|zoomgov\.com|teams\.microsoft\.com|teams\.live\.com"
-    r"|meet\.google\.com|webex\.com)(?![A-Za-z0-9.-])[^\s<>\"'\\^`{}|\[\]]*",
+    r"https?://(?:[A-Za-z0-9-]+\.)*(?:" + "|".join(re.escape(d) for d in JOIN_DOMAINS) + r")"
+    r"(?![A-Za-z0-9.-])[^\s<>\"'\\^`{}|\[\]]*",
     re.IGNORECASE)
 _JOIN_LABELS = (("zoom", "Zoom"), ("teams", "Teams"), ("meet.google", "Meet"), ("webex", "Webex"))
 
@@ -60,12 +63,22 @@ def find_join_url(*texts: Optional[str]) -> Optional[str]:
     for text in texts:
         if not text:
             continue
-        m = _JOIN_RE.search(text)
-        if m:
+        for m in _JOIN_RE.finditer(text):
             url = m.group(0).rstrip(".,;:!?)")
-            if len(url) <= MAX_URL:
+            if len(url) <= MAX_URL and _is_join_url(url):
                 return url
     return None
+
+
+def _is_join_url(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        return (parts.scheme.lower() == "https" and parts.username is None and parts.password is None
+                and parts.port in (None, 443)
+                and any(host == d or host.endswith("." + d) for d in JOIN_DOMAINS))
+    except ValueError:
+        return False
 
 
 def join_label(url: Optional[str]) -> Optional[str]:

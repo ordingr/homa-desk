@@ -65,8 +65,16 @@ def mcp_add_command(port: int, token: str) -> str:
             f'--header "Authorization: Bearer {token}"')
 
 
+def _python_command() -> str:
+    exe = Path(sys.executable or "python")
+    console = exe.with_name("python.exe")
+    if exe.name.lower() == "pythonw.exe" and console.is_file():
+        return str(console)
+    return str(exe)
+
+
 def desktop_snippet() -> str:
-    server: dict[str, Any] = {"command": "python", "args": ["-m", "assistant.mcp_stdio"]}
+    server: dict[str, Any] = {"command": _python_command(), "args": ["-m", "assistant.mcp_stdio"]}
     if os.environ.get(paths.ENV_VAR):
         server["env"] = {paths.ENV_VAR: str(paths.home())}
     return json.dumps({"mcpServers": {"assistant": server}}, indent=2)
@@ -329,7 +337,7 @@ class SettingsWindow:
         cal = self._calendars()
         self.outlook_present = outlook_classic_present()
         self.outlook_var = self._check(page, "Read meetings from classic Outlook",
-                                       bool(cal.get("outlook", True)),
+                                       bool(cal.get("outlook", False)),
                                        lambda v: self._set_calendar(outlook=v))
         self.outlook_note = self._text(
             page, f"classic Outlook detected: {'yes' if self.outlook_present else 'no'}")

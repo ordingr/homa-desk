@@ -198,13 +198,13 @@ def test_clearing_event_with_no_open_card_is_harmless(sess):
 # ---- Stop -> done card (AC-CS-7) ----------------------------------------------------
 
 def test_stop_makes_a_green_done_card_with_160_chars_and_elapsed_time(sess):
-    long_msg = "A" * 400
+    long_msg = " ".join(f"w{i:03d}" for i in range(80))
     sess.send("user_prompt_submit")
     sess.send("stop", last_assistant_message=long_msg)
     cards = wait_until(lambda: sess.of_kind("done"), timeout=2.0)
     assert len(cards) == 1
     detail = _detail(cards[0])
-    assert "A" * 160 in detail and "A" * 161 not in detail
+    assert long_msg[:160].strip() in detail and long_msg[:166].strip() not in detail
     assert re.search(r"Task completed in \d+", detail), detail
     assert cards[0]["title"] == sess.project
 

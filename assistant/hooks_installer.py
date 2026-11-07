@@ -81,6 +81,18 @@ def _strip_ours(data: dict) -> int:
     return removed
 
 
+def _without_ours(content: bytes) -> bytes:
+    try:
+        data = json.loads(content.decode("utf-8-sig") or "{}")
+        if not isinstance(data, dict) or not isinstance(data.get("hooks", {}), dict):
+            return content
+        if any(not isinstance(g, list) for g in data.get("hooks", {}).values()):
+            return content
+    except (ValueError, UnicodeDecodeError):
+        return content
+    return _dump(data) if _strip_ours(data) else content
+
+
 def _ours_in(data: dict) -> dict:
     found = {}
     for event, groups in data.get("hooks", {}).items():
@@ -174,7 +186,7 @@ def remove() -> int:
             print(f"removed {path} (Assistant created it)")
             return 0
         if state.get("backup") and backup.is_file():
-            _atomic_write(path, backup.read_bytes())
+            _atomic_write(path, _without_ours(backup.read_bytes()))
             _drop_state()
             print(f"restored {path} from {backup}")
             return 0

@@ -161,7 +161,7 @@ class ClaudeSessions:
             return
         if ntype not in _WAIT_NOTIFICATIONS:
             return
-        message = _text(payload.get("message"), 300) or _WAIT_NOTIFICATIONS[ntype]
+        message = _text(_mask(payload.get("message")), 300) or _WAIT_NOTIFICATIONS[ntype]
         existing = self._open(wid)
         if existing is not None:
             if ntype != "permission_prompt":
@@ -176,7 +176,7 @@ class ClaudeSessions:
         started = self._prompt_at.pop(sid, None)
         paused = bool(payload.get("background_tasks")) or bool(payload.get("session_crons"))
         message = payload.get("last_assistant_message")
-        snippet = _text(message[:SNIPPET_CHARS], SNIPPET_CHARS) if isinstance(message, str) else ""
+        snippet = _text(_mask(message)[:SNIPPET_CHARS], SNIPPET_CHARS) if isinstance(message, str) else ""
         lines = []
         if paused:
             lines.append("Paused — background work running"
@@ -194,7 +194,7 @@ class ClaudeSessions:
     def _stop_failure(self, sid: str, project: str, payload: dict, now: float) -> None:
         label = ""
         for key in _ERROR_KEYS:
-            label = _text(payload.get(key), 80).replace("_", " ")
+            label = _text(_mask(payload.get(key)), 80).replace("_", " ")
             if label:
                 break
         self._show_wait(sid, project, f"Claude stopped: {label or 'API error'}", now)

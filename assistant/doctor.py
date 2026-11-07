@@ -101,7 +101,7 @@ def _calendars_configured() -> str:
     cal = cal if isinstance(cal, dict) else {}
     urls = cal.get("ics_urls")
     count = len(urls) if isinstance(urls, list) else 0
-    outlook = cal.get("outlook", True) is not False
+    outlook = cal.get("outlook", False) is not False
     return f"{count} ICS feed(s), Outlook {'on' if outlook else 'off'}"
 
 
