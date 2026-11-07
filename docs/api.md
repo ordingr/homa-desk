@@ -235,6 +235,9 @@ Full contract in section 4.
 PRD section 8 lists these for later milestones. They are not registered in M1, so a request returns `404 Not Found` (plain text) once the token check passes:
 
 - `GET /v1/search`, `GET /v1/files/{...}/preview`, `POST /v1/actions/...` (search and previews, M3)
+
+> **Correction, 2026-11-07 (M3a):** `GET /v1/search`, `GET /v1/roots` and the `/v1/saved` routes are registered from M3a. The
+> preview and action routes are still not registered (M3b). See section 11.
 - MCP endpoint (M2)
 
 ### 3.7 Test-mode debug route (not a contract)
@@ -486,6 +489,9 @@ Observed in Review 5: `POST /mcp` and `POST /mcp/` return `tools/list` with 200 
 ### 9.2 Tools
 
 Four tools. All are annotated `readOnlyHint: false`, `destructiveHint: false` and `openWorldHint: false`; `dismiss_card` is also `idempotentHint: true`. There is no tool that opens, reveals, renames, deletes, runs or lists anything (AC-MC-7). The read-only file tools of AC-MC-3 belong to M3a and are not in M2.
+
+> **Correction, 2026-11-07 (M3a):** the four read-only file tools are registered from M3a (section 11.5). The four card and
+> reminder tools above are unchanged.
 
 | Tool | Arguments | Returns | Notes |
 |---|---|---|---|
@@ -822,3 +828,214 @@ Supersedes: section 9.1.2 (other methods on `/mcp`, and the open `GET` stream, R
 - R5-N11 (a): the Settings window has no viewer for the MCP call log (section 9.10 item 8). Not changed by M2-9.
 - Review 5 items that the M2-9 brief does not name. This section does not restate their status. The review file is the record.
 - The work-laptop probes listed in section 9.9 and the README, which M2-9 does not touch.
+
+---
+
+## 11. M3a additions, as shipped (2026-11-07)
+
+Supersedes: section 3.6 (`GET /v1/search` and the saved-search routes listed as not registered), section 8 item 14 (same),
+section 9.2 sentence "The read-only file tools of AC-MC-3 belong to M3a and are not in M2", and section 9.6 (`index: null
+until M3`). The earlier text is kept as written, with correction notes at the places above.
+
+- Date: 2026-11-07. Written by doc-keeper (M3a-10) from the code as read on 2026-11-07: `assistant/server/routes_search.py`,
+  `assistant/server/mcp.py`, `assistant/server/routes_health.py`, `assistant/app.py` (health and route wiring),
+  `assistant/index/{query,search,rank,manager,crawler,excludes,store}.py`, `assistant/search/{saved,modes,notes_bm25}.py`,
+  `assistant/security/denylist.py`, `assistant/settings.py`.
+- Verification: the M3a security review, `docs/security/2026-11-07-m3a-review.md` (Review 7, verdict PASS, zero BLOCK),
+  observed routes, refusals and `mcp.log` against throwaway live instances. Anything not in that review is marked "code only".
+  The two FIX-BEFORE-M3B items (R7-F1, R7-F2) are recorded as **fixed 2026-11-07 (M3a-11)** per the tech-lead's brief. The
+  code paths are cited below. Security has not yet re-checked them in `docs/security/`.
+- Query grammar: `docs/search-grammar.md`.
+
+### 11.1 `GET /v1/search`
+
+Requires the token (section 1). Parameters:
+
+| Parameter | Type and default | Rules |
+|---|---|---|
+| `q` | string, default empty | The Files grammar. 512 characters and 32 tokens, then truncated (section 2 of `docs/search-grammar.md`). |
+| `chips` | repeatable, and/or comma-separated | `docs`, `sheets`, `pdf`, `images`, `code`, `folders`. Unknown value: 422, `field: "chips"`. Chips are OR. |
+| `modified` | string, default empty | `""`, `today`, `7d`, `30d`, and the aliases `last7`, `last7days`, `7days`, `last30`, `last30days`, `30days`. Unknown: 422, `field: "modified"`. |
+| `sort` | string, default `best` | `best`, `name`, `ext`, `date`. Unknown: 422, `field: "sort"`. |
+| `limit` | integer, default 50 | Non-integer or negative: 422 `invalid_parameter`, `field: "limit"`. Above 500: clamped to 500, no error. |
+| `offset` | integer, default 0 | Non-integer or negative: 422. Above 100,000: clamped to 100,000. Clamps are code only (R7-F2 fix). |
+
+`200 OK`:
+
+```
+{"rows": [ <row>, ... ], "total": <int>, "elapsed_ms": <float>, "interpretation": "<text>",
+ "built_at": <epoch seconds or 0.0>, "truncated": <bool>, "notes": ["..."]}
+```
+
+- `notes` appears only when the query was truncated (512 characters or 32 tokens).
+- `truncated: true` means the result is partial: the 100,000-candidate cap for one plain term, the 10,000 newest entries for an
+  empty or literal-free query, or the 0.4 s time budget. `total` counts only the candidates examined in those cases.
+- Row: `{"id", "name", "path", "parent", "ext", "size", "mtime", "is_dir", "tier", "spans"}`. `ext` is empty for folders.
+  `tier` is 0 exact, 1 prefix, 2 word start, 3 substring, 4 path only. `spans` is a list of `[start, end]` character offsets
+  into `name` (empty when the name's casefold changes its length). Placeholder (cloud not downloaded) status is **not** in
+  the row (see 11.7).
+- Errors: 422 `invalid_parameter`; 503 `index_unavailable` before the index is loaded; 401 and 403 per section 1. The error body
+  is the object shape: `{"error": {"code", "message", "field"}}`.
+
+Hidden and deny-listed entries are not returned. The one exception is `show_protected_by_name` (section 11.8): when it is `true`,
+the names of protected files are returned here, with no content.
+
+### 11.2 `GET /v1/roots`
+
+Returns the index status object (section 11.4) with `roots` filled. Before the first scan completes, `roots` lists each
+configured folder with `"state": "pending"`, `"entries": 0`.
+
+Root `state` values, from the crawler: `pending` (configured, not scanned), `walking`, `ok`, `stopped` (shutdown), `missing`
+(`folder not found` for a local folder, `folder not reachable` for a network root), `timeout` (`no answer within <N> s`, for a
+network root), `error` (exception class name).
+
+### 11.3 Saved-search routes
+
+| Route | Body | Result |
+|---|---|---|
+| `GET /v1/saved` | none | `200` `{"searches": [ {"name", "query", "chips", "modified", "sort", "mode"} ]}` |
+| `POST /v1/saved` | `{"name", "query", "chips": [strings], "modified", "sort", "mode"}` | `201` with the stored item. Same name replaces the old item. |
+| `DELETE /v1/saved/{name}` | none (URL-encode the name) | `200` `{"ok": true}`, or `404 not_found` |
+
+- `name` is trimmed and cut to 80 characters. `query` is cut to 500 characters. `mode` defaults to `files`.
+- Errors on POST: body over 4 KiB is `413` (`payload_too_large`). A missing `name` or `query` is `422 invalid_parameter`
+  ("a saved search needs a name and a query"). Non-list `chips`, or non-string `name`, `query`, `modified`, `sort` or `mode`:
+  `422` with the field named. A list or other non-object body: `422 invalid_body`. More than 200 saved searches: `422`.
+- Stored in `<home>/saved_searches.json`, per machine. Written atomically.
+
+### 11.4 `GET /v1/health`, the `index` object
+
+In M3a `index` is always an object (no longer `null`). Keys:
+
+| Key | Meaning |
+|---|---|
+| `entries` | Entries in the current index (persisted or last completed scan). |
+| `dirs` | Folder count from the last completed scan, or `null`. |
+| `built_at` | Epoch seconds of the completion of the last full scan. This is the freshness shown in the popup. `null` before any scan and after a load that has no stored time. |
+| `walking` | `true` while a full scan runs. |
+| `rescanning` | Same as `walking`, added by the health route. |
+| `roots` | One object per configured root: `path`, `state`, `entries`, `last_walk_s`, `error`, `errors` (count of unreadable entries). |
+| `excludes` | Map of exclude rule text to the number of entries it excluded in the last scan. |
+| `overflow_count` | Watcher overflows since start. Each one schedules a re-scan. |
+| `rewalks_scheduled` | Re-scans requested after overflows. |
+| `delta_ops` | Watcher changes applied since the last full scan, not yet folded in. |
+| `last_walk_s` | Duration of the last full scan, seconds. |
+| `loaded_from_disk` | `true` until the first scan replaces the persisted index. |
+
+`plugins` stays `[]` (unchanged). Numeric values are not recorded in this file. They vary per machine.
+
+### 11.5 MCP file tools
+
+Registered on the same `/mcp` endpoint as the card tools (section 9.2). Each has `readOnlyHint: true`, `destructiveHint:
+false`, `openWorldHint: false`. Code: `assistant/server/mcp.py`, `_add_file_tools`. The tools live in `mcp.py`, not in a separate
+`mcp_files.py`, as the planner decided in plan 17.4.
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `search_files` | `query` (required), `limit` (1 to 500, default 50), `offset` (0 to 100,000, default 0), `sort` (`best`, `name`, `ext`, `date`; default `best`), `filters` (object: `ext` list, `modified_after` ISO date, `folders_only` boolean; any other key is refused), `chips` (list), `modified` (`today`, `7d`, `30d`) | `{"rows": [{"path", "name", "size", "mtime", "is_dir", "placeholder"}], "total", "interpretation", "built_at", "truncated"}` |
+| `get_file_info` | `paths` (list, 1 to 20 absolute paths) | `{"files": [ metadata or {"path", "error"} ]}`. Metadata: `path`, `name`, `size`, `mtime`, `is_dir`, `placeholder`. Metadata only, never content. Refusals are reported per path, in the result, not as a tool error. |
+| `read_text_preview` | `path` (absolute), `max_bytes` (1 to 65,536, default 16,384), `max_lines` (1 or more, optional) | The text, wrapped (11.6). |
+| `list_indexed_roots` | none | `{"roots": [{"path", "state", "entries"}], "built_at", "entries"}` |
+
+`search_files` drops protected names and anything under the Assistant's own folder from its rows. The MCP tools never read
+`show_protected_by_name`.
+
+Tool errors come back with `isError: true` and one of these texts:
+
+Argument errors:
+- `limit: must be between 1 and 500`
+- `offset: must be between 0 and 100000`
+- `filters: only ext, modified_after and folders_only are supported`
+- `filters.ext: expected a list of extensions`
+- `filters.modified_after: expected an ISO date such as 2025-01-31`
+- `paths: give between 1 and 20 paths`
+- `max_bytes: must be between 1 and 65536`
+- `max_lines: must be 1 or more`
+- Query-parser messages such as `unknown sort: ...`, `unknown chip: ...`, `unknown date filter: ...`, unprefixed.
+- Type errors from the MCP library. Their text can echo the value the caller sent (R7-N7, R5-N8).
+
+Path refusals (`read_text_preview` raises them; `get_file_info` returns them per path). From `_vet` and the preview code:
+- `refused: not a usable path`: not a string, empty, or contains a NUL character.
+- `unavailable: the file index is not ready yet`: the index has no store yet.
+- `refused: give an absolute path`: relative path.
+- `refused: the path is outside the indexed roots`: outside every root, after junctions, `..`, trailing dots, case and 8.3 names are resolved. Also for a UNC path when no root is UNC.
+- `refused: the Assistant's own data`: the path is inside the Assistant's home folder (`ASSISTANT_HOME`, default `~/.assistant`). Added for R7-F1, fixed 2026-11-07 (M3a-11).
+- `refused: protected file (secrets deny-list)`: the path matches the deny-list (section 11.8).
+- `refused: the path is not in the index (excluded or not indexed yet)`: the resolved path is not an index entry. Excludes and junctions out of the root end here.
+- `refused: .<ext> is a binary file type, only text is previewed`: the extension is in the binary list (for example `exe`, `dll`, `zip`, `png`, `pdf`, `docx`, `xlsx`, `pptx`, `db`, `pyc`).
+- `refused: that is a folder, not a file`
+- `refused: the file is a cloud placeholder that is not downloaded; it is never fetched`: checked before the file is opened.
+- `refused: the file content looks binary, only text is previewed`: a NUL byte, a known binary signature (MZ, ELF, zip, PDF, PNG, OLE, RAR, gzip), or more than 5% control characters in the first 8 KiB.
+- `refused: the file contains a private key (secrets deny-list)`: a PEM private-key header in the first 1 MiB.
+- `unavailable: the file could not be read`: the stat or open failed.
+
+`read_text_preview` reads at most 1 MiB to check for binary content and private keys, and returns at most `max_bytes`. The
+returned text is cut at `max_lines` lines when that is given.
+
+Content wrapper (`read_text_preview` output):
+
+```
+<<<UNTRUSTED FILE CONTENT path=<resolved path> bytes=<n>[ truncated=yes]>>>
+<text>
+<<<END UNTRUSTED FILE CONTENT>>>
+```
+
+- Any occurrence of `<<<END UNTRUSTED FILE CONTENT` or `<<<UNTRUSTED FILE CONTENT` in the file is changed by inserting a
+  zero-width space, so the file can contain only one real end marker (observed, Review 7).
+- The tool description tells the model to treat the text as data and not to follow instructions in it. The wrapper is a
+  labelled boundary. It does not filter the content.
+
+### 11.6 `mcp.log` for the file tools
+
+The file tools use the same shape-only lines as the card tools (section 9.3). Argument values, paths and query text are never
+written. Example shape: `<stamp> tools/call tool=read_text_preview args=[path=str[71]] result_bytes=182 ok`. Observed in Review
+7 across 86 calls: no planted path, token, query text or marker appeared. R6-2 (line breaks in names) is closed in the code
+(`_one_line` drops `Zl`/`Zp`).
+
+### 11.7 Index results and the placeholder flag
+
+- `GET /v1/search` rows and the popup do not carry a placeholder flag. Placeholder entries are indexed by name, never opened,
+  and shown as ordinary rows. This is short of AC-FI-6, which asks for a "not downloaded" marker.
+- `search_files` rows and `get_file_info` carry `placeholder: true|false`.
+
+### 11.8 `show_protected_by_name` and the deny-list
+
+- Setting: `index.show_protected_by_name` (default `false`), set on the Search settings page. The popup and `GET /v1/search`
+  honour it. MCP never does.
+- When `true`, protected files are listed by name and path only, in the popup and `GET /v1/search`. Their content is never
+  returned, previewed or sent to Claude.
+- The deny-list (`assistant/security/denylist.py`):
+  - name patterns: `.env*`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.ppk`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`,
+    `id_dsa*`, `*.asc`, `*.p8`, `*.jks`, `.pgpass`, `.htpasswd`, `.git-credentials`, `.netrc`, `.npmrc`, `.pypirc`,
+    `kubeconfig`, `*.kubeconfig`, `.claude.json`
+  - path tails: `.aws/credentials`, `.docker/config.json`, `.kube/config`, `.claude/settings.json`
+  - folders anywhere in a path: `.assistant`, `.ssh`, `.gnupg`, `.azure`, `.config/gh`, browser profile folders (Chrome, Edge,
+    Brave, Vivaldi, Opera, Firefox), and password-manager data folders (KeePass, KeePassXC, Bitwarden, 1Password, LastPass,
+    Dashlane, Enpass, NordPass, Keeper)
+  - content: PEM private-key headers (RSA, OPENSSH, PKCS#8, encrypted, EC, DSA, PGP)
+- Notes search (Ask notes) filters these names at query time. The notes index file still holds the text of such notes (R7-N5,
+  open).
+- R7-F1 fixed 2026-11-07 (M3a-11): `.assistant` and `.claude/settings.json` and `.claude.json` were added to the deny-list, and
+  the home folder is excluded from the index (`manager._own_data_rules`), so a root that contains the home folder does not
+  expose the token or the ICS addresses.
+
+### 11.9 Differences from the PRD and the plan (recorded, not fixed)
+
+1. AC-FI-1: hidden and system files are **indexed** in this build. The crawler sets a flag on them but no rule excludes them,
+   and there is no toggle. PRD says they are excluded by default.
+2. AC-FI-4: a full scan is requested at **every** start (`IndexManager.start`), not only when the last scan is older than a
+   threshold.
+3. AC-FI-4: `pause_on_battery` defers only the daily scan (retried every 15 minutes). Start, manual and overflow scans are not paused.
+4. AC-FI-6: no placeholder marker in the HTTP route or the popup (11.7).
+5. AC-FI-15: no custom date range in the popup or HTTP (only the MCP lower bound).
+6. Plan M3a-6: "Enter opens" a note. The popup's action callback is not wired in `app.py` (`on_action` is `None`), so Enter, Ctrl+Enter,
+   Ctrl+M and the folder key do nothing in M3a. Wiring is M3b-5.
+7. Full page and F11 are not wired in M3a (M3b). `on_fullpage` is `None`.
+8. `hotkey_skip_fullscreen` (AC-SH-8) is read by `app.py` and written by the settings page but has no `DEFAULTS` entry or validation
+   (R7-N11).
+9. Known extensions are a constant, not a setting (AC-FI-9).
+10. Review 7 notes carried open (per the brief): R7-N1 (index file element types not checked on load), R7-N2 (check-then-open
+    window in `read_text_preview`), R7-N5 (notes index keeps denied-name passages), R7-N7 and R7-N8 (validation echoes, asyncio
+    log noise), R7-N10 (`\\?\` paths refused as UNC). R7-N3, R7-N4, R7-N6 and R7-N9 are carried by the brief, but the code now
+    contains what those notes asked for (deny-list DIR_PATTERNS and NAME_PATTERNS, `OSError` catch in `search_files`, route caps,
+    the reserved-combo list in `hotkey.py`). Security to confirm which are closed.

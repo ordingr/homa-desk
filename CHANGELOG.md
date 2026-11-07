@@ -93,3 +93,46 @@
   `50dfdaf`, `886df89`, `619c862` and `02726c4`. The local reflog (`.git/logs/HEAD`) lists those four commits in that order
   (messages: M2-0; M2-1 to M2-3; M2-4 wiring and the M2 security review; M2 tests), and `.git/HEAD` points to `refs/heads/main`. The M2 entry above says "not confirmed in this
   record"; this bullet is the confirmation, dated 2026-11-06.
+
+## 2026-11-07
+- M3a (Files search, Ask notes, MCP file tools): built on the working tree 2026-11-07, uncommitted when this entry was written.
+  No pull request number is available to doc-keeper. Commit: **[placeholder: git-keeper to fill in]**. Merge: pending git-keeper.
+  Why: plan section 7.3, so Files mode and Ask notes run in the popup and Claude can search and read indexed files through MCP,
+  without a second app.
+  - Pieces: index store, excludes and deny-list (M3a-1: `assistant/index/{store,excludes}.py`, `assistant/security/{denylist,pathcheck}.py`);
+    crawler, watcher and manager (M3a-2: `assistant/index/{crawler,watcher,manager}.py`); query grammar, ranking and executor
+    (M3a-3: `assistant/index/{query,rank,search}.py`, grammar in `docs/search-grammar.md`); hotkey thread, search popup, modes and
+    saved searches (M3a-4: `assistant/overlay/{hotkey,search_ui}.py`, `assistant/search/{modes,saved}.py`); `GET /v1/search`, `GET /v1/roots`,
+    `/v1/saved` and the four read-only MCP file tools (M3a-5: `assistant/server/{routes_search,mcp}.py`); Ask notes BM25 over
+    `.md` (M3a-6: `assistant/search/notes_bm25.py`); wiring, Roots & excludes and Search settings pages, `--doctor` lines (M3a-7:
+    `assistant/app.py`, `assistant/overlay/settings_pages_search.py`, `assistant/doctor.py`).
+  - Dispatched by tech-lead. Drafted by dev (M3a-1 to M3a-7). Tests by qa (M3a-8). Security review by security (M3a-9, Review 7,
+    `docs/security/2026-11-07-m3a-review.md`: PASS, zero BLOCK; two FIX-BEFORE-M3B, R7-F1 and R7-F2; twelve NOTEs). Fixes for
+    R7-F1 and R7-F2 by M3a-11, agent not named in the brief, **fixed 2026-11-07**. Docs by doc-keeper (M3a-10: `README.md`,
+    `CHANGELOG.md`, `docs/api.md` section 11, `docs/search-grammar.md`).
+  - What changed for users: a `hotkey` (default `ctrl+alt+space`) opens the search box beside the icon; Files mode matches names
+    and paths under user-configured roots, with the grammar in `docs/search-grammar.md`; Ask notes searches `.md` under a
+    notes folder and sends nothing; Claude can call `search_files`, `get_file_info`, `read_text_preview` and `list_indexed_roots`,
+    all read-only. Nothing is indexed until a root is added. The home folder, the secrets deny-list and cloud placeholders are
+    never read.
+  - Verified numbers, as reported in the tech-lead's M3a brief (not in-repo artifacts): real roots about 395,000 entries; cold
+    crawl 36 s and warm crawl 22 s, both under load; index load 0.04 s; hotkey press to box 36 ms; selective queries p95 29 ms;
+    overall p95 144 ms before the prefilter. A prefilter is being added (M3a-12, in progress), so the overall p95 is to be updated.
+    Measured in repo: Review 7 recorded full-scan queries at 2.5 to 7 s on a synthetic 2,000,000-entry index before the R7-F2
+    fix (`docs/security/2026-11-07-m3a-review.md`).
+  - Not yet observed: the quiet-machine re-measure (the numbers above were taken under load); the work-laptop probes (user-run,
+    not run by doc-keeper); the popup on a live desktop with the hotkey registered, and the qa driver run of the popup (qa M3a-8
+    result **[placeholder: not in brief]**); a re-check of the R7-F1 and R7-F2 fixes by security (not yet in `docs/security/`).
+  - Known gaps, recorded not fixed: hidden and system files are indexed (PRD AC-FI-1 says excluded); a full scan runs at every
+    start (AC-FI-4); result actions (Open, Explorer, MD Vault, folder) and the Full page button do nothing yet (M3b); the popup
+    shows no placeholder marker (AC-FI-6); no custom date range in the popup (AC-FI-15); saved-search sort is stored but not
+    applied (AC-FI-16). The MCP file tools return file text to Claude, which sends it to Anthropic as part of the conversation.
+    This is the one exception to "nothing leaves your PC" in this build, and the PRD's AC-MC-3 and AC-MC-4 asked for it.
+  - Review 7 notes carried open, per the brief: R7-N1, R7-N2, R7-N3, R7-N4, R7-N5, R7-N6, R7-N7, R7-N8, R7-N9, R7-N10. The code
+    now contains what R7-N3 (deny-list entries), R7-N4 (`OSError` catch), R7-N6 (route caps) and R7-N9 (reserved combos) asked
+    for. Security to confirm which are closed. R7-N11 and R7-N12 are recorded as read. Also carried: R2-10 (`ws_max_size`, M3b),
+    R5-N7 (second half, per-source deadline), the B1 tail (work-laptop probe), R6-4.
+  - Docs: `README.md` gains Files search, Ask notes, Roots, excludes and protected files, and Claude and your files, plus M3a
+    security facts and troubleshooting, with dated correction notes where M1 and M2 text is now wrong. `docs/api.md` section 11
+    gives the search, roots, saved-search and health routes, the MCP file tools with every refusal text, and the differences from
+    the PRD. `docs/search-grammar.md` is new.

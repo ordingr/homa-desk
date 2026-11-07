@@ -14,6 +14,8 @@ executables. Nothing leaves your PC.
 
 > **Correction, 2026-11-06:** M2 shipped on 2026-11-06 and M3 is next. The status sentence above is the M1 wording, kept as written. See [Status](#status).
 
+> **Correction, 2026-11-07 (M3a):** M3a shipped 2026-11-07: Files search in the popup, Ask notes, and the read-only file tools for Claude over MCP. M3b (the full page and previews) is next. See [Status](#status).
+
 ## Contents
 
 - [What it is](#what-it-is)
@@ -26,6 +28,10 @@ executables. Nothing leaves your PC.
 - [Meetings](#meetings)
 - [MCP (coming in M2)](#mcp-coming-in-m2)
 - [Connect Claude over MCP](#connect-claude-over-mcp)
+- [Search files](#search-files)
+- [Ask notes](#ask-notes)
+- [Roots, excludes and protected files](#roots-excludes-and-protected-files)
+- [Claude and your files](#claude-and-your-files)
 - [Settings](#settings)
 - [Settings and files](#settings-and-files)
 - [Troubleshooting](#troubleshooting)
@@ -48,6 +54,8 @@ Not in this version yet: search (M3), meetings (M2), MCP tools for Claude (M2), 
 about a file (M4). The menu entries for Search and Settings are placeholders for now.
 
 > **Correction, 2026-11-06 (M2):** meetings and MCP tools are in this version (see [Meetings](#meetings) and [Connect Claude over MCP](#connect-claude-over-mcp)). The Settings menu entry opens a window from M2. Search (M3) is still a placeholder, and previews, plugins and Ask Claude are still to come.
+
+> **Correction, 2026-11-07 (M3a):** Files search and Ask notes are in this version (see [Search files](#search-files) and [Ask notes](#ask-notes)). Previews, plugins and Ask Claude are still to come.
 
 ## Install (Windows, no admin)
 
@@ -123,6 +131,8 @@ Right-click menu, in this order: **Search** (placeholder for now), **Remind me�
 **Settings** (placeholder for now), **Quit**.
 
 > **Correction, 2026-11-06 (M2):** the **Settings** entry opens the Settings window from M2 (see [Settings](#settings)). **Search** is still a placeholder.
+
+> **Correction, 2026-11-07 (M3a):** **Search** opens the search box from M3a (see [Search files](#search-files)). The sentence above is kept as written.
 
 ### Card kinds
 
@@ -332,6 +342,185 @@ The tools cannot open, delete or run anything, and they do not list cards or ret
 `~/.assistant/logs/mcp.log` as a shape only: the tool name, the argument names with their lengths or types, and the result
 size. Argument values are never written.
 
+## Search files
+
+Press **Ctrl+Alt+Space** (the default hotkey) or choose **Search** from the icon's menu. A search box slides out beside the
+icon. Type a query and press **Enter**; the box grows into a result list. Search runs on Enter, not on every keystroke.
+The hotkey and the icon both toggle the box, so pressing either again closes it.
+
+**The box.** At the left is the mode badge: `Files · local` or `Ask notes · local`. **Tab** switches between the two. A
+leading `?` runs one query in Ask notes. Below the text, the results header shows the count, `index from <date time>`,
+the elapsed time in milliseconds, and the interpretation of your query. Then come the chips and the date filter:
+
+- Chips: **Docs**, **Sheets**, **PDF**, **Images**, **Code**, **Folders**. Click to toggle. Several chips match any of
+  their types.
+- **Modified:** Any time, Today, 7 days, 30 days. Click to cycle, or press **Ctrl+D** with results showing.
+- **★ Save** saves the current query as a saved search, named after the query.
+
+Each result row shows a coloured extension tag (`?` for folders), the name with the matched letters highlighted, the
+folder, and the modified date. The row you select shows a details line with the full path, the size in bytes and the
+modified time.
+
+The buttons under the results are **Open (Enter)**, **MD Vault (Ctrl+M)**, **Explorer (Ctrl+Enter)**, **Fastsearch folder
+(Ctrl+F)** and **Full page (F11)**. In M3a only the popup itself is wired: **Open, MD Vault, Explorer, the folder key and Full
+page do nothing yet**. They are connected in M3b. Pressing Enter on an Ask notes result also does nothing yet, for the same
+reason.
+
+**The grammar.** Words are ANDed. The first word must appear in the file name, and later words may appear anywhere in the
+full path. A word that is a known extension (`md`, `pdf`, `py`, `docx` and so on) filters by extension. Five examples,
+with the interpretation the box shows:
+
+| You type | It finds | Interpretation shown |
+|---|---|---|
+| `design md` | `.md` files with "design" in the name | `name contains "design" · ext: md` |
+| `design doc` | files with "design" in the name and "doc" in the path, such as a `docs` folder | `name contains "design" · path contains "doc"` |
+| `config -e yml` | `.yml` files with "config" in the name | `name contains "config" · ext: yml` |
+| `report -p Documents` | files with "report" in the name and "Documents" in the path | `name contains "report" · path contains "Documents"` |
+| `design` | files with "design" in the name | `name contains "design"` |
+
+Other forms: `!draft` leaves out anything with "draft" in its path. `"quoted phrase"` matches the exact words. `ext:md,py`
+and `path:docs` are the long forms of `-e` and `-p`. `*` and `?` are wildcards, but they are not anchored, so `rep*` is the
+same as `rep`. `doc` is deliberately not an extension word: `design doc` looks for "doc" in the path, so use `design -e doc`
+for Word files. The full grammar, the caps and every interpretation string are in
+[docs/search-grammar.md](docs/search-grammar.md).
+
+**Chips and date filter** combine with the query: a chip or date limits the results further. The popup has no sort control in
+M3a; results are ranked exact name, then name start, then word start, then inside the name, then path only, with shorter
+names first among equals.
+
+**Saved searches** are stored in `~/.assistant/saved_searches.json`, per machine. When the box is open and empty they are
+listed; click one or press Enter on the highlighted one to run it. Press **Delete** on a highlighted saved search to remove
+it. Saving the same name replaces the old one. There is a limit of 200. Saved searches keep the query, the chips and the
+date filter. They also keep a sort value, but the popup does not apply it yet.
+
+**Esc** steps back: from results to the empty box (your text stays), then from the box to closed. The full-page step
+arrives in M3b.
+
+**Where the box appears.** Settings, Search, "Where the search box appears": beside the icon (the default), on the monitor
+with the mouse, on the monitor with the focused window, on the primary monitor, or where it was last. Drag the box to
+move it; "where it was last" remembers the place you dropped it.
+
+**The hotkey.** Settings, Search, Hotkey. The default is `ctrl+alt+space`. A hotkey needs at least one of Ctrl, Alt, Shift or
+Win, plus a key, for example `ctrl+alt+f10` or `win+shift+s`. Leave the field empty to turn the hotkey off. Changes apply at
+once. The status line after the field says what happened:
+
+- `registered`: the hotkey works.
+- `already registered by another app`: another program holds that combination. Choose another one. The icon still opens search.
+- `unsupported combo`: the code refuses it. Refused combinations are a bare key, a Win-only combination such as `win+s`,
+  Alt+F4, Alt+Tab, Win+L, Ctrl+Alt+Delete and Ctrl+Esc.
+- `disabled`: the field is empty.
+
+The hotkey is a system-wide registration (`RegisterHotKey`). It is not a keyboard hook and does not see what you type. The
+option "Ignore the hotkey while a full-screen app is in front" is off by default. When it is on, the hotkey does nothing while
+a full-screen window is in front. The icon still works.
+
+**What is local.** The index, the search, the saved searches, the popup and Ask notes never leave the PC. The only network
+traffic in these features is reading a network folder that you added as a root. The file-reading tools for Claude are
+described in [Claude and your files](#claude-and-your-files).
+
+## Ask notes
+
+Ask notes searches the `.md` files in a notes folder you choose, and shows the best-matching passages with the matched words
+highlighted. Press **Tab** in the box to switch to it, or start the query with `?`.
+
+- **Set the folder** in Settings, Search, **Notes folder** (use **Browse…** or type a full path such as
+  `C:\Users\<user>\Notes`). An environment variable `ASSISTANT_NOTES_DIR`, if set, overrides the setting. With no folder set,
+  the box says **Set your notes folder in Settings**. No default folder is assumed.
+- **First build.** The box shows `building index…` while the notes are read. The index is stored in
+  `~/.assistant/index/notes.json.gz`. The folder is checked again every 60 seconds, so a changed note appears within about a
+  minute.
+- **What is read.** Only `.md` files, in the folder and its sub-folders. Folders starting with a dot, `node_modules`,
+  `$RECYCLE.BIN`, `System Volume Information`, and links and junctions are skipped. Files over 2 MB are skipped.
+- **Cloud placeholders** (a note that a sync service has not downloaded) are never opened. They are not downloaded either.
+  Settings, Search says how many placeholder notes were skipped.
+- **Results.** Up to three passages from each note, ranked by a local BM25 score, with headings, bold text, lists, code and
+  tables rendered. Each result shows the file name. The footer reads **search over your notes; nothing left this PC**.
+- **Protected names.** Notes whose names match the secrets list are not returned (see
+  [Roots, excludes and protected files](#roots-excludes-and-protected-files)). Their text is still stored in the notes index
+  file in your Assistant folder. That file is user-only, but the note text is in it. This is an open item (R7-N5).
+
+## Roots, excludes and protected files
+
+Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists what is indexed.
+
+- **Add folder…** adds a folder. It must exist, and it cannot be added twice. Up to 20 folders. **Remove** takes one out.
+  **Rescan now** starts a scan at once. Changes apply without a restart.
+- **A folder on a network share** (a UNC path, or a mapped network drive) is read over the network. If it does not answer
+  within 60 seconds (`index.root_timeout_s`), it is skipped and its state reads `timeout`. The rest of the app keeps working.
+- **Persisted index.** The index is kept in `~/.assistant/index/files.idx`. After a restart, search works at once from the
+  stored index while a background scan runs at low priority. Scans run at start, once a day (`index.rescan_hours`, default
+  24), when you press **Rescan now**, and after a burst of changes. The daily scan waits while the PC is on battery
+  (`index.pause_on_battery`, default on) and retries every 15 minutes. The start scan does not wait for battery.
+- **Freshness.** The results header shows `index from <date time>`. That is the end time of the last complete scan. Files
+  created, renamed or deleted under a root while the app runs are picked up by a file watcher between scans.
+- **Excludes.** One rule per line, in the box under the root list. A rule with no `/` matches a name anywhere. A rule with a
+  `/` matches the path below the root. A trailing `/` means folders only. `*` matches any characters, including `/`. A line
+  that starts with `!` is ignored, because re-including is not supported. A drive-letter path such as `C:\Some\Folder\`
+  excludes that folder and everything under it. Each rule shows how many entries it excluded in the last scan. The box holds
+  up to 200 rules of up to 512 characters each.
+- **Default excludes.** The Windows folder; the Recycle Bin; `System Volume Information`; the Windows search index data;
+  `pagefile.sys`, `hiberfil.sys`, `swapfile.sys`; `*.vhdx` disk images; Temp, WindowsApps, Packages, and the Edge and Chrome
+  caches under `AppData\Local`; Docker data; caches under `AppData` (`Cache`, `Code Cache`, `GPUCache`, `Service Worker`,
+  `OfficeFileCache`, and npm and NuGet caches); and, inside any root, `node_modules`, `.git`, `.venv`, `venv`, `__pycache__`,
+  `target`, `bin`, `obj`, `.gradle`, `.m2`, `.nuget\packages`, `.cache`, `.vs`, `dist`, `build`, `.next` and `.turbo`.
+  Note that `bin`, `obj`, `build` and `dist` are excluded wherever they appear, including in your own project folders.
+- **Hidden and system files are indexed** in this build. The PRD asks for them to be excluded by default with a toggle, and
+  that is not built yet. Add `*` rules or folder rules if you want to leave some out.
+- **Your Assistant folder is never indexed.** The folder `~/.assistant` (or the folder named by `ASSISTANT_HOME`) and any
+  `.assistant` folder are left out, even when a root contains your whole user profile. Claude cannot read them either.
+- **Protected files.** Files whose names or folders match the secrets list are flagged when the index is built. They are
+  never previewed, never returned to Claude, and never sent to Ask Claude. The list:
+  - names: `.env*`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.ppk`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`,
+    `*.asc`, `*.p8`, `*.jks`, `.pgpass`, `.htpasswd`, `.git-credentials`, `.netrc`, `.npmrc`, `.pypirc`, `kubeconfig`,
+    `*.kubeconfig`, `.claude.json`
+  - path endings: `.aws\credentials`, `.docker\config.json`, `.kube\config`, `.claude\settings.json`
+  - folders: `.assistant`, `.ssh`, `.gnupg`, `.azure`, `.config\gh`, browser profile folders for Chrome, Edge, Brave, Vivaldi,
+    Opera and Firefox, and password-manager data folders for KeePass, KeePassXC, Bitwarden, 1Password, LastPass, Dashlane,
+    Enpass, NordPass and Keeper
+  - content: a file that contains a PEM private-key header is refused when Claude asks to read it, even under a harmless name.
+- **Show protected files by name.** Settings, Search, "Show protected files by name in local search". Off by default. When
+  on, the popup and the search route list the names and paths of protected files, so you can find them. Their content is still
+  never shown, and Claude's tools never show them. The settings page says this too.
+
+## Claude and your files
+
+Claude can find and read your indexed files through the `assistant` MCP server, with four read-only tools:
+
+| Tool | What it does |
+|---|---|
+| `search_files` | Searches the index with the same grammar as the popup. Returns up to 500 rows per call (default 50): path, name, size, modified time, folder flag and cloud-placeholder flag. |
+| `get_file_info` | Metadata for up to 20 paths. Never content. |
+| `read_text_preview` | The start of a text file, at most 64 KB per call (16 KB by default), optionally cut to a number of lines. |
+| `list_indexed_roots` | The folders that are indexed, with each folder's state and entry count, and when the index was built. |
+
+Claude **can**: search the indexed roots by name, path, extension, chip and date; read the text of an ordinary text file that
+is inside a root, not excluded, not protected and not a cloud placeholder that has not been downloaded.
+
+Claude **cannot**: open, reveal, rename, move, delete or run anything; see files outside the roots; read files in the
+Assistant folder; see protected files or their names in search; read binary files (Office documents, PDFs, images, archives,
+executables); read a cloud placeholder that is not downloaded; or read a file whose first megabyte contains a private key.
+
+**Text returned to Claude is wrapped.** Each `read_text_preview` result is placed between a header and a footer:
+
+```
+<<<UNTRUSTED FILE CONTENT path=<file path> bytes=<n>[ truncated=yes]>>>
+...the file text...
+<<<END UNTRUSTED FILE CONTENT>>>
+```
+
+The tool description tells Claude to treat that text as data and not to follow instructions found in it. The wrapper marks
+the boundary. It does not filter the text, so a file can still contain text that tries to steer Claude. Read untrusted files
+with that in mind.
+
+**What leaves the PC.** Assistant itself sends nothing. But when Claude calls `read_text_preview`, the text it reads becomes
+part of the Claude conversation, and that conversation is sent to Anthropic's service as Claude Code or Claude Desktop
+normally does. So file text can leave your PC through a Claude session, when Claude is asked to read it. This is the one
+exception to "nothing leaves your PC" in this version. The PRD asked for read-only file tools (AC-MC-3 and AC-MC-4), so the
+exception is intended. Do not point Claude at folders you would not want it to read.
+
+**What is logged.** Each MCP call is logged to `~/.assistant/logs/mcp.log` as a shape only: the tool name, the argument
+names with their lengths, and the result size. Paths, queries and file text are never written.
+
 ## Settings
 
 Right-click the icon and choose **Settings**. The window has six pages: **General**, **Cards**, **Calendars**,
@@ -397,6 +586,17 @@ Notes on the table:
 - Calendar cards come from the source `calendar`, which is not in the mute list above, so they cannot be muted by source.
 - Use `https://` addresses where your calendar offers them. The code also accepts `http://`.
 
+> **Correction, 2026-11-07 (M3a):** the Settings window has eight pages from M3a: General, Cards, Calendars, Claude Code, MCP,
+> About, **Roots & excludes** and **Search**. The Search page holds the hotkey field (enabled, see [Search files](#search-files)),
+> the full-screen option, the search box placement, the notes folder and "Show protected files by name". The General page
+> still shows the hotkey as disabled, which is the M1 wording kept above. The keys below are added to `settings.json` from M3a:
+> `hotkey` (default `ctrl+alt+space`; text, at most 64 characters; empty turns it off), `search_placement` (default `icon`;
+> `icon`, `mouse`, `focused`, `primary` or `last`), `hotkey_skip_fullscreen` (default off; read by the app, not listed in the
+> defaults, see the open items in [docs/api.md](docs/api.md) section 11.9), `index` (`roots`, up to 20 absolute folders;
+> `excludes`, up to 200 rules; `show_protected_by_name`, default `false`; `rescan_hours`, default 24, 0.01 to 720;
+> `root_timeout_s`, default 60, 0.1 to 3600; `pause_on_battery`, default `true`) and `notes` (`dir`, empty or an absolute folder
+> path). A bad `index` or `notes` value falls back for that key only, with a warning in the log.
+
 ## Settings and files
 
 Everything lives in `~/.assistant` (set the `ASSISTANT_HOME` environment variable to use another folder). Copying that folder
@@ -420,6 +620,8 @@ which is not in the folder, so run `python -m assistant hooks install` on the ot
 Settings in the menu (**Settings**) and search (**Search**) are placeholders in this version.
 
 > **Correction, 2026-11-06 (M2):** the `settings.json` row above lists only `port` and `cards_every_monitor`. The full key list, with defaults and ranges, is in [Settings](#settings). The Settings window exists from M2. Search is still a placeholder.
+
+> **Correction, 2026-11-07 (M3a):** **Search** is live from M3a. The index and the notes folder are stored under the same folder: `index/files.idx` (the file index), `index/notes.json.gz` (the Ask notes index) and `saved_searches.json` (saved searches). The `settings.json` keys added in M3a are listed under [Settings](#settings).
 
 ## Troubleshooting
 
@@ -491,6 +693,24 @@ the Claude Code entry still has the old token. See [Connect Claude over MCP](#co
 > not end. The M2-9 tests check that `POST` `initialize` still returns 200 and that a real MCP client still lists the tools
 > (`tests/test_m2_9.py`, `test_n2_*`). The `401` note above is unchanged.
 
+**Hotkey: "already registered by another app".** Another program holds the combination. Settings, Search, choose another
+combination in the Hotkey field. The icon still opens the search box. To find the holder, run `python -m assistant --doctor`:
+its `hotkey` line gives the status. If it says the running Assistant may be the holder, the combination is already in use by
+the copy that is running. The log has a warning line that names the combination.
+
+**Index not building, or search returns nothing.** Check that at least one folder is listed under Settings, Roots & excludes.
+With no roots, nothing is indexed and the header says so. Then run `python -m assistant --doctor`: `index size and age` says
+`no index file yet` until the first scan completes, and `index roots` lists the folders. In Settings, Roots & excludes, a
+folder that reads `missing` does not exist or is not reachable, and one that reads `timeout` is a network folder that did not
+answer within 60 seconds. A search that finds nothing in a folder can also mean the folder is excluded: each rule shows its
+count, so a rule with a large count is the one to look at. Hidden and system files are indexed in this build.
+
+**Search is slow on a very large root.** A single plain term examines at most 100,000 candidates. The scan also stops after
+0.4 seconds. Either way the result carries `truncated`, and the popup's header count is then partial. Narrow the query: add a
+second word for the path, an extension (`md`, or `-e md`), a chip, or a modified filter. The empty query shows only the newest
+10,000 entries. If you have a very large folder under a root, consider leaving it out with an exclude rule, for example
+`C:\Users\<user>\Archive\` as a drive-letter rule.
+
 ## Uninstall
 
 ```
@@ -551,6 +771,20 @@ What M2 adds:
 > **Correction, 2026-11-06 (M2-9):** the Features list above has three changes. Classic Outlook is off by default (see
 > [Meetings](#meetings)). A join link is used only if it passes the allow-list (see Meetings, and item R5-F1 under
 > [Security & privacy](#security--privacy)). Calendar addresses are capped at 20 (see [Settings](#settings)).
+
+What M3a adds:
+
+- **Files search:** a hotkey (default Ctrl+Alt+Space) and the icon open a search box beside the icon. Names and paths under your
+  roots, with the grammar in [Search files](#search-files), chips, a modified-date filter, saved searches and a visible
+  interpretation. Results rank by how well the name matches.
+- **Index:** persisted under `~/.assistant/index/`, rescanned at start and daily, with a file watcher between scans. Excludes
+  with per-rule counts, and network roots that time out without blocking the app.
+- **Ask notes:** BM25 search over `.md` files in a notes folder, with rendered passages and a local footer.
+- **Claude over MCP:** `search_files`, `get_file_info`, `read_text_preview` and `list_indexed_roots`, all read-only, with wrapped
+  text and refusals that say why (see [Claude and your files](#claude-and-your-files)).
+- **Settings:** Roots & excludes and Search pages.
+- **`--doctor`:** hotkey status, index size and age, index roots, and the notes folder state.
+- **Health:** `/v1/health` `index` is an object with roots, scan state and counters (see [docs/api.md](docs/api.md) section 11.4).
 
 ## Security & privacy
 
@@ -674,6 +908,40 @@ Pillow is present in the development environment but is not a dependency of this
 
 > **Correction, 2026-11-06 (M2):** `mcp` is imported from M2 (the MCP server), and `tzdata` is used for calendar time zones. The count of 29 packages above is the M1 count, and `requirements.txt` was not recounted for M2.
 
+### M3a additions (2026-11-07)
+
+Source: the M3a security review, `docs/security/2026-11-07-m3a-review.md` (Review 7: PASS, zero BLOCK, R7-F1 and R7-F2 as
+FIX-BEFORE-M3B, twelve NOTEs), unless a point says otherwise.
+
+> **Correction, 2026-11-07 (M3a):** the bullet "Secrets deny-list (PRD SEC-3) does not apply yet" above is superseded. The
+> deny-list applies to search results, the file tools for Claude and Ask notes, from M3a. Previews (M3b) and Ask Claude (M4)
+> are not built.
+>
+> **Correction, 2026-11-07 (M3a):** "Nothing leaves the PC" and the list of outbound paths above stay true for Assistant's own
+> code. From M3a, file text that Claude reads through `read_text_preview` becomes part of a Claude conversation and so leaves
+> the PC through Claude. See [Claude and your files](#claude-and-your-files).
+
+- **Local search.** The index, the saved searches, the Ask notes index and the popup live in your Assistant folder. The
+  index records names, paths, sizes and times. The crawler opens no file (observed in Review 7 with an open-audit hook).
+  The Ask notes index does hold the text of notes, in a user-only file.
+- **Deny-list.** Protected names and folders (listed under [Roots, excludes and protected files](#roots-excludes-and-protected-files))
+  are refused by the file tools and never returned by search, except by name when "Show protected files by name" is on.
+  The file tools also refuse a path inside the Assistant folder.
+- **Fixed 2026-11-07 (M3a-11):** R7-F1, the Assistant's own folder was indexed and readable through the file tools (a root
+  that contained the profile exposed the bearer token and the calendar addresses). The folder is now excluded from the index,
+  the tools refuse it, and `.assistant`, `.claude/settings.json` and `.claude.json` are in the deny-list.
+  R7-F2, full-scan queries took 2.5 to 7 seconds on a 2,000,000-entry index and the offset cap was bypassed. Limits now apply:
+  `limit` clamps to 500, `offset` to 100,000, a single plain term examines at most 100,000 candidates, and the scan stops after
+  0.4 seconds with `truncated` set. Security has not re-checked these fixes in `docs/security/` yet.
+- **Open, carried from Review 7:** the notes index keeps passages of protected-name notes, filtered only at query time (R7-N5).
+  The index loader does not check element types (R7-N1). The file tools have a check-then-open window that only a same-user
+  process could use (R7-N2). Some validation messages echo the value sent (R7-N7). Security will confirm R7-N3, N4, N6 and
+  N9, which the code appears to address.
+- **Hotkey.** `RegisterHotKey` on its own thread. No keyboard hook. The reserved list refuses Alt+F4, Alt+Tab, Win+L,
+  Ctrl+Alt+Delete and Ctrl+Esc, bare keys, and Win-only combinations.
+- **Not yet observed for M3a:** the popup on a live desktop with the hotkey registered; the quiet-machine re-measure of the
+  numbers (the numbers were taken under load); the work-laptop probes (run by you, not yet pasted).
+
 ## Status
 
 - **M1 shipped 2026-11-06:** the overlay, the card model and store, Claude Code hooks, the HTTP card and reminder API,
@@ -694,6 +962,18 @@ Pillow is present in the development environment but is not a dependency of this
   Five fixes are scheduled before M3 (R5-F1 to R5-F5, listed under [Security & privacy](#security--privacy)).
   > **Correction, 2026-11-06 (M2-9):** those five fixes shipped the same day; see "M2-9 fixes" under Security & privacy.
 - **M3 next:** files search (the index, query grammar and popup), Ask notes, and the file tools for MCP.
+  > **Correction, 2026-11-07 (M3a):** this M3 bullet is the wording from before M3a. M3a shipped (next bullet). M3b is next.
+- **M3a shipped 2026-11-07:** Files search in the popup (hotkey, box, grammar, chips, date filter, saved searches, placements), the
+  file index with excludes and persistence, Ask notes over `.md` files, `GET /v1/search`, `GET /v1/roots`, the `/v1/saved` routes,
+  the four read-only MCP file tools, the Roots & excludes and Search settings pages, and the `--doctor` lines. Plan:
+  `docs/plans/2026-11-06-assistant-v1-plan.md` (sections 7.3 and 17.4). Requirements: `docs/prds/2026-11-06-assistant-v1.md`
+  (sections 6.3, 6.4, 6.5 and 6.11). Security review: `docs/security/2026-11-07-m3a-review.md` (Review 7, PASS, zero BLOCK;
+  R7-F1 and R7-F2 fixed 2026-11-07 by M3a-11). Commit: **[placeholder: git-keeper]**.
+  Not yet observed: the popup on a live desktop with the hotkey registered; the quiet-machine re-measure; the work-laptop probes.
+  Not built in M3a: the full page and previews (M3b); result actions (M3b); sort buttons, custom date range and placeholder markers
+  in the popup (PRD gaps listed in [docs/api.md](docs/api.md) section 11.9).
+- **M3b next:** the full page (Edge in app mode), previews of Markdown, PDF, Office and images, and result actions (open, reveal,
+  Recycle Bin only). Plan section 7.4.
 - **Later:** M3 files search and Ask notes, M4 Ask Claude and polish, M5 plugins (PRD section 15).
 
 ## Documentation
@@ -703,6 +983,8 @@ Pillow is present in the development environment but is not a dependency of this
 - [docs/plans/2026-11-06-assistant-v1-plan.md](docs/plans/2026-11-06-assistant-v1-plan.md): the milestone plan.
 - [docs/security/2026-11-06-m1-review.md](docs/security/2026-11-06-m1-review.md): the M1 security review.
 - [docs/security/2026-11-06-m2-review.md](docs/security/2026-11-06-m2-review.md): the M2 security review (Review 5).
+- [docs/security/2026-11-07-m3a-review.md](docs/security/2026-11-07-m3a-review.md): the M3a security review (Review 7).
+- [docs/search-grammar.md](docs/search-grammar.md): the Files search grammar, caps and interpretation strings.
 - [docs/reference/2026-11-06-assistant-popup-readme.md](docs/reference/2026-11-06-assistant-popup-readme.md): the behaviour of the
   reference build this replaces.
 - [CHANGELOG.md](CHANGELOG.md): what changed, and when.
