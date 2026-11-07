@@ -59,7 +59,7 @@ class AuthMiddleware:
         await self.app(scope, receive, send)
 
     async def _reject(self, scope, send, status: int, message: str) -> None:
-        log.warning("rejected %s %s with %d (%s)", scope["type"], scope.get("path", ""), status, message)
+        log.warning("rejected %s %r with %d (%s)", scope["type"], scope.get("path", "")[:200], status, message)
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1008})
             return

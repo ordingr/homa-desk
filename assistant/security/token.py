@@ -1,7 +1,6 @@
 import logging
 import os
 import secrets
-import subprocess
 
 from .. import paths
 
@@ -10,19 +9,16 @@ log = logging.getLogger("assistant.security.token")
 _MIN_LEN = 32
 
 
-def _current_sid() -> str:
-    out = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True,
-                         text=True, check=True, timeout=15).stdout.strip()
-    sid = out.rsplit(",", 1)[-1].strip().strip('"')
-    if not sid.startswith("S-1-"):
-        raise RuntimeError("could not determine the current user SID")
-    return sid
+class TokenSecurityError(RuntimeError):
+    pass
 
 
 def _restrict_to_current_user(path) -> None:
-    sid = _current_sid()
-    subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"*{sid}:(F)"],
-                   capture_output=True, text=True, check=True, timeout=15)
+    try:
+        from . import acl
+        acl.restrict_to_current_user(path)
+    except Exception as exc:
+        raise TokenSecurityError(type(exc).__name__) from None
 
 
 def _write_new(token: str) -> None:
@@ -62,10 +58,18 @@ def read() -> str:
 def ensure() -> str:
     if paths.token_file().exists():
         try:
+            _restrict_to_current_user(paths.token_file())
             return read()
+        except TokenSecurityError as exc:
+            log.error("could not secure the token file (%s); refusing to start", exc)
+            raise SystemExit(1) from None
         except (OSError, ValueError):
             log.warning("token file unreadable or malformed; regenerating")
-    token = regenerate()
+    try:
+        token = regenerate()
+    except TokenSecurityError as exc:
+        log.error("could not secure the token file (%s); refusing to start", exc)
+        raise SystemExit(1) from None
     log.info("token created")
     return token
 
