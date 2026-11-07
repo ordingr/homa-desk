@@ -118,7 +118,7 @@ def test_doctor_output_never_contains_token(running_app, assistant_env, assistan
     assert token not in combined
     assert re.search(r"^token file\s+present$", result.stdout, re.M)
     assert re.search(r"^python\s+3\.\d+\.\d+$", result.stdout, re.M)
-    assert re.search(r"^port\s+\d+ in use$", result.stdout, re.M)
+    assert re.search(r"^port\s+\d+ in use by pid \d+ \(python3?w?\.exe\)$", result.stdout, re.M)
     assert re.search(r"^Outlook COM\s+n/a$", result.stdout, re.M)
 
 

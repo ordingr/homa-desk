@@ -619,3 +619,206 @@ def test_a_foreign_file_still_stops_secure_home(tmp_path, monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="assistant.paths"):
         paths.secure_home()
     assert [r for r in caplog.records if "not restricting" in r.getMessage()]
+
+
+# ----- R4: listener ownership, stale pid file, asyncio reset noise, doctor/bind messages -----------
+
+def _foreign_listener(port: int):
+    """A non-python process (PowerShell TcpListener) holding ``port``; it accepts and discards."""
+    script = (f"$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,{port});$l.Start();"
+              "while($true){if($l.Pending()){$l.AcceptTcpClient().Close()};Start-Sleep -Milliseconds 100}")
+    proc = subprocess.Popen(["powershell", "-NoProfile", "-Command", script], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    deadline = time.monotonic() + 30
+    while netinfo.listener_pid(port) is None:
+        assert time.monotonic() < deadline and proc.poll() is None, "foreign listener did not start"
+        time.sleep(0.2)
+    return proc
+
+
+@pytest.mark.parametrize("command", [("send", "--title", "x"), ("shutdown",)])
+def test_r41_no_pid_file_and_non_python_listener_is_refused(tmp_path, command):
+    port = _free_port()
+    home = _prepare_home(tmp_path, port)
+    assert not (home / "assistant.pid").exists()
+    squatter = _foreign_listener(port)
+    try:
+        result = _cli(home, *command)
+        assert result.returncode == 1
+        assert "No assistant.pid" in result.stderr
+        assert "powershell" in result.stderr.lower()
+        assert f"pid {netinfo.listener_pid(port)}" in result.stderr
+        assert "nothing was sent" in result.stderr
+    finally:
+        squatter.kill()
+        squatter.wait()
+
+
+def test_r41_no_pid_file_and_python_listener_sends(tmp_path):
+    ours = Sink()
+    try:
+        home = _prepare_home(tmp_path, ours.port)
+        assert not (home / "assistant.pid").exists()
+        result = _cli(home, "send", "--title", "x")
+        assert result.returncode == 0, result.stderr
+        assert len(ours.requests) == 1
+    finally:
+        ours.close()
+
+
+def test_r41_no_pid_file_and_nothing_listening_is_not_a_listener_refusal(tmp_path):
+    home = _prepare_home(tmp_path, _free_port())
+    result = _cli(home, "send", "--title", "x")
+    assert result.returncode != 0
+    assert "No assistant.pid" not in result.stderr
+
+
+def test_r41_no_pid_file_with_the_real_app_sends_and_shuts_down(live):
+    (live.home / "assistant.pid").unlink()
+    assert _cli(live.home, "send", "--title", "x").returncode == 0
+    assert _cli(live.home, "shutdown").returncode == 0
+    live.proc.wait(timeout=20)
+
+
+def test_r42_stale_pid_file_with_a_reused_python_pid_is_removed_and_the_app_starts(tmp_path):
+    port = _free_port()
+    home = _prepare_home(tmp_path, port)
+    unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        pid_file = home / "assistant.pid"
+        pid_file.write_text(f"{unrelated.pid}\n{port}\n", encoding="ascii")
+        app = LiveApp(home, port)
+        try:
+            recorded = pid_file.read_text(encoding="ascii").split()
+            assert int(recorded[0]) != unrelated.pid
+            assert netinfo.listener_pid(port) == int(recorded[0])
+            log = (home / "logs" / "app.log").read_text(encoding="utf-8")
+            assert log.count("removing stale pid file") == 1
+            assert str(pid_file) in log
+        finally:
+            app.stop()
+    finally:
+        unrelated.kill()
+        unrelated.wait()
+
+
+def test_r42_pid_file_naming_a_dead_pid_is_removed_too(tmp_path):
+    port = _free_port()
+    home = _prepare_home(tmp_path, port)
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    (home / "assistant.pid").write_text(f"{dead.pid}\n{port}\n", encoding="ascii")
+    app = LiveApp(home, port)
+    try:
+        assert (home / "assistant.pid").read_text(encoding="ascii").split()[0] != str(dead.pid)
+        assert (home / "logs" / "app.log").read_text(encoding="utf-8").count("removing stale pid file") == 1
+    finally:
+        app.stop()
+
+
+def test_r42_refusal_names_the_pid_file_and_leaves_it_alone(live):
+    before = (live.home / "assistant.pid").read_text(encoding="ascii")
+    second = subprocess.run([sys.executable, "-m", "assistant"], cwd=REPO_ROOT, env=_env(live.home),
+                            capture_output=True, text=True, timeout=60)
+    assert second.returncode == 1
+    assert f"pid file {live.home / 'assistant.pid'}" in second.stderr
+    assert (live.home / "assistant.pid").read_text(encoding="ascii") == before
+    assert "removing stale" not in (live.home / "logs" / "app.log").read_text(encoding="utf-8")
+    assert live.get("/v1/health") == 200
+
+
+def _asyncio_record(exc, message, name="asyncio"):
+    return logging.LogRecord(name, logging.ERROR, __file__, 1, message, None, (type(exc), exc, None))
+
+
+def test_r43_filter_drops_only_the_proactor_connection_lost_reset():
+    from assistant.app import _ProactorResetFilter
+    flt = _ProactorResetFilter()
+    lost = "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)"
+    assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), lost)) is False
+    assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), "peer reset", name="assistant.x")) is True
+    assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), "Exception in callback other()")) is True
+    assert flt.filter(_asyncio_record(ValueError("boom"), lost)) is True
+    assert flt.filter(logging.LogRecord("asyncio", logging.ERROR, __file__, 1, lost, None, None)) is True
+
+
+def test_r43_filter_installed_by_setup_logging_stops_a_real_loop_exception_report(tmp_path, monkeypatch):
+    from assistant import app as app_module
+    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path))
+    monkeypatch.setattr(paths, "_fresh_roots", set())
+    paths.ensure_layout()
+    root = logging.getLogger()
+    asyncio_logger = logging.getLogger("asyncio")
+    saved_handlers, saved_filters = list(root.handlers), list(asyncio_logger.filters)
+    try:
+        app_module._setup_logging()
+        loop = asyncio.new_event_loop()
+        try:
+            loop.call_exception_handler({
+                "message": "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)",
+                "exception": ConnectionResetError(10054, "reset")})
+            loop.call_exception_handler({"message": "Exception in callback other()",
+                                         "exception": ConnectionResetError(10054, "reset")})
+        finally:
+            loop.close()
+        for handler in root.handlers:
+            handler.flush()
+        text = (paths.logs_dir() / "app.log").read_text(encoding="utf-8")
+    finally:
+        for handler in root.handlers[:]:
+            if handler not in saved_handlers:
+                root.removeHandler(handler)
+                handler.close()
+        asyncio_logger.filters[:] = saved_filters
+    assert "_call_connection_lost" not in text
+    assert "Exception in callback other()" in text
+
+
+def test_r45_doctor_names_the_pid_and_image_holding_the_port(tmp_path):
+    with socket.socket() as squat:
+        squat.bind(("127.0.0.1", 0))
+        squat.listen(1)
+        port = squat.getsockname()[1]
+        home = _prepare_home(tmp_path, port)
+        result = _cli(home, "--doctor")
+    line = next(l for l in result.stdout.splitlines() if l.startswith("port"))
+    image = os.path.basename(netinfo.process_image(os.getpid()))
+    assert line.split(None, 1)[1] == f"{port} in use by pid {os.getpid()} ({image})"
+
+
+def test_r45_doctor_names_a_non_python_owner(tmp_path):
+    port = _free_port()
+    home = _prepare_home(tmp_path, port)
+    squatter = _foreign_listener(port)
+    try:
+        line = next(l for l in _cli(home, "--doctor").stdout.splitlines() if l.startswith("port"))
+        assert f"{port} in use by pid {netinfo.listener_pid(port)} (powershell.exe)" in line
+    finally:
+        squatter.kill()
+        squatter.wait()
+
+
+def test_r45_doctor_says_free_for_a_free_port(tmp_path):
+    port = _free_port()
+    home = _prepare_home(tmp_path, port)
+    line = next(l for l in _cli(home, "--doctor").stdout.splitlines() if l.startswith("port"))
+    assert line.split(None, 1)[1] == f"{port} free"
+
+
+def test_r45_bind_failure_log_line_says_address_in_use_with_the_errno(tmp_path):
+    with socket.socket() as squat:
+        squat.bind(("127.0.0.1", 0))
+        squat.listen(1)
+        port = squat.getsockname()[1]
+        home = _prepare_home(tmp_path, port)
+        result = _cli(home)
+    assert result.returncode == 1
+    log = (home / "logs" / "app.log").read_text(encoding="utf-8")
+    assert f"server failed to start on 127.0.0.1:{port} (address in use (10048))" in log
+    assert "port in use?" not in log
+
+
+def test_r45_bind_error_text_does_not_claim_address_in_use_when_the_port_is_bindable():
+    text = server_app.ServerThread(None, _free_port())._bind_error()
+    assert "address in use" not in text
+    assert "bindable" in text

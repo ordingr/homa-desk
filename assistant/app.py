@@ -29,6 +29,17 @@ DEBUG_TIMEOUT_S = 3.0
 TICK_SLACK_S = 0.05
 
 
+class _ProactorResetFilter(logging.Filter):
+    """Drops the proactor transport's ConnectionResetError traceback from _call_connection_lost."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        if not isinstance(exc, ConnectionResetError):
+            return True
+        context = getattr(record, "message", None) or record.getMessage()
+        return "_call_connection_lost" not in context
+
+
 def _setup_logging() -> None:
     handler = logging.handlers.RotatingFileHandler(
         paths.logs_dir() / "app.log", maxBytes=2 * 1024 * 1024, backupCount=4, encoding="utf-8")
@@ -39,6 +50,7 @@ def _setup_logging() -> None:
     console = logging.StreamHandler(sys.stderr)
     console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     root.addHandler(console)
+    logging.getLogger("asyncio").addFilter(_ProactorResetFilter())
 
 
 def pid_file():
@@ -115,16 +127,26 @@ class App:
             netinfo.message_box("Assistant", text)
 
     def _another_instance_running(self) -> bool:
+        path = pid_file()
         try:
-            pid = int(pid_file().read_text(encoding="ascii").split()[0])
+            fields = path.read_text(encoding="ascii").split()
+            pid = int(fields[0])
+            port = int(fields[1])
         except (OSError, ValueError, IndexError):
             return False
         if pid == os.getpid():
             return False
         image = netinfo.process_image(pid)
-        if image is None or not os.path.basename(image).lower().startswith("python"):
+        alive = image is not None and os.path.basename(image).lower().startswith("python")
+        if not alive or netinfo.listener_pid(port) != pid:
+            log.warning("removing stale pid file %s (pid %d is not the Assistant listening on port %d)",
+                        path, pid, port)
+            try:
+                path.unlink()
+            except OSError:
+                pass
             return False
-        message = f"Assistant is already running (pid {pid}). This second copy will exit."
+        message = f"Assistant is already running (pid {pid}; pid file {path}). This second copy will exit."
         log.error(message)
         self._notify_user(message)
         return True

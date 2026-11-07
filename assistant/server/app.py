@@ -1,6 +1,8 @@
 import asyncio
+import errno
 import json
 import logging
+import socket
 import threading
 from typing import Callable, Optional
 
@@ -148,9 +150,22 @@ class ServerThread:
         try:
             self._server.run()
         except SystemExit:
-            log.error("server failed to start on %s:%d (port in use?)", BIND_HOST, self.port)
+            log.error("server failed to start on %s:%d (%s)", BIND_HOST, self.port, self._bind_error())
         except Exception:
             log.exception("server crashed")
+
+    def _bind_error(self) -> str:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind((BIND_HOST, self.port))
+        except OSError as exc:
+            code = exc.winerror if getattr(exc, "winerror", None) else exc.errno
+            if code in (10048, errno.EADDRINUSE):
+                return f"address in use ({code})"
+            return f"bind failed: {type(exc).__name__} {code} {exc.strerror}"
+        finally:
+            probe.close()
+        return "startup failed; the port is bindable now, see earlier log lines"
 
     def stop(self) -> None:
         self._server.should_exit = True

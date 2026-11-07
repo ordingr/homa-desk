@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -43,9 +44,18 @@ def _recorded_pid() -> Optional[int]:
 def _check_listener(port: int) -> None:
     recorded = _recorded_pid()
     owner = netinfo.listener_pid(port)
-    if recorded is not None and owner is not None and recorded != owner:
+    if owner is None:
+        return
+    if recorded is not None:
+        if recorded != owner:
+            raise ListenerMismatch(
+                f"Port {port} is held by process {owner}, not the Assistant (pid {recorded}); nothing was sent.")
+        return
+    image = netinfo.process_image(owner)
+    if image is None or not os.path.basename(image).lower() in ("python.exe", "pythonw.exe"):
+        held = os.path.basename(image) if image else "an unidentified process"
         raise ListenerMismatch(
-            f"Port {port} is held by process {owner}, not the Assistant (pid {recorded}); nothing was sent.")
+            f"No assistant.pid, and port {port} is held by {held} (pid {owner}); nothing was sent.")
 
 
 def post(route: str, payload: dict, timeout: float = 5.0):

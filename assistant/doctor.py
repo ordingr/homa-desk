@@ -1,5 +1,6 @@
 import importlib
 import importlib.metadata
+import os
 import re
 import shutil
 import socket
@@ -7,7 +8,7 @@ import subprocess
 import sys
 from typing import List, Tuple
 
-from . import __version__, hooks_installer, paths, settings
+from . import __version__, hooks_installer, netinfo, paths, settings
 from .security import token
 
 _DEPS = ("mcp", "starlette", "uvicorn", "pydantic", "pywin32")
@@ -47,7 +48,11 @@ def _port_state(port: int) -> str:
         sock.bind(("127.0.0.1", port))
         return f"{port} free"
     except OSError:
-        return f"{port} in use"
+        owner = netinfo.listener_pid(port)
+        if owner is None:
+            return f"{port} in use"
+        image = netinfo.process_image(owner)
+        return f"{port} in use by pid {owner}" + (f" ({os.path.basename(image)})" if image else "")
     finally:
         sock.close()
 

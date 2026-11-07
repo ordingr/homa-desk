@@ -1,6 +1,7 @@
+import asyncio
 import logging
 import queue
-from concurrent.futures import Future
+from concurrent.futures import Future, InvalidStateError
 from typing import Any, Callable
 
 log = logging.getLogger("assistant.uibus")
@@ -29,12 +30,16 @@ def submit(fn: Callable[[], Any]) -> Future:
         try:
             result = fn()
         except BaseException as exc:
-            if not future.done():
+            try:
                 future.set_exception(exc)
+            except (InvalidStateError, asyncio.InvalidStateError):
+                pass
             log.warning("ui call failed: %s", type(exc).__name__)
             return
-        if not future.done():
+        try:
             future.set_result(result)
+        except (InvalidStateError, asyncio.InvalidStateError):
+            pass
 
     post(run)
     return future
