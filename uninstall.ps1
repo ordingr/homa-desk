@@ -21,7 +21,15 @@ try {
             $pidFile = Join-Path $homeDir 'assistant.pid'
             if (Test-Path $pidFile) {
                 $recorded = [int](Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-                if ($recorded) { Stop-Process -Id $recorded -ErrorAction SilentlyContinue }
+                if ($recorded) {
+                    $proc = Get-Process -Id $recorded -ErrorAction SilentlyContinue
+                    if ($proc -and $proc.ProcessName -in @('python', 'pythonw')) {
+                        Stop-Process -Id $recorded -ErrorAction SilentlyContinue
+                    }
+                    else {
+                        Write-Host "Process $recorded is not a Python process; left running."
+                    }
+                }
             }
         }
         & $python -m assistant hooks remove
@@ -38,7 +46,7 @@ if (Test-Path $lnkPath) {
 }
 
 if (Test-Path $homeDir) {
-    $answer = Read-Host "Delete $homeDir (settings, index, plugins, logs)? [y/N]"
+    $answer = Read-Host "Delete $homeDir (settings, token, card state, reminders, hooks-backup, logs; index and plugins once they exist)? [y/N]"
     if ($answer -match '^[yY]') {
         Remove-Item -LiteralPath $homeDir -Recurse -Force
         Write-Host "Deleted $homeDir"
@@ -47,3 +55,7 @@ if (Test-Path $homeDir) {
         Write-Host "Kept $homeDir"
     }
 }
+
+Write-Host ''
+Write-Host 'The Python packages Assistant installed are still in place. To remove them, run:'
+Write-Host "    $(if ($python) { $python } else { 'python' }) -m pip uninstall -y -r `"$(Join-Path $repo 'requirements.txt')`""

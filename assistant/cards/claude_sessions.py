@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import OrderedDict
 from typing import Callable, Optional
 
-from .model import MAX_DETAIL, MAX_TITLE, Card
+from .model import MAX_DETAIL, MAX_TITLE, Card, strip_control
 from .store import CardNotFound, CardStore
 
 log = logging.getLogger("assistant.cards.claude_sessions")
@@ -27,10 +28,21 @@ _WAIT_NOTIFICATIONS = {
 _CLEARING_NOTIFICATIONS = frozenset({"elicitation_complete", "elicitation_response", "quota_auto_resume_fired"})
 _SUMMARY_KEYS = ("command", "file_path", "path", "url", "pattern", "query", "description", "prompt")
 _ERROR_KEYS = ("error", "error_type", "error_class")
+_BEARER = re.compile(r"\bbearer\s+\S+", re.IGNORECASE)
+_AUTH_HEADER = re.compile(r"(authorization[\"']?\s*[:=]\s*[\"']?)(?:\w+\s+)?[^\s\"']+", re.IGNORECASE)
+_LONG_TOKEN = re.compile(r"[A-Za-z0-9_-]{40,}")
 
 
 def _text(value, limit: int) -> str:
-    return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+    return " ".join(strip_control(value).split())[:limit] if isinstance(value, str) else ""
+
+
+def _mask(value) -> str:
+    if not isinstance(value, str):
+        return value
+    value = _BEARER.sub("Bearer ***", value)
+    value = _AUTH_HEADER.sub(r"\g<1>***", value)
+    return _LONG_TOKEN.sub("***", value)
 
 
 def _project_label(payload: dict) -> str:
@@ -48,14 +60,14 @@ def _project_label(payload: dict) -> str:
 def _tool_summary(tool_input) -> str:
     if isinstance(tool_input, dict):
         for key in _SUMMARY_KEYS:
-            text = _text(tool_input.get(key), 300)
+            text = _text(_mask(tool_input.get(key)), 300)
             if text:
                 return text
         try:
-            return _text(json.dumps(tool_input, ensure_ascii=False, default=str), 300)
+            return _text(_mask(json.dumps(tool_input, ensure_ascii=False, default=str)), 300)
         except (TypeError, ValueError, RecursionError):
             return ""
-    return _text(tool_input, 300)
+    return _text(_mask(tool_input), 300)
 
 
 def _elapsed(seconds: float) -> str:

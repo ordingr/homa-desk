@@ -92,6 +92,8 @@ def _error_text(body: bytes) -> str:
 
 def run_send(args) -> int:
     payload = {"title": args.title, "kind": args.kind}
+    if getattr(args, "id", None) is not None:
+        payload["id"] = args.id
     if args.detail is not None:
         payload["detail"] = args.detail
     if args.priority is not None:

@@ -26,10 +26,7 @@ class ApiError(Exception):
         self.field = field
 
     def to_dict(self) -> dict:
-        error = {"code": self.code, "message": self.message}
-        if self.field:
-            error["field"] = self.field
-        return {"error": error}
+        return {"error": {"code": self.code, "message": self.message, "field": self.field or None}}
 
 
 class PayloadTooLarge(Exception):
@@ -37,7 +34,7 @@ class PayloadTooLarge(Exception):
 
 
 def payload_too_large_response() -> JSONResponse:
-    return JSONResponse({"error": "payload too large"}, status_code=413, headers={"connection": "close"})
+    return JSONResponse(ApiError(413, "payload_too_large", "payload too large").to_dict(), status_code=413, headers={"connection": "close"})
 
 
 def _finite_float(text: str) -> float:
@@ -160,7 +157,18 @@ async def too_large_handler(request: Request, exc: PayloadTooLarge) -> JSONRespo
     return payload_too_large_response()
 
 
+async def http_404_handler(request: Request, exc) -> JSONResponse:
+    return JSONResponse(ApiError(404, "not_found", "No such route.").to_dict(), status_code=404)
+
+
+async def http_405_handler(request: Request, exc) -> JSONResponse:
+    return JSONResponse(ApiError(405, "method_not_allowed", "That method is not allowed on this route.").to_dict(),
+                        status_code=405, headers=getattr(exc, "headers", None))
+
+
 exception_handlers = {
+    404: http_404_handler,
+    405: http_405_handler,
     ApiError: api_error_handler,
     CardValidationError: validation_error_handler,
     CardNotFound: not_found_handler,

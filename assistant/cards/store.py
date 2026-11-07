@@ -257,7 +257,7 @@ class CardStore:
 
     def _dismiss(self, card: Card, now: float, event: str) -> None:
         card.dismissed_at = now
-        self._record(card.id, "dismissed")
+        self._record(card.id, event)
         self._emit(event, card)
         history = sorted((c for c in self._cards.values() if c.dismissed_at is not None),
                          key=lambda c: c.dismissed_at)

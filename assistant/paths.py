@@ -16,7 +16,7 @@ def home() -> Path:
     return Path.home() / ".assistant"
 
 
-_KNOWN_FILES = re.compile(r"(token|token\.tmp|settings\.json|settings\.json\.tmp|hooks-install\.json|hooks-install\.json\.tmp|assistant\.pid|reminders\.json|reminders\.json\.tmp|reminders\.json\.corrupt|console\.txt|state[^/\\]*\.json|state\.json\.tmp|state\.json\.corrupt)",
+_KNOWN_FILES = re.compile(r"(token|token\.tmp|settings\.json|settings\.json\.tmp|hooks-install\.json|hooks-install\.json\.tmp|assistant\.pid|reminders\.json|reminders\.json\.tmp|reminders\.json\.corrupt|console\.txt|state[^/\\]*\.json|state\.json\.tmp|state_ui\.json\.tmp|state\.json\.corrupt)",
                           re.IGNORECASE)
 _KNOWN_DIRS = {"logs", "events", "hooks-backup", "index", "plugins", "plugins-data"}
 _fresh_roots: set = set()

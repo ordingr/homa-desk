@@ -11,6 +11,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     send = sub.add_parser("send", help="post a card to the running app")
     send.add_argument("--title", required=True)
+    send.add_argument("--id", help="update the card with this id in place instead of creating a new one")
     send.add_argument("--detail")
     send.add_argument("--kind", default="custom", choices=("custom", "waiting", "done", "meeting", "reminder"))
     send.add_argument("--priority", type=int)

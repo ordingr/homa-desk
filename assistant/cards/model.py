@@ -4,6 +4,7 @@ import copy
 import logging
 import math
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -137,6 +138,11 @@ def _is_number(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def strip_control(text: str) -> str:
+    """Drop Unicode Cc/Cf characters (BEL, ESC, zero-width, bidi overrides); newline and tab are kept."""
+    return "".join(ch for ch in text if ch in "\n\t" or unicodedata.category(ch) not in ("Cc", "Cf"))
+
+
 def validate_fields(data: dict, *, require_title: bool) -> dict:
     """Validate a (possibly partial) set of input fields; returns normalised kwargs
     containing only the keys present. Raises CardValidationError(field=...)."""
@@ -147,6 +153,8 @@ def validate_fields(data: dict, *, require_title: bool) -> dict:
 
     if "title" in data or require_title:
         t = data.get("title")
+        if isinstance(t, str):
+            t = strip_control(t)
         if not isinstance(t, str) or not t.strip():
             raise CardValidationError("title", "title is required and must be a non-empty string.",
                                       "missing_field" if t is None else "invalid_field")
@@ -180,6 +188,7 @@ def validate_fields(data: dict, *, require_title: bool) -> dict:
         d = data["detail"]
         if not isinstance(d, str):
             bad("detail", "detail must be a string.")
+        d = strip_control(d)
         if len(d) > MAX_DETAIL:
             bad("detail", f"detail must be at most {MAX_DETAIL} characters.")
         out["detail"] = d
@@ -227,6 +236,9 @@ def _validate_actions(actions: Any) -> list:
                                    ("shortcut", shortcut, MAX_ACTION_SHORTCUT)):
             if value is not None and len(value) > limit:
                 raise CardValidationError("actions", f"actions[{i}].{part} must be at most {limit} characters.")
+        label = strip_control(label)
+        if not label.strip():
+            raise CardValidationError("actions", f"actions[{i}].label must be a non-empty string.")
         if aid in seen:
             raise CardValidationError("actions", f"actions[{i}].id duplicates an earlier action.")
         seen.add(aid)
