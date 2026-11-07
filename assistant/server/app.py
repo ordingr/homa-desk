@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import threading
@@ -7,7 +8,12 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 
-from . import routes_health
+from ..cards.claude_sessions import ClaudeSessions
+from ..cards.filedrop import FileDrop
+from ..cards.store import CardStore
+from ..reminders.store import ReminderStore
+from ..scheduler import Scheduler
+from . import routes_cards, routes_health, routes_hooks, routes_reminders
 from .auth import AuthMiddleware
 
 log = logging.getLogger("assistant.server.app")
@@ -75,19 +81,52 @@ class BodyLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
-def create_app(token_provider: Callable[[], str]) -> Starlette:
-    return Starlette(
-        routes=list(routes_health.routes),
+def create_app(token_provider: Callable[[], str], store: Optional[CardStore] = None,
+               reminders: Optional[ReminderStore] = None,
+               scheduler: Optional[Scheduler] = None) -> Starlette:
+    """Card, hook and file-drop routes need `store`; reminder routes need `reminders`.
+    With `scheduler` as well, the events/ folder watcher is started on it."""
+    routes = list(routes_health.routes)
+    if store is not None:
+        routes.extend(routes_cards.routes)
+        routes.extend(routes_hooks.routes)
+    if reminders is not None:
+        routes.extend(routes_reminders.routes)
+    app = Starlette(
+        routes=routes,
         middleware=[Middleware(AuthMiddleware, token_provider=token_provider),
                     Middleware(BodyLimitMiddleware)],
+        exception_handlers=routes_cards.exception_handlers,
     )
+    if store is not None:
+        app.state.store = store
+        app.state.sessions = ClaudeSessions(store)
+        if scheduler is not None:
+            app.state.filedrop = FileDrop(store)
+            app.state.filedrop.start(scheduler)
+    if reminders is not None:
+        app.state.reminders = reminders
+    return app
+
+
+IDLE_TICK_SECONDS = 1.0
+
+
+class _QuietServer(uvicorn.Server):
+    """uvicorn's main loop wakes 10x/s; one wake per second is enough and keeps idle CPU near zero."""
+
+    async def main_loop(self) -> None:
+        should_exit = await self.on_tick(0)
+        while not should_exit:
+            await asyncio.sleep(IDLE_TICK_SECONDS)
+            should_exit = await self.on_tick(0)
 
 
 class ServerThread:
     def __init__(self, app: Starlette, port: int) -> None:
         config = uvicorn.Config(app, host=BIND_HOST, port=port, log_config=None,
                                 access_log=False, lifespan="off")
-        self._server = uvicorn.Server(config)
+        self._server = _QuietServer(config)
         self._thread: Optional[threading.Thread] = None
         self.port = port
 
