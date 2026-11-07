@@ -119,7 +119,9 @@ def test_doctor_output_never_contains_token(running_app, assistant_env, assistan
     assert re.search(r"^token file\s+present$", result.stdout, re.M)
     assert re.search(r"^python\s+3\.\d+\.\d+$", result.stdout, re.M)
     assert re.search(r"^port\s+\d+ in use by pid \d+ \(python3?w?\.exe\)$", result.stdout, re.M)
-    assert re.search(r"^Outlook COM\s+n/a$", result.stdout, re.M)
+    assert re.search(r"^Outlook COM\s+(available|unavailable)$", result.stdout, re.M)
+    assert re.search(r"^MCP\s+mounted at /mcp", result.stdout, re.M)
+    assert re.search(r"^calendars configured\s+\d+ ICS feed\(s\), Outlook (on|off)$", result.stdout, re.M)
 
 
 def test_app_log_never_contains_token(running_app, assistant_home):

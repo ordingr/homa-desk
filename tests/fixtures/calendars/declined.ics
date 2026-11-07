@@ -1,0 +1,23 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Assistant QA//fixtures//EN
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+UID:declined@example.test
+DTSTAMP:20261101T000000Z
+DTSTART:20261110T150000Z
+DTEND:20261110T160000Z
+SUMMARY:Declined review
+ORGANIZER;CN=Organizer Placeholder:mailto:organizer@example.test
+ATTENDEE;CN=User Placeholder;PARTSTAT=DECLINED:mailto:user@example.test
+END:VEVENT
+BEGIN:VEVENT
+UID:accepted@example.test
+DTSTAMP:20261101T000000Z
+DTSTART:20261110T170000Z
+DTEND:20261110T180000Z
+SUMMARY:Accepted review
+ORGANIZER;CN=Organizer Placeholder:mailto:organizer@example.test
+ATTENDEE;CN=User Placeholder;PARTSTAT=ACCEPTED:mailto:user@example.test
+END:VEVENT
+END:VCALENDAR
