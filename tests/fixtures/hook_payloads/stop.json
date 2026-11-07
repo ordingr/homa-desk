@@ -1,0 +1,16 @@
+{
+  "session_id": "5301b93f-5477-43d3-8fd5-f316ee9901b1",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\my-project\\5301b93f-5477-43d3-8fd5-f316ee9901b1.jsonl",
+  "cwd": "C:\\Users\\<user>\\projects\\my-project",
+  "scratchpad_dir": "C:\\Users\\<user>\\.claude\\scratchpad\\5301b93f-5477-43d3-8fd5-f316ee9901b1",
+  "prompt_id": "2ea2383d-a504-44c4-b2a1-e4bca0588585",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "I ran it and it printed:\n\n```\nP6-CASE-A\n```\n\nThe tool also noted that the shell's working directory was reset to the session's start folder (`C:\\Users\\<user>\\projects\\my-project`). That doesn't change the output.",
+  "background_tasks": [],
+  "session_crons": []
+}

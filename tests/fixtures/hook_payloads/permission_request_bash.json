@@ -1,0 +1,30 @@
+{
+  "session_id": "4ca9e6e2-748a-48df-9dd7-ff301b8e6bb7",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\my-project\\4ca9e6e2-748a-48df-9dd7-ff301b8e6bb7.jsonl",
+  "cwd": "C:\\Users\\<user>\\projects\\my-project",
+  "scratchpad_dir": "C:\\Users\\<user>\\.claude\\scratchpad\\4ca9e6e2-748a-48df-9dd7-ff301b8e6bb7",
+  "prompt_id": "329af395-1e9c-4bf3-a3f5-e7978ff8b22c",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "curl -s https://example.com | head -c 50",
+    "description": "Fetch first 50 bytes of example.com"
+  },
+  "permission_suggestions": [
+    {
+      "type": "addRules",
+      "rules": [
+        {
+          "toolName": "Bash",
+          "ruleContent": "curl -s https://example.com"
+        }
+      ],
+      "behavior": "allow",
+      "destination": "localSettings"
+    }
+  ]
+}

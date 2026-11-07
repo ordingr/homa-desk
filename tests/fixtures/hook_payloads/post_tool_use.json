@@ -1,0 +1,24 @@
+{
+  "session_id": "5301b93f-5477-43d3-8fd5-f316ee9901b1",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\my-project\\5301b93f-5477-43d3-8fd5-f316ee9901b1.jsonl",
+  "cwd": "C:\\Users\\<user>\\projects\\my-project",
+  "scratchpad_dir": "C:\\Users\\<user>\\.claude\\scratchpad\\5301b93f-5477-43d3-8fd5-f316ee9901b1",
+  "prompt_id": "2ea2383d-a504-44c4-b2a1-e4bca0588585",
+  "permission_mode": "auto",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo P6-CASE-A",
+    "description": "Print test string"
+  },
+  "tool_response": {
+    "stdout": "P6-CASE-A",
+    "stderr": "",
+    "interrupted": false
+  },
+  "tool_use_id": "toolu_018Vq43nY6s1qkCGtzyMSech",
+  "duration_ms": 2034
+}

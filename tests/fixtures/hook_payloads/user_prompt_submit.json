@@ -1,0 +1,10 @@
+{
+  "session_id": "5301b93f-5477-43d3-8fd5-f316ee9901b1",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\my-project\\5301b93f-5477-43d3-8fd5-f316ee9901b1.jsonl",
+  "cwd": "C:\\Users\\<user>\\projects\\my-project",
+  "scratchpad_dir": "C:\\Users\\<user>\\.claude\\scratchpad\\5301b93f-5477-43d3-8fd5-f316ee9901b1",
+  "prompt_id": "2ea2383d-a504-44c4-b2a1-e4bca0588585",
+  "permission_mode": "auto",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Run this exact shell command with the Bash tool and tell me its output: echo P6-CASE-A"
+}

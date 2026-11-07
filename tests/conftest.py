@@ -137,3 +137,57 @@ def _stop(proc: subprocess.Popen) -> None:
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=30)
             proc.wait(timeout=10)
             pytest.fail("assistant did not shut down gracefully and was force-killed")
+
+
+class Api:
+    """Tiny JSON client for the running app. ``token=False`` sends no Authorization header."""
+
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url
+        self.token = token
+        self.host, _, self.port = base_url.removeprefix("http://").partition(":")
+
+    def request(self, method: str, path: str, body=None, *, token=True, raw: bytes | None = None, headers=None):
+        import http.client
+        hdrs = dict(headers or {})
+        if token is True:
+            hdrs["Authorization"] = f"Bearer {self.token}"
+        elif isinstance(token, str):
+            hdrs["Authorization"] = f"Bearer {token}"
+        payload = raw
+        if body is not None:
+            payload = json.dumps(body).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json")
+        conn = http.client.HTTPConnection(self.host, int(self.port), timeout=10)
+        try:
+            conn.request(method, path, body=payload, headers=hdrs)
+            response = conn.getresponse()
+            data = response.read()
+        finally:
+            conn.close()
+        try:
+            parsed = json.loads(data) if data else None
+        except ValueError:
+            parsed = None
+        return response.status, parsed
+
+    def get(self, path, **kw):
+        return self.request("GET", path, **kw)
+
+    def post(self, path, body=None, **kw):
+        return self.request("POST", path, body, **kw)
+
+
+@pytest.fixture(scope="session")
+def api(running_app) -> Api:
+    return Api(*running_app)
+
+
+def wait_until(predicate, timeout: float = 2.0, step: float = 0.05):
+    """Poll ``predicate`` until it returns a truthy value (returned) or the timeout passes (returns the last value)."""
+    deadline = time.monotonic() + timeout
+    value = predicate()
+    while not value and time.monotonic() < deadline:
+        time.sleep(step)
+        value = predicate()
+    return value
