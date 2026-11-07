@@ -348,10 +348,19 @@ def test_ask_claude_asks_before_anything_and_names_what_would_be_sent(app):
 
 
 def test_ask_claude_refuses_protected_binary_and_placeholder_files(app):
-    for key in ("pem", "keybackup", "docx", "png", "offline", "binary"):
+    for key in ("pem", "keybackup", "png", "offline", "binary"):
         status, body = app.act("ask_claude", app.files[key])
         assert status in (403, 422) or (status == 200 and not body.get("needs_confirmation")), (key, status, body)
         assert not body.get("needs_confirmation"), key
+
+
+@pytest.mark.parametrize("key", ["docx", "xlsx", "pptx"])
+def test_ask_claude_office_files_confirm_with_extracted_text_only(app, key):
+    status, body = app.act("ask_claude", app.files[key])
+    assert status == 200 and body["ok"] is False and body["needs_confirmation"] is True, (key, body)
+    summary = body["summary"]
+    assert summary["office_text"] is True and summary["bytes_to_send"] > 0, summary
+    assert "the file itself is not sent" in summary["what"], summary
 
 
 # ---- md_vault and properties ----------------------------------------------------------------------------------------------

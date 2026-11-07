@@ -6,11 +6,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ..actions import VERBS, dispatch
+from ..actions import VERBS, claude, dispatch
 from .routes_cards import ApiError, read_json
 
 ACTION_BODY_MAX = 4_096
-_STATUS = {"refused": 403, "invalid": 422, "not_found": 404, "error": 500, "not_implemented": 501}
+_STATUS = {"refused": 403, "invalid": 422, "not_found": 404, "error": 500, "not_implemented": 501,
+           "unavailable": 503}
 _FIELD = {"invalid": "new_name"}
 
 
@@ -25,7 +26,27 @@ def _body(raw: Any) -> dict:
         raise ApiError(422, "invalid_parameter", "new_name must be a string.", "new_name")
     if "confirm" in raw and not isinstance(raw["confirm"], bool):
         raise ApiError(422, "invalid_parameter", "confirm must be true or false.", "confirm")
+    if "whole_file" in raw and not isinstance(raw["whole_file"], bool):
+        raise ApiError(422, "invalid_parameter", "whole_file must be true or false.", "whole_file")
     return raw
+
+
+async def ask_claude_status(request: Request) -> JSONResponse:
+    refresh = request.query_params.get("refresh") in ("1", "true")
+    return JSONResponse(await run_in_threadpool(claude.status, refresh))
+
+
+async def ask_claude_continue(request: Request) -> JSONResponse:
+    raw = await read_json(request, ACTION_BODY_MAX)
+    path = raw.get("path") if isinstance(raw, dict) else None
+    if not isinstance(path, str) or not path.strip():
+        raise ApiError(422, "invalid_parameter", "path must be a non-empty string.", "path")
+    if not claude.has_context(path):
+        raise ApiError(404, "no_answer", "There is no Claude answer for that file in this session.", "path")
+    result = await run_in_threadpool(claude.continue_session, path)
+    if not result["ok"]:
+        raise ApiError(500, "error", result["message"])
+    return JSONResponse(result)
 
 
 async def action(request: Request) -> JSONResponse:
@@ -38,7 +59,7 @@ async def action(request: Request) -> JSONResponse:
         raise ApiError(503, "index_unavailable", "The file index is not ready yet.")
     result = await run_in_threadpool(
         dispatch, verb, body["path"], body.get("new_name"), body.get("confirm") is True,
-        index=state.index, settings=getattr(state, "settings", None))
+        index=state.index, settings=getattr(state, "settings", None), whole_file=body.get("whole_file") is True)
     kind = result.get("kind")
     if kind is None:
         return JSONResponse(result)
@@ -54,4 +75,6 @@ async def action(request: Request) -> JSONResponse:
     return JSONResponse(envelope, status_code=status)
 
 
-routes = [Route("/v1/actions/{verb}", action, methods=["POST"])]
+routes = [Route("/v1/actions/ask_claude/status", ask_claude_status, methods=["GET"]),
+          Route("/v1/actions/ask_claude/continue", ask_claude_continue, methods=["POST"]),
+          Route("/v1/actions/{verb}", action, methods=["POST"])]

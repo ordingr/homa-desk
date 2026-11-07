@@ -1,11 +1,16 @@
 """Search executor for Files mode (DEC 5, AC-FI-8 .. AC-FI-18).
 
-Candidates come from ``IndexStore.find_substring`` on the longest literal run
-of the name-required term; every other condition is verified per hit.
+Every plain term and phrase may match anywhere in the full path. Candidates
+come from ``IndexStore.find_via_dirs`` on the longest separator-free literal
+run of any term (complete for the whole query); when that is too common the
+run falls back to ``find_substring`` on the names and says ``truncated``.
+Every other condition is verified per hit; path-only hits rank after rows
+whose terms all hit the name.
 """
 from __future__ import annotations
 
 import heapq
+import re
 import time
 from array import array
 from bisect import bisect_left
@@ -197,31 +202,20 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
     date = _resolve_date(date_filter, now)
     interpretation = _interpretation(query, chip_keys, date)
 
-    name_m = [Matcher(t) for t in query.terms]
-    phrase_m = [Matcher(p, literal=True) for p in query.phrases]
-    if name_m:
-        name_required, path_req = name_m, [Matcher(t) for t in query.path_terms] + phrase_m
-    elif phrase_m:
-        name_required, path_req = phrase_m[:1], [Matcher(t) for t in query.path_terms] + phrase_m[1:]
-    else:
-        name_required, path_req = [], [Matcher(t) for t in query.path_terms]
+    anywhere = ([Matcher(t) for t in query.terms] + [Matcher(t) for t in query.path_terms]
+                + [Matcher(p, literal=True) for p in query.phrases])
     not_m = [Matcher(n) for n in query.nots]
     part_m = [Matcher(_norm_path(p)) for p in query.path_parts]
     exts = {e.casefold().lstrip(".") for e in query.exts}
     chip_dirs = "folders" in chip_keys
     chip_exts = frozenset().union(*(CHIP_EXTS[c] for c in chip_keys if c in CHIP_EXTS))
     use_chips = bool(chip_keys)
-    need_path = bool(path_req or not_m or part_m)
+    need_path = bool(not_m or part_m)
 
-    capped = len(name_required) == 1 and not (exts or need_path or use_chips or date)
-    everything = not (exts or need_path) and not any(m.longest_literal() for m in name_required)
+    capped = len(anywhere) == 1 and not (exts or need_path or use_chips or date)
+    everything = not (exts or need_path) and not any(m.longest_literal() for m in anywhere)
     deadline = t0 + budget_s if budget_s else None
-    via_dirs = None
-    if name_required and all(len(m.text) == 1 and m.longest_literal() == m.text for m in name_required):
-        near = [m.text for m in part_m + path_req if len(m.text) >= 2 and not set("*?\\/") & set(m.text)]
-        if near:
-            via_dirs = (name_required[0].text, max(near, key=len))
-    ids, truncated = _candidates(store, name_required, exts, capped, everything, via_dirs, deadline)
+    ids, truncated, name_only = _candidates(store, anywhere, exts, capped, everything, deadline, part_m)
     if everything and truncated and sort == "best":
         sort = "date"
     if delta is not None:
@@ -234,8 +228,8 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
     items: list = []
     append = items.append
     pre_top, pre_total = [], 0
-    lit = name_required[0].longest_literal() if len(name_required) == 1 else ""
-    if (lit and sort == "best" and name_required[0].text == lit and hasattr(store, "rank_best_literal")
+    lit = anywhere[0].longest_literal() if len(anywhere) == 1 else ""
+    if (name_only and lit and sort == "best" and anywhere[0].text == lit and hasattr(store, "rank_best_literal")
             and not (exts or need_path or use_chips or date)):
         cut = bisect_left(ids, store.entry_count)
         pre_top, pre_total, cut_off = store.rank_best_literal(ids, cut, lit, show_denied, deadline,
@@ -259,24 +253,16 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
             continue
         if use_chips and not ((chip_dirs and is_dir) or (not is_dir and ext in chip_exts)):
             continue
-        tiers = []
         ok = True
-        for m in name_required:
-            t = rank.name_tier(ncf, m)
-            if t is None:
-                ok = False
-                break
-            tiers.append(t)
-        if not ok:
-            continue
         if date:
             mt = mtime_of(i)
             if (lo is not None and mt < lo) or (hi is not None and mt > hi):
                 continue
         else:
             mt = 0.0
+        tiers = []
+        pcf = _norm_path(path_of(i).casefold()) if need_path else None
         if need_path:
-            pcf = _norm_path(path_of(i).casefold())
             for m in part_m:
                 if not m.contains_in(pcf):
                     ok = False
@@ -289,16 +275,18 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
                     break
             if not ok:
                 continue
-            for m in path_req:
-                t = rank.name_tier(ncf, m)
-                if t is None:
-                    if not m.contains_in(pcf):
-                        ok = False
-                        break
-                    t = rank.PATH
-                tiers.append(t)
-            if not ok:
-                continue
+        for m in anywhere:
+            t = rank.name_tier(ncf, m)
+            if t is None:
+                if pcf is None:
+                    pcf = _norm_path(path_of(i).casefold())
+                if not m.contains_in(pcf):
+                    ok = False
+                    break
+                t = rank.PATH
+            tiers.append(t)
+        if not ok:
+            continue
         if sort == "best":
             key = rank.best_key(tiers, ncf)
         elif sort == "name":
@@ -315,7 +303,7 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
     top = heapq.nsmallest(want, items) if want < total // 4 else sorted(items)[:want]
     page = top[offset:want]
 
-    highlight = name_required + path_req
+    highlight = anywhere
     rows = []
     for _key, i, tier in page:
         name = store.name(i)
@@ -334,27 +322,41 @@ def run(query: Query, store, delta=None, chips=(), date_filter=None, sort: str =
                         truncated=truncated)
 
 
-def _candidates(store, name_required, exts, capped=False, everything=False, via_dirs=None, deadline=None):
-    """(ids, truncated). ``capped`` limits a lone plain term to DENSE_CAP hits; ``everything`` (nothing to match
-    on) yields only the newest NEWEST_CAP entries; ``via_dirs`` (one-character name term, selective path term)
-    asks the directory table first. Otherwise the fetch runs on the longest literal of any name term, the most
-    selective one, and stops at ``deadline``."""
-    if via_dirs is not None:
-        hits = store.find_via_dirs(via_dirs[0], via_dirs[1], VIA_DIRS_MAX, deadline)
+def _path_chunks(matchers) -> list:
+    """Runs of 2+ characters, free of wildcards and separators, that any path matching a term must contain,
+    longest first (at most four)."""
+    seen: dict = {}
+    for m in matchers:
+        for part in re.split(r"[*?\\/]", m.text):
+            if len(part) >= 2:
+                seen[part] = None
+    return sorted(seen, key=len, reverse=True)[:4]
+
+
+def _candidates(store, anywhere, exts, capped=False, everything=False, deadline=None, parts=()):
+    """(ids, truncated, name_only). The id set must contain every entry whose path matches all of ``anywhere``:
+    ``find_via_dirs`` on the first path chunk of any term or ``path:`` part that is selective enough gives exactly that. Otherwise the ids
+    are the names containing the longest literal (``name_only``), path-only hits are missing, and ``truncated`` is
+    set. ``capped`` limits a lone plain term to DENSE_CAP name hits; ``everything`` (nothing to match on) yields
+    only the newest NEWEST_CAP entries. The name fetch stops at ``deadline``."""
+    chunks = [] if everything or not hasattr(store, "find_via_dirs") else _path_chunks([*anywhere, *parts])
+    for chunk in chunks:
+        hits = store.find_via_dirs("", chunk, VIA_DIRS_MAX, deadline)
         if hits is not None:
-            return hits, hits.cut
-    lit = max((m.longest_literal() for m in name_required), key=len, default="")
+            return hits, hits.cut, False
+    incomplete = bool(anywhere) and not everything
+    lit = max((m.longest_literal() for m in anywhere), key=len, default="")
     if lit:
         if capped:
             hits = store.find_substring(lit, DENSE_CAP, deadline)
-            return hits, len(hits) >= DENSE_CAP or hits.cut
+            return hits, len(hits) >= DENSE_CAP or hits.cut or incomplete, True
         hits = store.find_substring(lit, None, deadline)
-        return hits, hits.cut
+        return hits, hits.cut or incomplete, True
     if exts:
         merged: set = set()
         for e in exts:
             merged.update(store.find_substring("." + e))
-        return array("I", sorted(merged)), False
+        return array("I", sorted(merged)), incomplete, True
     if everything and store.entry_count > NEWEST_CAP:
-        return store.newest_ids(NEWEST_CAP), True
-    return array("I", range(store.entry_count)), False
+        return store.newest_ids(NEWEST_CAP), True, True
+    return array("I", range(store.entry_count)), False, True

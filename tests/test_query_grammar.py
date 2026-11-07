@@ -21,34 +21,34 @@ def cf(items):
 
 # ---- the five reference examples (AC-FI-12) --------------------------------------------------------------------------
 
-def test_design_md_is_a_name_term_plus_an_extension_filter():
+def test_design_md_is_a_term_plus_an_extension_filter():
     q = parse("design md")
     assert cf(q.terms) == ["design"] and cf(q.exts) == ["md"] and not q.path_terms and not q.path_parts
-    assert q.interpretation == f'name contains "design" {DOT} ext: md'
+    assert q.interpretation == f'name or path contains "design" {DOT} ext: md'
 
 
-def test_design_doc_narrows_by_path_when_doc_is_not_a_known_extension():
+def test_design_doc_makes_two_anywhere_terms_when_doc_is_not_a_known_extension():
     q = parse("design doc")
-    assert cf(q.terms) == ["design"] and cf(q.path_terms) == ["doc"] and not q.exts
-    assert q.interpretation == f'name contains "design" {DOT} path contains "doc"'
+    assert cf(q.terms) == ["design", "doc"] and not q.path_terms and not q.exts
+    assert q.interpretation == f'name or path contains "design" {DOT} name or path contains "doc"'
 
 
 def test_config_dash_e_yml():
     q = parse("config -e yml")
     assert cf(q.terms) == ["config"] and cf(q.exts) == ["yml"]
-    assert q.interpretation == f'name contains "config" {DOT} ext: yml'
+    assert q.interpretation == f'name or path contains "config" {DOT} ext: yml'
 
 
 def test_report_dash_p_documents():
     q = parse("report -p Documents")
     assert cf(q.terms) == ["report"] and q.path_parts == ["Documents"]
-    assert q.interpretation == f'name contains "report" {DOT} path contains "Documents"'
+    assert q.interpretation == f'name or path contains "report" {DOT} path contains "Documents"'
 
 
 def test_plain_design():
     q = parse("design")
     assert cf(q.terms) == ["design"] and not (q.exts or q.path_terms or q.path_parts or q.nots or q.phrases)
-    assert q.interpretation == 'name contains "design"'
+    assert q.interpretation == 'name or path contains "design"'
 
 
 # ---- extension token rules ------------------------------------------------------------------------------------------
@@ -83,7 +83,7 @@ def test_ext_long_form_takes_a_comma_list_and_path_long_form_is_a_path_part():
 def test_dash_x_is_a_literal_term_never_a_not():
     q = parse("-x foo")
     assert not q.nots
-    assert cf(q.terms) == ["-x"] and cf(q.path_terms) == ["foo"]
+    assert cf(q.terms) == ["-x", "foo"] and not q.path_terms
     q2 = parse("-5 foo")
     assert not q2.nots and "-5" in q2.terms
 
@@ -165,4 +165,16 @@ def test_fuzzed_input_never_raises_and_always_returns_strings():
 
 def test_unicode_terms_are_kept_verbatim():
     q = parse("résumé 日本語")
-    assert q.terms == ["résumé"] and q.path_terms == ["日本語"]
+    assert q.terms == ["résumé", "日本語"] and not q.path_terms
+
+
+def test_every_plain_term_and_phrase_is_described_as_name_or_path():
+    q = parse('alpha beta "gamma delta" path:docs')
+    assert q.terms == ["alpha", "beta"] and q.phrases == ["gamma delta"] and q.path_parts == ["docs"]
+    assert q.interpretation == (f'name or path contains "alpha" {DOT} name or path contains "beta" {DOT} '
+                                f'name or path contains "gamma delta" {DOT} path contains "docs"')
+
+
+def test_wildcard_term_is_described_as_name_or_path_matching():
+    q = parse("des*gn")
+    assert q.interpretation.startswith("name or path ") and '"des*gn"' in q.interpretation

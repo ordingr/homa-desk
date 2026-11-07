@@ -13,6 +13,14 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+REAL_HOME = Path.home()  # captured before the session fixture points USERPROFILE at a temp dir (node_modules lookups)
+_REAL_USER_ENV = {k: os.environ[k] for k in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH") if k in os.environ}
+
+
+def browser_env(**extra) -> dict:
+    """os.environ for a node/Edge child: the session points USERPROFILE at a temp dir so no Assistant process can reach the
+    real ~/.claude, but a browser needs its real profile folders to start."""
+    return dict(os.environ, **_REAL_USER_ENV, **extra)
 STARTUP_TIMEOUT = 30.0
 SHUTDOWN_TIMEOUT = 15.0
 
@@ -70,13 +78,18 @@ def _health_ok(port: int, token: str) -> bool:
 def isolated_home_env(tmp_path_factory):
     """Point this process's own ASSISTANT_HOME at a temp dir so in-process tests never touch ~/.assistant."""
     home = tmp_path_factory.mktemp("inproc_home")
-    previous = os.environ.get("ASSISTANT_HOME")
-    os.environ["ASSISTANT_HOME"] = str(home)
+    fake_user = tmp_path_factory.mktemp("fake_userprofile")
+    drive, rest = os.path.splitdrive(str(fake_user))
+    overrides = {"ASSISTANT_HOME": str(home), "USERPROFILE": str(fake_user), "HOME": str(fake_user),
+                 "HOMEDRIVE": drive, "HOMEPATH": rest}
+    previous = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
     yield home
-    if previous is None:
-        os.environ.pop("ASSISTANT_HOME", None)
-    else:
-        os.environ["ASSISTANT_HOME"] = previous
+    for key, value in previous.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
 
 
 @pytest.fixture(scope="session")
@@ -232,6 +245,10 @@ def launch_app(home: Path, port: int, settings: dict | None = None, test_mode: b
     home.mkdir(parents=True, exist_ok=True)
     (home / "settings.json").write_text(json.dumps({"schema": 1, "port": port, **(settings or {})}), encoding="utf-8")
     env = dict(os.environ, ASSISTANT_HOME=str(home))
+    fake_user = home.parent / (home.name + "_userprofile")
+    fake_user.mkdir(parents=True, exist_ok=True)
+    drive, rest = os.path.splitdrive(str(fake_user))
+    env.update(USERPROFILE=str(fake_user), HOME=str(fake_user), HOMEDRIVE=drive, HOMEPATH=rest)
     env.pop("ASSISTANT_TEST_MODE", None)
     if test_mode:
         env["ASSISTANT_TEST_MODE"] = "1"
@@ -882,3 +899,7 @@ def preview_app(tmp_path_factory):
         if not (isinstance(index, dict) and index.get("entries", 0) >= len(files) - 2):
             pytest.skip(f"/v1/health index never reached {len(files) - 2} entries (got {index!r})")
         yield PreviewApp(base_url, token, root, base / "home", files)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: runs for a minute or more (perf gates, repeated app launches)")

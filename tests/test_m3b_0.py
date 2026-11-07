@@ -394,7 +394,7 @@ def test_j_one_char_name_plus_path_term_is_selective_and_fast_on_2m_entries(synt
 
 
 def test_j_the_shortcut_returns_what_the_full_scan_returns():
-    """Same answer on a small store with and without the directory-table path (a two-character term forces the scan)."""
+    """A one-character term cannot use the directory table: it scans names only and says so; the ``-p`` form is complete."""
     from assistant.index import query, search
     from conftest import ROOT_PARENT, store_api
     builder = store_api().IndexBuilder()
@@ -406,8 +406,12 @@ def test_j_the_shortcut_returns_what_the_full_scan_returns():
     store = builder.finish()
     shortcut = search.run(query.parse("a -p alpha", KNOWN), store, limit=100)
     full = search.run(query.parse("a", KNOWN), store, limit=100)
-    expected = sorted(p for p in row_paths(full.rows) if "alpha" in p.lower())
-    assert sorted(row_paths(shortcut.rows)) == expected and expected
+    in_alpha = sorted(p for p in row_paths(full.rows) if "alpha" in p.lower())
+    assert in_alpha and full.truncated, "a one-character term is name-only and reported as truncated"
+    assert not shortcut.truncated
+    assert set(in_alpha) <= set(row_paths(shortcut.rows))
+    assert sorted(p.rsplit("\\", 1)[-1] for p in row_paths(shortcut.rows)) == sorted(
+        ["a.txt", "ab.txt", "alpha", "cat.md", "dog.md", "zzz.md"]), "every file under alpha matches 'a' through its path"
 
 
 # ---- (k) the root folder row is not a result ---------------------------------------------------------------------------------

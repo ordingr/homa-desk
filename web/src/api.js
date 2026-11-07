@@ -28,7 +28,7 @@ function errorFrom(response, body, path) {
   }
   if (typeof err === "string") return new ApiError(response.status, err);
   if (response.status === 404) {
-    return new ApiError(404, `Not available in this build yet (404 ${path}).`, "not_found");
+    return new ApiError(404, `Not available in this build yet (404 ${path}).`, "route_missing");
   }
   return new ApiError(response.status, `Request failed: ${response.status} ${response.statusText}`);
 }
@@ -50,7 +50,7 @@ export async function exchangeNonce(nonce) {
   token = value;
 }
 
-export async function request(method, path, { params, body } = {}) {
+export async function request(method, path, { params, body, signal } = {}) {
   if (token === null) throw new ApiError(401, "No session. Open this page from Assistant.");
   let url = path;
   if (params) {
@@ -64,6 +64,7 @@ export async function request(method, path, { params, body } = {}) {
   }
   const headers = { Authorization: `Bearer ${token}` };
   const init = { method, headers, cache: "no-store", referrerPolicy: "no-referrer" };
+  if (signal) init.signal = signal;
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
@@ -93,7 +94,7 @@ export async function requestRaw(path, params) {
   return response;
 }
 
-export const get = (path, params) => request("GET", path, { params });
+export const get = (path, params, signal) => request("GET", path, { params, signal });
 export const post = (path, body) => request("POST", path, { body: body ?? {} });
 export const del = (path) => request("DELETE", path);
 

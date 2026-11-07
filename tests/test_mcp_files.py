@@ -88,7 +88,7 @@ def test_no_tool_can_open_reveal_rename_delete_or_execute(app):
 
 def test_search_files_uses_the_files_mode_grammar_and_returns_compact_rows(app):
     rows = rows_of(app.mcp.call("search_files", {"query": "design md"}))
-    assert [r["name"] for r in rows] == ["designer.md"]
+    assert [r["name"] for r in rows] == ["designer.md", "x.md"], "the name hit first, then the file under docs/design"
     row = rows[0]
     assert row["path"].lower().startswith(str(app.root).lower()) and row["size"] == 800
     assert {"path", "name", "size"} <= set(row) and ("modified" in row or "mtime" in row)
@@ -109,7 +109,7 @@ def test_search_files_filters_and_sort(app):
     rows = rows_of(app.mcp.call("search_files", {"query": "design", "filters": {"folders_only": True}}))
     assert sorted(r["name"] for r in rows) == ["Design", "design"]
     rows = rows_of(app.mcp.call("search_files", {"query": "design", "filters": {"ext": ["md", "html"]}}))
-    assert sorted(r["name"] for r in rows) == ["design-system.html", "designer.md", "stepper-designs.html"]
+    assert sorted(r["name"] for r in rows) == ["design-system.html", "designer.md", "stepper-designs.html", "x.md"]
     rows = rows_of(app.mcp.call("search_files", {"query": "item_", "limit": 10, "sort": "name"}))
     names = [r["name"] for r in rows]
     assert names == sorted(names)

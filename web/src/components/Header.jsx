@@ -1,5 +1,7 @@
 import { fmtAgo, fmtCount, fmtDateTime } from "../format.js";
-import { MoonIcon, SunIcon } from "./Icons.jsx";
+import { MonitorIcon, MoonIcon, SunIcon } from "./Icons.jsx";
+
+export const NEXT = { dark: "light", light: "system", system: "dark" };
 
 export default function Header({ entries, builtAt, theme, onToggleTheme, onPanel }) {
   const indexText = builtAt
@@ -25,11 +27,11 @@ export default function Header({ entries, builtAt, theme, onToggleTheme, onPanel
         type="button"
         className="icon-btn"
         onClick={onToggleTheme}
-        aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-        title={theme === "dark" ? "Light theme" : "Dark theme"}
+        aria-label={`Theme: ${theme}. Switch to ${NEXT[theme]} theme`}
+        title={`Theme: ${theme} (click for ${NEXT[theme]})`}
         data-testid="theme-toggle"
       >
-        {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+        {theme === "dark" ? <MoonIcon /> : theme === "light" ? <SunIcon /> : <MonitorIcon />}
       </button>
     </header>
   );

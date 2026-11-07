@@ -160,7 +160,7 @@ class Crawler:
                 if self.stop.is_set():
                     break
                 results.append(self._do_root(root, builder))
-            store = builder.finish()
+            store = (self.builder_factory() if self.stop.is_set() else builder).finish()
         finally:
             if background:
                 background_end()

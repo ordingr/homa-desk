@@ -44,6 +44,13 @@ export const MoonIcon = (props) => (
   </svg>
 );
 
+export const MonitorIcon = (props) => (
+  <svg {...base} {...props}>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M8 20h8M12 16v4" />
+  </svg>
+);
+
 export const CloseIcon = (props) => (
   <svg {...base} {...props}>
     <path d="m6 6 12 12M18 6 6 18" />
@@ -67,5 +74,37 @@ export const SearchIcon = (props) => (
 export const StarIcon = (props) => (
   <svg {...base} {...props}>
     <path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7L12 3Z" />
+  </svg>
+);
+
+export const ZoomInIcon = (props) => (
+  <svg {...base} {...props}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4.5 4.5M11 8.5v5M8.5 11h5" />
+  </svg>
+);
+
+export const ZoomOutIcon = (props) => (
+  <svg {...base} {...props}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4.5 4.5M8.5 11h5" />
+  </svg>
+);
+
+export const ExpandIcon = (props) => (
+  <svg {...base} {...props}>
+    <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
+  </svg>
+);
+
+export const CollapseIcon = (props) => (
+  <svg {...base} {...props}>
+    <path d="M20 10h-6V4M4 14h6v6M14 10l7-7M10 14l-7 7" />
+  </svg>
+);
+
+export const BackIcon = (props) => (
+  <svg {...base} {...props}>
+    <path d="M19 12H5M11 6l-6 6 6 6" />
   </svg>
 );

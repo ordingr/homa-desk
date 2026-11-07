@@ -29,6 +29,11 @@ from typing import Iterable, Optional, Union
 
 DEFAULT_EXCLUDES = (
     "*:\\Windows\\",
+    # Installed software and app data: the index targets the user's own documents and files (2026-11-07).
+    "*:\\Program Files\\",
+    "*:\\Program Files (x86)\\",
+    "*:\\ProgramData\\",
+    "AppData/",
     "$RECYCLE.BIN/",
     "System Volume Information/",
     "*:\\ProgramData\\Microsoft\\Search\\",

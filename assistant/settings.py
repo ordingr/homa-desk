@@ -3,6 +3,7 @@ import json
 import logging
 import ntpath
 import os
+import re
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -35,6 +36,31 @@ PREVIEW_MAX_BYTES = 4 * 1024 ** 3
 MAX_KNOWN_EXTS = 200
 MAX_EXT_CHARS = 16
 
+THEMES = ("light", "dark", "system")
+MAX_SHORTCUT_CHARS = 32
+MAX_UPDATE_SOURCE_CHARS = 2048
+_CHORD = re.compile(
+    r"(?:(?:ctrl|shift|alt)\+)*(?:[a-z0-9]|f(?:[1-9]|1[0-9]|2[0-4])|enter|escape|delete|tab|space|backspace|insert"
+    r"|home|end|pageup|pagedown|up|down|left|right|menu)", re.IGNORECASE | re.ASCII)
+
+DEFAULT_SHORTCUTS = {
+    "open": "Enter",
+    "reveal": "Ctrl+Enter",
+    "copy_path": "Ctrl+C",
+    "rename": "F2",
+    "properties": "Alt+Enter",
+    "recycle": "Delete",
+    "md_vault": "Ctrl+M",
+    "folder_listing": "Ctrl+F",
+    "cycle_sort": "Ctrl+S",
+    "save_search": "Ctrl+Shift+S",
+    "cycle_date": "Ctrl+D",
+    "cycle_mode": "Tab",
+    "context_menu": "Shift+F10",
+    "full_page": "F11",
+    "close": "Escape",
+}
+
 MUTE_SOURCES = ("hooks", "http", "mcp", "file", "reminders", "calendar")
 
 DEFAULTS: dict[str, Any] = {
@@ -54,9 +80,12 @@ DEFAULTS: dict[str, Any] = {
               "include_hidden": False, "scan_if_older_hours": 12, "known_exts": list(DEFAULT_KNOWN_EXTS)},
     "notes": {"dir": ""},
     "preview": {"max_bytes": 50_000_000},
+    "md_vault": {"url": ""},
+    "shortcuts": dict(DEFAULT_SHORTCUTS),
+    "update": {"source": ""},
 }
 
-_NESTED = ("mute_sources", "calendars", "claude_code", "mcp", "index", "notes", "preview")
+_NESTED = ("mute_sources", "calendars", "claude_code", "mcp", "index", "notes", "preview", "md_vault", "shortcuts", "update")
 _BOOLS = ("sound_on", "cards_every_monitor", "hotkey_skip_fullscreen")
 
 
@@ -144,7 +173,41 @@ def _check_preview(value: Any) -> None:
         raise ValueError("preview.max_bytes must be a whole number from 1 MiB to 4 GiB")
 
 
+def _check_md_vault(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("md_vault must be an object")
+    url = value.get("url", "")
+    if url == "":
+        return
+    if (not isinstance(url, str) or len(url) > MAX_ICS_URL_CHARS or not url.lower().startswith(("http://", "https://"))
+            or any(c.isspace() or ord(c) < 32 for c in url)):
+        raise ValueError("md_vault.url must be empty or an address starting with http:// or https://")
+
+
+def _check_shortcuts(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("shortcuts must be an object")
+    for action, chord in value.items():
+        if not isinstance(action, str) or not 0 < len(action) <= MAX_SHORTCUT_CHARS or not action.isidentifier():
+            raise ValueError("shortcuts names must be short words such as copy_path")
+        if not isinstance(chord, str) or len(chord) > MAX_SHORTCUT_CHARS or not _CHORD.fullmatch(chord):
+            raise ValueError(f"shortcuts.{action} must be a key such as F2 or Ctrl+Shift+S")
+
+
+def _check_update(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("update must be an object")
+    source = value.get("source", "")
+    if source == "":
+        return
+    if (not isinstance(source, str) or len(source) > MAX_UPDATE_SOURCE_CHARS
+            or not source.lower().startswith("https://") or any(c.isspace() or ord(c) < 32 for c in source)):
+        raise ValueError("update.source must be empty or an address starting with https://")
+
+
 def _check(key: str, value: Any) -> None:
+    if key == "theme" and value not in THEMES:
+        raise ValueError("theme must be light, dark or system")
     if key == "port" and not _valid_port(value):
         raise ValueError("port must be an integer between 1024 and 65535")
     if key in _BOOLS and not isinstance(value, bool):
@@ -161,6 +224,12 @@ def _check(key: str, value: Any) -> None:
         _check_notes(value)
     if key == "preview":
         _check_preview(value)
+    if key == "md_vault":
+        _check_md_vault(value)
+    if key == "shortcuts":
+        _check_shortcuts(value)
+    if key == "update":
+        _check_update(value)
     if key == "hotkey" and not (isinstance(value, str) and len(value) <= 64):
         raise ValueError("hotkey must be text such as ctrl+alt+space")
     if key == "search_placement" and not (isinstance(value, str) and 0 < len(value) <= 32):
@@ -174,14 +243,14 @@ def _merged(loaded: dict[str, Any]) -> dict[str, Any]:
             merged[key].update(value)
         else:
             merged[key] = value
-    for key in ("port", "hotkey", "search_placement", *_BOOLS, *_NESTED):
+    for key in ("port", "hotkey", "search_placement", "theme", *_BOOLS, *_NESTED):
         try:
             _check(key, merged[key])
         except ValueError:
             if key == "calendars" and isinstance(merged[key], dict):
                 _repair_calendars(merged[key])
                 continue
-            if key in ("index", "notes", "preview") and isinstance(merged[key], dict):
+            if key in _NESTED_CHECKS and isinstance(merged[key], dict):
                 _repair_nested(key, merged[key])
                 continue
             log.warning("invalid %s in settings; using default", key)
@@ -203,10 +272,21 @@ def _repair_calendars(value: dict) -> None:
             value[sub] = copy.deepcopy(default)
 
 
-_NESTED_CHECKS = {"index": _check_index, "notes": _check_notes, "preview": _check_preview}
+_NESTED_CHECKS = {"index": _check_index, "notes": _check_notes, "preview": _check_preview,
+                  "md_vault": _check_md_vault, "shortcuts": _check_shortcuts, "update": _check_update}
 
 
 def _repair_nested(key: str, value: dict) -> None:
+    if key == "shortcuts":
+        for action in list(value):
+            try:
+                _check_shortcuts({action: value[action]})
+            except ValueError:
+                log.warning("invalid shortcuts.%s in settings; using default", str(action)[:40])
+                if action in DEFAULT_SHORTCUTS:
+                    value[action] = DEFAULT_SHORTCUTS[action]
+                else:
+                    del value[action]
     for sub, default in DEFAULTS[key].items():
         try:
             _NESTED_CHECKS[key]({sub: value.get(sub, default)})
@@ -366,6 +446,18 @@ class Settings:
     @property
     def port(self) -> int:
         return self.get("port", DEFAULTS["port"])
+
+
+def peek_update_source() -> str:
+    """Configured update.source without creating or writing anything (for `update`); empty when unset or invalid."""
+    try:
+        raw = json.loads(paths.settings_file().read_text(encoding="utf-8"))
+        update = raw.get("update") if isinstance(raw, dict) else None
+        source = update.get("source", "") if isinstance(update, dict) else ""
+        _check_update({"source": source})
+        return source
+    except (OSError, ValueError):
+        return ""
 
 
 def peek_port() -> int:

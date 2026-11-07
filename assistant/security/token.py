@@ -105,12 +105,20 @@ def _new_token() -> str:
 
 def regenerate() -> Regenerated:
     """Replace the token file, then rewrite the Claude Code hook entries if Assistant's are installed
-    (they embed the token). `hooks` is "not installed", "updated" or "failed: <reason>"."""
-    token = _new_token()
-    log.info("token regenerated")
+    (they embed the token). `hooks` is "not installed", "updated", "belongs to another instance" or
+    "failed: <reason>". Entries are rewritten only when they carry this instance's old token, so a second
+    instance (another ASSISTANT_HOME, a test run) never repoints the user's hooks at itself."""
     from .. import hooks_installer
     try:
+        old = _read_text().strip()
+    except OSError:
+        old = ""
+    token = _new_token()
+    log.info("token regenerated")
+    try:
         state = hooks_installer.installed()
+        if state.startswith(("yes", "partial")) and not (old and hooks_installer.carries_bearer(old)):
+            return Regenerated(token, "belongs to another instance")
         if state.startswith(("yes", "partial")):
             with contextlib.redirect_stdout(io.StringIO()):
                 code = hooks_installer.install()

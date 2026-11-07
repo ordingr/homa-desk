@@ -43,7 +43,7 @@ def test_search_equals_the_in_process_result(search_app, local, q):
 def test_response_carries_the_documented_fields(search_app):
     body = ok(search_app, "design md")
     assert set(body) >= {"rows", "total", "elapsed_ms", "interpretation", "built_at"}
-    assert body["interpretation"] == f'name contains "design" {DOT} ext: md'
+    assert body["interpretation"] == f'name or path contains "design" {DOT} ext: md'
     assert isinstance(body["elapsed_ms"], (int, float)) and body["built_at"] > 0
     row = body["rows"][0]
     assert {"name", "path", "size", "mtime", "is_dir"} <= set(row)

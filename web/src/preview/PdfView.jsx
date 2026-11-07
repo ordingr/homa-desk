@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Notice } from "./Notices.jsx";
+import { useZoom } from "./zoom.js";
 
 const ASSET_BASE = `${import.meta.env.BASE_URL}pdfjs/`;
 
@@ -23,6 +24,7 @@ export default function PdfView({ blob }) {
   const [doc, setDoc] = useState(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
+  const zoom = useZoom();
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +67,7 @@ export default function PdfView({ blob }) {
         if (cancelled) return;
         const base = pdfPage.getViewport({ scale: 1 });
         const available = Math.max(200, wrapRef.current.clientWidth);
-        const scale = Math.min(3, available / base.width);
+        const scale = Math.min(3, available / base.width) * zoom;
         const ratio = window.devicePixelRatio || 1;
         const viewport = pdfPage.getViewport({ scale: scale * ratio });
         const canvas = canvasRef.current;
@@ -83,7 +85,7 @@ export default function PdfView({ blob }) {
       cancelled = true;
       if (task) task.cancel();
     };
-  }, [doc, page]);
+  }, [doc, page, zoom]);
 
   if (error) return <Notice title="This PDF could not be displayed">{error}</Notice>;
   const count = doc ? doc.numPages : 0;

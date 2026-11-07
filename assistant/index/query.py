@@ -1,8 +1,8 @@
 """Files-mode query grammar (DEC 5, AC-FI-8 .. AC-FI-12).
 
-Space is AND. The first plain term must match the file name; every further
-plain term and every quoted phrase after it must appear in the full path
-(which includes the name). A bare token that equals a known extension and is
+Space is AND. Every plain term and every quoted phrase may match anywhere in
+the full path (which includes the name); rows where all of them hit the file
+name rank above rows where some only hit the folders. A bare token that equals a known extension and is
 not the only token becomes an extension filter. ``-e``/``-p`` take a value;
 ``ext:``/``path:`` are the long forms; ``!word`` excludes; ``"..."`` is a
 literal phrase; ``*`` and ``?`` are wildcards. Any other ``-word`` is a
@@ -104,15 +104,10 @@ def _kind(text: str) -> str:
 
 def _describe(q: Query) -> str:
     parts: list[str] = []
-    primary_is_phrase = not q.terms and bool(q.phrases)
     for t in q.terms:
-        parts.append(f'name {_kind(t)} "{t}"')
-    if primary_is_phrase:
-        parts.append(f'name contains "{q.phrases[0]}"')
-    for t in q.path_terms:
-        parts.append(f'path {_kind(t)} "{t}"')
-    for p in q.phrases[1:] if primary_is_phrase else q.phrases:
-        parts.append(f'path contains "{p}"')
+        parts.append(f'name or path {_kind(t)} "{t}"')
+    for p in q.phrases:
+        parts.append(f'name or path contains "{p}"')
     for p in q.path_parts:
         parts.append(f'path {_kind(p)} "{p}"')
     if q.exts:
@@ -169,7 +164,6 @@ def parse(text: str, known_exts=()) -> Query:
             continue
         bare.append(t.text)
     q.exts = _dedupe(q.exts)
-    q.terms = bare[:1]
-    q.path_terms = bare[1:]
+    q.terms = bare
     q.interpretation = _describe(q)
     return q

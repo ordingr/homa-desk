@@ -13,7 +13,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from . import __version__, netinfo, paths, uibus
+from . import __version__, netinfo, paths, uibus, update
 from .calendar.ics import IcsSource
 from .calendar.meetings import MeetingScheduler
 from .calendar.outlook import OutlookSource
@@ -27,13 +27,13 @@ from .search.notes_bm25 import AskNotesMode
 from .search.saved import SavedSearches
 from .security import token as token_store
 from .actions import shell
-from .server import auth, routes_actions
+from .server import auth, routes_actions, routes_settings
 from .server.app import ServerThread, create_app
 from .server.mcp import build_mcp
 from .server.routes_files import register_files_routes
 from .server.routes_search import known_exts
 from .server.static import register_static
-from .overlay import fullpage, sounds
+from .overlay import fullpage, monitors, sounds, theme
 from .settings import Settings
 
 log = logging.getLogger("assistant.app")
@@ -42,6 +42,8 @@ TEST_MODE_VAR = "ASSISTANT_TEST_MODE"
 DEBUG_TIMEOUT_S = 3.0
 TICK_SLACK_S = 0.05
 MCP_PATH = "/mcp"
+SHUTDOWN_STEPS_S = 3.0
+HARD_EXIT_S = 10.0
 
 
 
@@ -56,6 +58,14 @@ class _ProactorResetFilter(logging.Filter):
         return "_call_connection_lost" not in context and "_loop_reading" not in context
 
 
+class _ShutdownCancelFilter(logging.Filter):
+    """Drops the traceback of a request that uvicorn cancelled because it outlived the graceful-shutdown timeout."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, asyncio.CancelledError)
+
+
 def _setup_logging() -> None:
     handler = logging.handlers.RotatingFileHandler(
         paths.logs_dir() / "app.log", maxBytes=2 * 1024 * 1024, backupCount=4, encoding="utf-8")
@@ -63,10 +73,12 @@ def _setup_logging() -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(handler)
-    console = logging.StreamHandler(sys.stderr)
-    console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    root.addHandler(console)
+    if sys.stderr is not None:
+        console = logging.StreamHandler(sys.stderr)
+        console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        root.addHandler(console)
     logging.getLogger("asyncio").addFilter(_ProactorResetFilter())
+    logging.getLogger("uvicorn.error").addFilter(_ShutdownCancelFilter())
 
 
 class _ExactMount:
@@ -107,6 +119,7 @@ class App:
         self.search_modes = None
         self.popup = None
         self.hotkey = None
+        self.display_watch = None
         self.settings_window = None
         self._started_at = time.monotonic()
         self._token = ""
@@ -118,6 +131,7 @@ class App:
         self._tick_for: Optional[float] = None
         self._test_mode = os.environ.get(TEST_MODE_VAR) == "1"
         self._windowed = sys.stderr is None
+        self.hard_exit = False
 
     def run(self) -> int:
         paths.ensure_layout()
@@ -155,21 +169,25 @@ class App:
                               opener=self._open_fullpage)
         register_static(web_app)
         web_app.router.routes.extend(routes_actions.routes)
+        web_app.router.routes.extend(routes_settings.routes)
         web_app.router.routes.insert(0, Route("/v1/health", self._health_route, methods=["GET"]))
         web_app.router.routes.append(Route(MCP_PATH, _ExactMount(mcp_asgi, MCP_PATH)))
         web_app.router.routes.append(Route("/v1/shutdown", self._shutdown_route, methods=["POST"]))
         if self._test_mode:
             log.warning("%s=1: serving /v1/_debug/ui", TEST_MODE_VAR)
             web_app.router.routes.append(Route("/v1/_debug/ui", self._debug_route, methods=["GET"]))
+            web_app.router.routes.append(Route("/v1/_debug/monitors", self._debug_monitors_route,
+                                               methods=["POST"]))
         self.server = ServerThread(web_app, self.settings.port)
+        self._write_pid()
         if not self.server.start():
             log.error("could not start the HTTP server on port %d", self.settings.port)
+            self._remove_pid()
             self.meetings.stop()
             self.notes_mode.close()
             self.scheduler.stop()
             self._report_bind_failure()
             return 1
-        self._write_pid()
 
         try:
             self._build_ui()
@@ -236,6 +254,7 @@ class App:
         self.root = icon_mod.create_root()
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
         uibus.start(self.root)
+        theme.install(self.settings, self.scheduler, self.root)
         actions = icon_mod.IconActions(
             search=self._open_search,
             remind_submit=self._remind_submit,
@@ -249,11 +268,20 @@ class App:
         self.cards_ui = cards_mod.CardsUI(
             self.root, self.icon, cards_mod.callbacks_for_store(self.store, self._open_url), self.settings,
             on_close_request=self.shutdown)
+        self.display_watch = monitors.DisplayWatcher(self.icon, self.root)
+        self.display_watch.start()
         self._sync_indicators()
         self._sync_visible()
         self._arm_tick()
         self._build_search()
+        self._show_update_notice()
         log.info("overlay ready")
+
+    def _show_update_notice(self) -> None:
+        notice = update.consume_notice()
+        if notice is not None:
+            self.store.upsert(Card(id="updated", kind="custom", title=notice["title"], detail=notice["detail"]),
+                              "app")
 
     def _files_source(self):
         store, delta = self.index.current()
@@ -284,7 +312,8 @@ class App:
             from .overlay import hotkey as hotkey_mod, search_ui
             self.popup = search_ui.SearchPopup(self.root, self.icon, self.search_modes, self.settings,
                                                saved=self.saved, on_fullpage=self._on_fullpage,
-                                               on_action=self._on_action)
+                                               on_action=self._on_action, fullpage_is_open=self._fullpage_open,
+                                               fullpage_close=fullpage.close)
             self.hotkey = hotkey_mod.Hotkey(
                 str(self.settings.get("hotkey", "") or ""),
                 lambda: uibus.post(self.popup.toggle, self.hotkey.last_press),
@@ -310,12 +339,19 @@ class App:
             log.exception("could not open the full page")
             return False
         if not opened:
-            log.warning("the full page did not open")
+            reason = fullpage.last_failure() or "The full page did not open."
+            log.warning("the full page did not open: %s", reason)
+            if self.popup is not None:
+                uibus.post(self.popup.show_note, reason)
+        elif self.popup is not None:
+            # The full page takes over the search; one search window is enough.
+            uibus.post(self.popup.close)
         return opened
 
-    def _on_action(self, verb: str, row, confirm: bool = False, new_name: Optional[str] = None) -> dict:
+    def _on_action(self, verb: str, row, confirm: bool = False, new_name: Optional[str] = None,
+                   whole_file: bool = False) -> dict:
         return shell.dispatch(verb, row.path, new_name=new_name, confirm=confirm, index=self.index,
-                              settings=self.settings)
+                              settings=self.settings, whole_file=whole_file)
 
     def _fullpage_open(self) -> bool:
         return fullpage.is_open()
@@ -520,6 +556,9 @@ class App:
             snapshot["search"] = self.popup.debug_state()
         snapshot["actions"] = shell.action_log()[-50:]
         snapshot["fullpage"] = {"open": self._fullpage_open()}
+        snapshot["theme"] = theme.debug_state()
+        if self.display_watch is not None:
+            snapshot["monitors"] = self.display_watch.debug_state()
         if self.hotkey is not None:
             snapshot["hotkey"] = self.hotkey.status()
             snapshot["hotkey_combo"] = self.hotkey.combo
@@ -534,6 +573,17 @@ class App:
         except asyncio.TimeoutError:
             return JSONResponse({"error": "ui thread busy"}, status_code=503)
         return JSONResponse(data)
+
+    async def _debug_monitors_route(self, request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+            if body.get("restore") is True:
+                await asyncio.wrap_future(uibus.submit(monitors.simulate_restore))
+            else:
+                await asyncio.wrap_future(uibus.submit(lambda: monitors.simulate_remove(int(body["idx"]))))
+        except (ValueError, KeyError, IndexError, RuntimeError, TypeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+        return JSONResponse({"ok": True})
 
     def _write_pid(self) -> None:
         try:
@@ -550,25 +600,50 @@ class App:
         except (OSError, IndexError):
             pass
 
+    def _run_steps(self, steps: list) -> None:
+        """Runs the teardown steps side by side; one that is stuck is logged and left behind after the shared
+        deadline instead of holding up the server stop and the pid file release."""
+        def run(name, fn) -> None:
+            try:
+                fn()
+            except Exception:
+                log.exception("shutdown step %s failed", name)
+
+        started = [(name, threading.Thread(target=run, args=(name, fn), name=f"shutdown-{name}", daemon=True))
+                   for name, fn in steps]
+        for _, th in started:
+            th.start()
+        deadline = time.monotonic() + SHUTDOWN_STEPS_S
+        for name, th in started:
+            th.join(max(0.0, deadline - time.monotonic()))
+            if th.is_alive():
+                log.warning("shutdown step %s still running after %.0f s; moving on", name, SHUTDOWN_STEPS_S)
+
+    def _hard_exit(self) -> None:
+        time.sleep(HARD_EXIT_S)
+        log.error("shutdown did not finish within %.0f s; exiting", HARD_EXIT_S)
+        self._remove_pid()
+        logging.shutdown()
+        os._exit(1)
+
     def shutdown(self) -> None:
         if self.stop.is_set():
             return
         self.stop.set()
         log.info("shutting down")
+        if self.hard_exit:
+            threading.Thread(target=self._hard_exit, name="hard-exit", daemon=True).start()
         uibus.stop()
-        if self.meetings is not None:
-            self.meetings.stop()
-        if self.hotkey is not None:
-            self.hotkey.stop()
-        try:
-            fullpage.close()
-        except Exception:
-            log.exception("could not close the full page")
-        if self.index is not None:
-            self.index.stop()
-        if self.notes_mode is not None:
-            self.notes_mode.close()
-        self.scheduler.stop()
+        if self.server is not None:
+            self.server.request_stop()
+        steps = [("calendar", lambda: self.meetings is not None and self.meetings.stop()),
+                 ("hotkey", lambda: self.hotkey is not None and self.hotkey.stop()),
+                 ("display watch", lambda: self.display_watch is not None and self.display_watch.stop()),
+                 ("full page", fullpage.close),
+                 ("index", lambda: self.index is not None and self.index.stop()),
+                 ("notes", lambda: self.notes_mode is not None and self.notes_mode.close()),
+                 ("scheduler", self.scheduler.stop)]
+        self._run_steps(steps)
         if self.server is not None:
             self.server.stop()
         self._remove_pid()
@@ -584,4 +659,12 @@ class App:
 
 
 def main() -> int:
-    return App().run()
+    app = App()
+    app.hard_exit = True
+    code = app.run()
+    lingering = [t.name for t in threading.enumerate() if t is not threading.main_thread() and not t.daemon]
+    if lingering:
+        log.warning("exiting with non-daemon threads still running: %s", ", ".join(lingering))
+        logging.shutdown()
+        os._exit(code)
+    return code

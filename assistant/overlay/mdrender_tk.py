@@ -23,8 +23,11 @@ _INLINE = re.compile(
 
 
 def configure_tags(text: tk.Text, family: str = "Segoe UI", size: int = 10,
-                   fg: str = gfx.PANEL_FG, dim: str = gfx.PANEL_DIM, bg: str = gfx.PANEL_BG,
+                   fg: Optional[str] = None, dim: Optional[str] = None, bg: Optional[str] = None,
                    hit_bg: str = "#6B5A12", mono: str = "Consolas") -> None:
+    fg = gfx.PANEL_FG if fg is None else fg
+    dim = gfx.PANEL_DIM if dim is None else dim
+    bg = gfx.PANEL_BG if bg is None else bg
     base = tkfont.Font(family=family, size=size)
     bold = tkfont.Font(family=family, size=size, weight="bold")
     italic = tkfont.Font(family=family, size=size, slant="italic")

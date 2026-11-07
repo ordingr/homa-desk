@@ -17,8 +17,7 @@ crawler = pytest.importorskip("assistant.index.crawler", reason="assistant/index
 store_mod = pytest.importorskip("assistant.index.store", reason="assistant/index/store.py (M3a-1) not present")
 excludes_mod = pytest.importorskip("assistant.index.excludes", reason="assistant/index/excludes.py (M3a-1) not present")
 
-EXCLUDED_PREFIXES = ("node_modules", "$RECYCLE.BIN", "AppData/Local/App/Code Cache",
-                     "AppData/Local/Microsoft/Office/16.0/OfficeFileCache")
+EXCLUDED_PREFIXES = ("node_modules", "$RECYCLE.BIN", "AppData")
 
 
 def expected_entries():
@@ -71,7 +70,7 @@ def test_per_rule_counts_are_reported(search_tree):
     assert counts and all(isinstance(n, int) and n > 0 for n in counts.values())
     vhdx = [n for rule, n in counts.items() if "vhdx" in str(rule).lower()]
     assert vhdx == [2], f"two .vhdx files in the tree; counts={counts}"
-    assert sum(counts.values()) == 6, "recycle bin, node_modules, two .vhdx, Code Cache, OfficeFileCache"
+    assert sum(counts.values()) == 5, "recycle bin, node_modules, two .vhdx, and the AppData folder (one hit, never entered)"
     nm = [n for rule, n in counts.items() if "node_modules" in str(rule).lower()]
     assert nm and sum(nm) >= 1, "node_modules is counted once as a directory; its children are never visited"
 

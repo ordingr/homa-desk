@@ -262,7 +262,28 @@ class SearchPages:
         self.exts_entry.pack(side="left", fill="x", expand=True)
         self.exts_var.trace_add("write", lambda *_: w._debounce("known_exts", self.apply_known_exts))
         w._text(page, KNOWN_EXTS_HELP)
+        row = w._row(page, "MD Vault address")
+        self.vault_var = tk.StringVar(value=self._md_vault_setting())
+        self.vault_entry = w._entry(row, self.vault_var, 40)
+        self.vault_entry.pack(side="left", fill="x", expand=True)
+        self.vault_var.trace_add("write", lambda *_: w._debounce("md_vault_url", self.apply_md_vault))
+        w._text(page, "Web address the MD Vault action opens (http:// or https://). Leave empty to open the file "
+                      "with its default app.")
         w._error_line(SEARCH_PAGE)
+
+    def _md_vault_setting(self) -> str:
+        cfg = self.settings.get("md_vault") or {}
+        value = cfg.get("url", "") if isinstance(cfg, dict) else ""
+        return value if isinstance(value, str) else ""
+
+    def apply_md_vault(self) -> None:
+        text = self.vault_var.get().strip()
+        if text == self._md_vault_setting():
+            return
+        if text and not text.lower().startswith(("http://", "https://")):
+            self.w._fail(SEARCH_PAGE, "the MD Vault address must start with http:// or https://")
+            return
+        self.w._save(SEARCH_PAGE, "md_vault", {"url": text})
 
     def _placement(self) -> str:
         value = self.settings.get("search_placement", "icon")

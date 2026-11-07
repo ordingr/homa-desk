@@ -176,14 +176,14 @@ def test_overflow_ends_with_a_correct_index_after_the_rescan(rig):
 
 
 def test_a_burst_of_real_creates_converges(rig):
-    folder = rig.root / "burst"
+    folder = rig.root / "flooddir"
     folder.mkdir()
     for n in range(4000):
-        (folder / f"burst_{n:05d}.txt").write_text("")
+        (folder / f"zxflood_{n:05d}.txt").write_text("")
 
     def count():
         store, delta = rig.manager.current()
-        return search.run(query.parse("burst_", set()), store, delta, limit=1).total
+        return search.run(query.parse("zxflood_", set()), store, delta, limit=1).total
     assert wait_until(lambda: count() == 4000, 90, 0.5), f"index shows {count()} of 4000 after the burst"
 
 

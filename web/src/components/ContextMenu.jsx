@@ -1,22 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CloudSendIcon, LocalIcon } from "./Icons.jsx";
+import { chordLabel } from "../shortcuts.js";
 
 export const MENU_ITEMS = [
-  { verb: "open", label: "Open", key: "Enter" },
+  { verb: "open", label: "Open", shortcut: "open" },
   { verb: "open_with", label: "Open with…" },
-  { verb: "reveal", label: "Reveal in Explorer", key: "Ctrl+Enter" },
-  { verb: "copy_path", label: "Copy path" },
+  { verb: "reveal", label: "Reveal in Explorer", shortcut: "reveal" },
+  { verb: "copy_path", label: "Copy path", shortcut: "copy_path" },
   { verb: "copy_path_quoted", label: "Copy path (quoted)" },
   { separator: true },
-  { verb: "rename", label: "Rename…" },
-  { verb: "properties", label: "Properties" },
-  { verb: "md_vault", label: "Open in MD Vault", key: "Ctrl+M" },
-  { verb: "recycle", label: "Move to Recycle Bin" },
+  { verb: "rename", label: "Rename…", shortcut: "rename" },
+  { verb: "properties", label: "Properties", shortcut: "properties" },
+  { verb: "md_vault", label: "Open in MD Vault", shortcut: "md_vault" },
+  { verb: "recycle", label: "Move to Recycle Bin", shortcut: "recycle" },
   { separator: true },
   { verb: "ask_claude", label: "Ask Claude about this file", cloud: true },
 ];
 
-export default function ContextMenu({ x, y, onPick, onClose }) {
+export default function ContextMenu({ x, y, claude, shortcuts, onPick, onClose }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
@@ -29,7 +30,7 @@ export default function ContextMenu({ x, y, onPick, onClose }) {
   }, [x, y]);
 
   useEffect(() => {
-    ref.current.querySelector("button")?.focus();
+    ref.current.querySelector("button:not(:disabled)")?.focus();
     const away = (event) => {
       if (!ref.current.contains(event.target)) onClose();
     };
@@ -44,7 +45,7 @@ export default function ContextMenu({ x, y, onPick, onClose }) {
   }, [onClose]);
 
   const onKeyDown = (event) => {
-    const buttons = [...ref.current.querySelectorAll("button")];
+    const buttons = [...ref.current.querySelectorAll("button:not(:disabled)")];
     const at = buttons.indexOf(document.activeElement);
     if (event.key === "ArrowDown") buttons[(at + 1) % buttons.length].focus();
     else if (event.key === "ArrowUp") buttons[(at - 1 + buttons.length) % buttons.length].focus();
@@ -64,14 +65,16 @@ export default function ContextMenu({ x, y, onPick, onClose }) {
       onContextMenu={(event) => event.preventDefault()}
       data-testid="context-menu"
     >
-      {MENU_ITEMS.map((item, index) =>
-        item.separator ? (
-          <hr key={index} />
-        ) : (
+      {MENU_ITEMS.map((item, index) => {
+        if (item.separator) return <hr key={index} />;
+        const blocked = item.cloud && !claude.available;
+        return (
+          <Fragment key={item.verb}>
           <button
-            key={item.verb}
             type="button"
             role="menuitem"
+            disabled={blocked}
+            title={blocked ? claude.reason : undefined}
             className={`menuitem ${item.cloud ? "cloud" : "local"}`}
             data-verb={item.verb}
             data-scope={item.cloud ? "sends-to-claude" : "local"}
@@ -84,11 +87,17 @@ export default function ContextMenu({ x, y, onPick, onClose }) {
             {item.cloud ? (
               <span className="menutag">sends to Claude</span>
             ) : (
-              item.key && <kbd>{item.key}</kbd>
+              item.shortcut && shortcuts[item.shortcut] && <kbd>{chordLabel(shortcuts[item.shortcut])}</kbd>
             )}
           </button>
-        ),
-      )}
+          {blocked && (
+            <div className="menu-note" data-testid="ask-unavailable">
+              {claude.reason}
+            </div>
+          )}
+          </Fragment>
+        );
+      })}
       <div className="menu-legend">
         <span className="legend local">
           <LocalIcon /> local

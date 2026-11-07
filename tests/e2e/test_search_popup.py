@@ -130,9 +130,9 @@ def test_design_md_enter_shows_results_header_details_and_interpretation(root, p
     popup.open()
     pump(root, 0.3)
     st = type_and_enter(root, popup, "design md")
-    assert st["state"] == "results" and st["result_count"] == 1 and st["selected_name"] == "designer.md"
-    assert "1 file(s)" in st["header"] and "index from" in st["header"] and " ms" in st["header"]
-    assert 'name contains "design"' in st["header"] and "ext: md" in st["header"]
+    assert st["state"] == "results" and st["result_count"] == 2 and st["selected_name"] == "designer.md"
+    assert "2 file(s)" in st["header"] and "index from" in st["header"] and " ms" in st["header"]
+    assert 'name or path contains "design"' in st["header"] and "ext: md" in st["header"]
     assert st["interpretation"].endswith("ext: md")
     print("details line:", repr(st["details"]))
     assert "designer.md" in st["details"] and "800" in st["details"]
@@ -143,14 +143,14 @@ def test_plain_design_lists_every_match_and_up_down_move_the_selection(root, pop
     popup.open()
     pump(root, 0.3)
     st = type_and_enter(root, popup, "design")
-    assert st["result_count"] == 5 and st["selected"] == 0
+    assert st["result_count"] == 7 and st["selected"] == 0
     popup.move(1)
     popup.move(1)
     assert popup.debug_state()["selected"] == 2
     popup.move(-5)
     assert popup.debug_state()["selected"] == 0, "selection is clamped at the top"
     popup.move(99)
-    assert popup.debug_state()["selected"] == 4, "and at the bottom"
+    assert popup.debug_state()["selected"] == 6, "and at the bottom"
 
 
 def test_enter_on_unchanged_results_opens_the_selected_row(root, popup):
@@ -251,11 +251,11 @@ def test_chips_rerun_the_search_and_show_in_the_interpretation(root, popup):
     assert st["chips"] == ["folders"] and st["result_count"] == 2 and "Folders" in st["interpretation"]
     popup.toggle_chip("docs")
     settle(root, popup)
-    assert popup.debug_state()["result_count"] == 3, "chips OR together"
+    assert popup.debug_state()["result_count"] == 4, "chips OR together"
     popup.toggle_chip("folders")
     popup.toggle_chip("docs")
     settle(root, popup)
-    assert popup.debug_state()["result_count"] == 5
+    assert popup.debug_state()["result_count"] == 7
 
 
 def test_modified_filter_narrows_and_clears(root, popup):
@@ -265,10 +265,10 @@ def test_modified_filter_narrows_and_clears(root, popup):
     popup.set_modified("7d")
     settle(root, popup)
     st = popup.debug_state()
-    assert st["modified"] == "7d" and "designer.md" not in st["header"] and 0 < st["result_count"] < 5
+    assert st["modified"] == "7d" and "designer.md" not in st["header"] and 0 < st["result_count"] < 7
     popup.set_modified("")
     settle(root, popup)
-    assert popup.debug_state()["result_count"] == 5
+    assert popup.debug_state()["result_count"] == 7
 
 
 # ---- AC-FI-16: saved searches ------------------------------------------------------------------------------------------------------------
@@ -288,7 +288,7 @@ def test_saved_search_is_listed_before_typing_and_runs(root, popup):
     popup.run_saved("my docs")
     settle(root, popup)
     st = popup.debug_state()
-    assert st["state"] == "results" and st["result_count"] == 1 and st["chips"] == ["docs"] and st["text"] == "design md"
+    assert st["state"] == "results" and st["result_count"] == 2 and st["chips"] == ["docs"] and st["text"] == "design md"
     popup.close()
     popup.open()
     pump(root, 0.3)

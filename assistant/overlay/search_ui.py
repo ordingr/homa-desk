@@ -4,6 +4,7 @@ import ctypes
 import dataclasses
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -13,13 +14,86 @@ from tkinter import font as tkfont
 from typing import Any, Callable, Optional
 
 from .. import uibus
+from ..actions import claude
 from ..search import modes as search_modes
 from ..search.modes import (MODIFIED_CHOICES, SORT_CHOICES, CHIP_LABELS, CHIPS, ModeUnavailable, Row, SearchResult,
                             valid_modified)
 from ..search.saved import SavedSearches
-from . import gfx, monitors, panel, win
+from ..settings import DEFAULT_SHORTCUTS
+from . import ask_claude_ui, gfx, monitors, panel, theme, win
 
 log = logging.getLogger("assistant.overlay.search_ui")
+
+LIVE_DELAY_MS = 120
+GHOST_WORD_END = " .-_()[]"
+GHOST_ROWS = 10
+FIELD = {
+    "dark": {"bg": "#6A3DB8", "fg": "#FFFFFF", "dim": "#E4D8F7", "ghost": "#D2C6EC"},
+    "light": {"bg": "#E3D7F6", "fg": "#2B1557", "dim": "#5A4A80", "ghost": "#6B6482"},
+}
+
+
+def field_colours() -> dict:
+    return FIELD[theme.current()]
+
+
+def _blend(fg: str, bg: str, a: float) -> str:
+    f = [int(fg[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(bg[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(x * a + y * (1 - a)) for x, y in zip(f, b))
+
+
+def pill_image(master: tk.Misc, w: int, h: int, fill: str, bg: str) -> tk.PhotoImage:
+    """A w x h stadium (corner radius h/2) in ``fill`` whose edge pixels are pre-blended toward ``bg``."""
+    img = tk.PhotoImage(master=master, width=w, height=h)
+    r = h / 2.0
+    cap = int(r) + 1
+    img.put(bg, to=(0, 0, w, h))
+    if w > 2 * cap:
+        img.put(fill, to=(cap, 0, w - cap, h))
+    for y in range(h):
+        left, right = [], []
+        for x in range(cap):
+            d = ((x + 0.5 - r) ** 2 + (y + 0.5 - r) ** 2) ** 0.5
+            colour = _blend(fill, bg, max(0.0, min(1.0, r - d + 0.5)))
+            left.append(colour)
+            right.append(colour)
+        img.put("{" + " ".join(left) + "}", to=(0, y))
+        img.put("{" + " ".join(reversed(right)) + "}", to=(w - cap, y))
+    return img
+
+
+def completion(prefix: str, name: str) -> str:
+    """The rest of the word of ``name`` that starts with ``prefix`` (at the start or a word boundary), up to the
+    next separator; a following extension comes whole. Empty when nothing continues the prefix."""
+    low, want = name.casefold(), prefix.casefold()
+    if not want or len(low) != len(name):
+        return ""
+    i = low.find(want)
+    while i >= 0:
+        if i == 0 or not name[i - 1].isalnum():
+            rest = name[i + len(want):]
+            if rest.startswith("."):
+                return rest
+            cut = next((k for k, ch in enumerate(rest) if ch in GHOST_WORD_END), len(rest))
+            if cut:
+                return rest[:cut]
+        i = low.find(want, i + 1)
+    return ""
+
+
+def suggestion(text: str, names) -> str:
+    """Ghost text for the last word of ``text`` from the first of ``names`` that continues it."""
+    if not text or text[-1].isspace():
+        return ""
+    prefix = text.rsplit(None, 1)[-1]
+    if prefix[0] in '"!' or any(ch in prefix for ch in "*?:"):
+        return ""
+    for name in names:
+        rest = completion(prefix, name)
+        if rest:
+            return rest
+    return ""
 
 PLACEMENTS = ("icon", "mouse", "focused", "primary", "last")
 STATE_KEY = "search_box"
@@ -62,7 +136,7 @@ BUTTONS = (
     ("open", "Open", "Enter"),
     ("md_vault", "MD Vault", "Ctrl+M"),
     ("reveal", "Explorer", "Ctrl+Enter"),
-    ("folder_listing", "Fastsearch folder", "Ctrl+F"),
+    ("folder_listing", "List folder", "Ctrl+F"),
 )
 LOCAL_MARK = "● "
 CLAUDE_MARK = "☁ "
@@ -101,6 +175,17 @@ def format_built_at(built_at: Optional[float]) -> str:
         return ""
 
 
+_RANGE_TOKEN = re.compile(r"(?<!\S)(?:modified:)?(\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2})(?!\S)", re.IGNORECASE)
+
+
+def extract_range(text: str) -> tuple:
+    """(text without the token, 'YYYY-MM-DD..YYYY-MM-DD' or ''): the first valid `modified:A..B` (or bare A..B) token."""
+    for found in _RANGE_TOKEN.finditer(text):
+        if valid_modified(found.group(1)):
+            return " ".join((text[:found.start()] + " " + text[found.end():]).split()), found.group(1)
+    return text, ""
+
+
 def format_modified(mtime: Optional[float]) -> str:
     if mtime is None:
         return ""
@@ -136,6 +221,35 @@ def header_text(result: SearchResult, noun: str, elapsed_ms: Optional[float]) ->
     return " · ".join(parts)
 
 
+_KEYSYMS = {"enter": ("Return", "KP_Enter"), "escape": ("Escape",), "delete": ("Delete",), "tab": ("Tab",),
+            "space": ("space",), "backspace": ("BackSpace",), "insert": ("Insert",), "home": ("Home",),
+            "end": ("End",), "pageup": ("Prior",), "pagedown": ("Next",), "up": ("Up",), "down": ("Down",),
+            "left": ("Left",), "right": ("Right",), "menu": ("App",)}
+_MODS = (("ctrl", "Control"), ("alt", "Alt"), ("shift", "Shift"))
+
+
+def chord_sequences(chord: str) -> list:
+    """Tk key sequences for a settings chord such as "Ctrl+Shift+S", "F2" or "Alt+Enter"; [] when unusable."""
+    parts = [p for p in str(chord).strip().split("+") if p]
+    if not parts:
+        return []
+    key, mods = parts[-1].casefold(), {p.casefold() for p in parts[:-1]}
+    if not mods <= {"ctrl", "alt", "shift"}:
+        return []
+    if key in _KEYSYMS:
+        names = _KEYSYMS[key]
+    elif re.fullmatch(r"f(?:[1-9]|1[0-9]|2[0-4])", key):
+        names = (key.upper(),)
+    elif len(key) == 1 and key.isascii() and key.isalnum():
+        names = (key.upper() if "shift" in mods and key.isalpha() else key,)
+        if key.isalpha():
+            mods.discard("shift")
+    else:
+        return []
+    prefix = [name for m, name in _MODS if m in mods]
+    return ["<" + "-".join(prefix + [name]) + ">" for name in names]
+
+
 class _DictSettings:
     def __init__(self, data: Optional[dict] = None) -> None:
         self.data = data or {}
@@ -152,6 +266,8 @@ class SearchPopup:
                  run_search: Optional[Callable[..., Any]] = None, saved: Optional[SavedSearches] = None,
                  on_fullpage: Optional[Callable[[str], None]] = None,
                  on_action: Optional[Callable[..., Any]] = None,
+                 fullpage_is_open: Optional[Callable[[], bool]] = None,
+                 fullpage_close: Optional[Callable[[], Any]] = None,
                  post: Callable[..., None] = uibus.post,
                  clock: Callable[[], float] = time.perf_counter) -> None:
         self.root = root
@@ -162,6 +278,8 @@ class SearchPopup:
         self.saved = saved or SavedSearches()
         self.on_fullpage = on_fullpage
         self.on_action = on_action
+        self.fullpage_is_open = fullpage_is_open
+        self.fullpage_close = fullpage_close
         self.on_context: Optional[Callable[[Row, Any], None]] = self.show_context_menu
         self._post = post
         self._clock = clock
@@ -191,6 +309,12 @@ class SearchPopup:
         self.exstyle = 0
         self.hwnd = 0
         self._token = 0
+        self._live_job: Optional[str] = None
+        self._ghost = ""
+        self._field: Optional[dict] = None
+        self._pill: Optional[tk.PhotoImage] = None
+        self._pill_key: Optional[tuple] = None
+        self._entry_x, self._entry_w, self._entry_cy = 0, 40, 0.0
         self._anchor: dict = {"x": 0, "cy": 0, "align": "right"}
         self._offset = 0
         self._fonts: dict = {}
@@ -204,21 +328,31 @@ class SearchPopup:
         self.menu_open = False
         self.last_action: Optional[dict] = None
         self._dialog: Optional[dict] = None
+        self.answer_window: Optional[ask_claude_ui.AnswerWindow] = None
+        self._bound_seqs: list = []
+        self._chords_bound: Optional[dict] = None
+        self.ask_thread: Optional[threading.Thread] = None
 
         self.win = tk.Toplevel(root)
         self.win.withdraw()
         self.win.overrideredirect(True)
-        self.win.configure(bg=gfx.CHROMA_KEY)
+        self.rounded = win.round_corners(win.hwnd_of(self.win))
+        key = gfx.INPUT_BORDER if self.rounded else gfx.CHROMA_KEY
+        self.win.configure(bg=key)
         self.win.attributes("-topmost", True)
-        self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
-        self.canvas = tk.Canvas(self.win, bg=gfx.CHROMA_KEY, highlightthickness=0, bd=0)
+        if not self.rounded:
+            self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
+        self.canvas = tk.Canvas(self.win, bg=key, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True)
         self.var = tk.StringVar()
-        self.entry = tk.Entry(self.canvas, textvariable=self.var, bg=gfx.INPUT_BG, fg=gfx.PANEL_FG,
-                              insertbackground=gfx.PANEL_FG, relief="flat", highlightthickness=1,
-                              highlightbackground=gfx.INPUT_BORDER, highlightcolor=gfx.PURPLE,
-                              selectbackground=gfx.BLUE)
+        look = field_colours()
+        self.entry = tk.Entry(self.canvas, textvariable=self.var, bg=look["bg"], fg=look["fg"],
+                              insertbackground=look["fg"], relief="flat", bd=0, highlightthickness=0,
+                              selectbackground=gfx.BLUE, selectforeground=gfx.WHITE)
+        self.ghost_label = tk.Label(self.canvas, text="", bg=look["bg"], fg=look["ghost"], bd=0, padx=0, pady=0)
         self.var.trace_add("write", lambda *_: self._on_text())
+        for sequence in ("<KeyRelease>", "<ButtonRelease-1>"):
+            self.entry.bind(sequence, lambda _e: self._place_ghost(), add="+")
         self._bind_keys()
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._motion)
@@ -227,6 +361,7 @@ class SearchPopup:
         self.canvas.bind("<MouseWheel>", self._wheel)
         self.win.bind("<Escape>", lambda _e: self._escape())
         self.win.protocol("WM_DELETE_WINDOW", self.close)
+        theme.on_change(self._on_theme)
 
     # ---- mode helpers -------------------------------------------------
 
@@ -273,6 +408,8 @@ class SearchPopup:
             self._focus()
             return
         self.press_ts = press_ts
+        threading.Thread(target=claude.status, name="claude-probe", daemon=True).start()
+        self._apply_shortcuts()
         self.mode_i = 0
         self.chips = set()
         self.modified = ""
@@ -300,6 +437,7 @@ class SearchPopup:
         if self.state == "closed":
             return
         self._token += 1
+        self._cancel_live()
         self.state = "closed"
         self.pending = False
         self.win.withdraw()
@@ -459,14 +597,54 @@ class SearchPopup:
     def _on_text(self) -> None:
         if self.state == "closed":
             return
-        if self.state == "input":
+        self._cancel_live()
+        text = self.var.get()
+        if self.state == "results" and not text.strip():
+            self._token += 1
+            self._reset_results()
+            self.state = "input"
+            self._refresh_saved()
+            self._apply_geometry()
+        elif self.state == "input":
             self.saved_sel = min(self.saved_sel, max(0, len(self._saved_cache) - 1))
             self._apply_geometry()
+        if text.strip():
+            self._live_job = self.win.after(LIVE_DELAY_MS, self._live_search)
         self._render()
+
+    def _on_theme(self, _old: str, _new: str) -> None:
+        try:
+            self._render()
+        except tk.TclError:
+            pass
+
+    def _cancel_live(self) -> None:
+        if self._live_job is not None:
+            try:
+                self.win.after_cancel(self._live_job)
+            except tk.TclError:
+                pass
+            self._live_job = None
+
+    def _live_search(self) -> None:
+        self._live_job = None
+        if self.state == "closed" or not self.var.get().strip():
+            return
+        if self.state == "results" and self.var.get() == self.last_text:
+            return
+        try:
+            mode, _query, _switched = self.effective()
+        except ModeUnavailable:
+            return
+        if not getattr(mode, "local", False):
+            return
+        self.search_now(keep=self.state == "results")
 
     def _escape(self) -> str:
         if self.menu_open:
             self._close_menu()
+        elif self._fullpage_is_open():
+            self._fullpage_close()
         elif self._listing_stack:
             self._leave_listing()
         elif self.state == "results":
@@ -482,13 +660,36 @@ class SearchPopup:
         return "break"
 
     def escape(self) -> str:
-        """Esc chain step (menu -> folder listing -> results -> normal -> closed); returns the resulting state."""
+        """Esc chain step (menu -> full page -> folder listing -> results -> normal -> closed); returns the resulting state."""
         self._escape()
         return self.state
+
+    def _fullpage_is_open(self) -> bool:
+        if self.fullpage_is_open is None or self.fullpage_close is None:
+            return False
+        try:
+            return bool(self.fullpage_is_open())
+        except Exception:
+            log.exception("could not ask whether the full page is open")
+            return False
+
+    def _fullpage_close(self) -> None:
+        try:
+            self.fullpage_close()
+        except Exception:
+            log.exception("could not close the full page")
+
+    def show_note(self, text: str) -> None:
+        """One line in the details area, for messages that arrive from outside the popup (e.g. the full page did not open)."""
+        if self.state == "closed" or not text:
+            return
+        self.details, self.details_kind = text, "err"
+        self._render()
 
     # ---- searching ----------------------------------------------------
 
     def submit(self) -> None:
+        self._cancel_live()
         text = self.var.get()
         if self.state == "input" and not text.strip():
             if self._saved_visible() and self._saved_cache:
@@ -499,8 +700,11 @@ class SearchPopup:
             return
         self.search_now()
 
-    def search_now(self) -> None:
+    def search_now(self, keep: bool = False) -> None:
         mode, query, _switched = self.effective()
+        query, typed_range = extract_range(query)
+        if typed_range:
+            self.modified = typed_range
         if not query:
             return
         self._token += 1
@@ -509,9 +713,10 @@ class SearchPopup:
         self.state = "results"
         self.pending = True
         self.error = ""
-        self.header = "searching…"
         self._listing_stack = []
-        self.rows, self.sel, self.top, self.details, self.details_kind = [], -1, 0, "", ""
+        if not keep:
+            self.header = "searching…"
+            self.rows, self.sel, self.top, self.details, self.details_kind = [], -1, 0, "", ""
         self.result_noun = getattr(mode, "noun", None) or "result(s)"
         self.last_text = self.var.get()
         self._apply_geometry()
@@ -654,8 +859,20 @@ class SearchPopup:
         self.set_sort(keys[(keys.index(self.sort) + 1) % len(keys)])
 
     def cycle_modified(self) -> None:
+        """Any time -> Today -> 7 days -> 30 days -> Custom (the range typed in the query bar) -> Any time.
+        Custom is skipped when the bar holds no valid range."""
         keys = [k for k, _ in MODIFIED_CHOICES]
-        self.set_modified(keys[(keys.index(self.modified) + 1) % len(keys)] if self.modified in keys else "")
+        if self.modified in keys:
+            nxt = self.modified if keys.index(self.modified) == len(keys) - 1 else keys[keys.index(self.modified) + 1]
+            if nxt != self.modified:
+                self.set_modified(nxt)
+                return
+            clean, custom = extract_range(self.var.get())
+            if custom:
+                self.var.set(clean)
+                self.set_modified(custom)
+                return
+        self.set_modified("")
 
     def _rerun_if_results(self) -> None:
         if self.state == "results" and self.var.get().strip():
@@ -679,7 +896,12 @@ class SearchPopup:
         try:
             result = self.on_action(verb, row, **kwargs)
             if isinstance(result, dict) and result.get("needs_confirmation"):
-                if self._ask_confirm(str(result.get("message", "")), verb == "ask_claude"):
+                summary = result.get("summary")
+                if verb == "ask_claude" and isinstance(summary, dict) and summary.get("available") is False:
+                    result = {"ok": False, "message": str(summary.get("reason") or claude.REASON_ABSENT)}
+                elif verb == "ask_claude":
+                    return self._ask_claude_flow(row, result)
+                elif self._ask_confirm(str(result.get("message", "")), False):
                     result = self.on_action(verb, row, **kwargs, confirm=True)
                 else:
                     result = {"ok": False, "message": "Cancelled.", "cancelled": True}
@@ -688,6 +910,49 @@ class SearchPopup:
             return False
         self._after_action(verb, row, result)
         return True
+
+    def _ask_claude_flow(self, row: Row, prepared: dict) -> bool:
+        summary = prepared.get("summary") or {}
+        offer = not summary.get("whole_file") and summary.get("mode") != "whole_file"
+        choice = self._ask_confirm(ask_claude_ui.confirm_text(prepared), True, whole=offer)
+        whole = choice == "whole"
+        if whole:
+            prepared = self.on_action("ask_claude", row, whole_file=True)
+            if not (isinstance(prepared, dict) and prepared.get("needs_confirmation")):
+                self._after_action("ask_claude", row, prepared)
+                return True
+            choice = self._ask_confirm(ask_claude_ui.confirm_text(prepared), True)
+        if not choice:
+            self._after_action("ask_claude", row, {"ok": False, "message": "Cancelled.", "cancelled": True})
+            return True
+        return self._ask_claude_async(row, whole)
+
+    def _ask_claude_async(self, row: Row, whole_file: bool = False) -> bool:
+        if self.ask_thread is not None and self.ask_thread.is_alive():
+            return True
+        self.details, self.details_kind = f"Asking Claude about {row.name}…", "dim"
+        self._render()
+
+        def work() -> None:
+            try:
+                result = (self.on_action("ask_claude", row, confirm=True, whole_file=True) if whole_file
+                          else self.on_action("ask_claude", row, confirm=True))
+            except Exception:
+                log.exception("result action ask_claude failed")
+                result = {"ok": False, "message": "Asking Claude failed."}
+            uibus.post(self._ask_claude_done, row, result)
+
+        self.ask_thread = threading.Thread(target=work, name="ask-claude", daemon=True)
+        self.ask_thread.start()
+        return True
+
+    def _ask_claude_done(self, row: Row, result: Any) -> None:
+        self._after_action("ask_claude", row, result)
+        if isinstance(result, dict) and result.get("ok") and isinstance(result.get("answer"), str):
+            if self.answer_window is not None:
+                self.answer_window.close()
+            self.answer_window = ask_claude_ui.show_answer(self.win, row.name, row.path, result["answer"],
+                                                           self.scale)
 
     def _after_action(self, verb: str, row: Row, result: Any) -> None:
         self.last_action = {"verb": verb, "name": row.name, "result": result}
@@ -752,11 +1017,18 @@ class SearchPopup:
                 menu.add_separator()
                 continue
             verb, label, shortcut = item
-            claude = verb == "ask_claude"
-            text = f"{CLAUDE_MARK}{label}{CLAUDE_SUFFIX}" if claude else f"{LOCAL_MARK}{label}"
-            menu.add_command(label=text, accelerator=shortcut, foreground=gfx.AMBER if claude else gfx.PANEL_OK,
+            shortcut = self.chord_label(verb, shortcut) if shortcut else shortcut
+            is_claude = verb == "ask_claude"
+            found = claude.cached_status() if is_claude else None
+            reason = str(found["reason"]) if found and not found["available"] else None
+            text = f"{CLAUDE_MARK}{label}{CLAUDE_SUFFIX}" if is_claude else f"{LOCAL_MARK}{label}"
+            if reason:
+                text = f"{text}  ({reason})"
+            menu.add_command(label=text, accelerator=shortcut, state="disabled" if reason else "normal",
+                             foreground=gfx.AMBER if is_claude else gfx.PANEL_OK,
                              command=lambda v=verb, r=row: self.invoke(v, r))
-            items.append({"verb": verb, "label": text, "key": shortcut, "scope": "claude" if claude else "local"})
+            items.append({"verb": verb, "label": text, "key": shortcut, "scope": "claude" if is_claude else "local",
+                          "enabled": reason is None, "reason": reason})
         self._menu, self._menu_items, self.menu_open = menu, items, True
         x = getattr(event, "x_root", None)
         y = getattr(event, "y_root", None)
@@ -819,9 +1091,10 @@ class SearchPopup:
                          activebackground=gfx.BUTTON_BG_HOVER, activeforeground=gfx.WHITE, relief="flat", bd=0,
                          padx=14, pady=5, font=("Segoe UI", 10))
 
-    def _ask_confirm(self, message: str, claude: bool = False) -> bool:
+    def _ask_confirm(self, message: str, claude: bool = False, whole: bool = False) -> Any:
+        """True or False; "whole" (truthy) when the user chose to send the whole file instead."""
         dlg = self._open_dialog("confirm", "Confirm", message)
-        answer = {"ok": False}
+        answer: dict = {"ok": False}
         if claude:
             tk.Label(dlg, text=f"{CLAUDE_MARK}Sends to Claude", bg=gfx.PANEL_BG, fg=gfx.AMBER,
                      font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
@@ -830,7 +1103,7 @@ class SearchPopup:
         row = tk.Frame(dlg, bg=gfx.PANEL_BG)
         row.pack(anchor="e", pady=(12, 0))
 
-        def finish(value: bool) -> None:
+        def finish(value: Any) -> None:
             answer["ok"] = value
             dlg.destroy()
 
@@ -839,6 +1112,8 @@ class SearchPopup:
                                   gfx.AMBER if claude else gfx.BLUE)
         no.pack(side="right", padx=(8, 0))
         yes.pack(side="right")
+        if whole:
+            self._dialog_button(row, "Send whole file…", lambda: finish("whole")).pack(side="right", padx=(0, 8))
         dlg.bind("<Escape>", lambda _e: finish(False))
         dlg.bind("<Return>", lambda _e: finish(True))
         dlg.protocol("WM_DELETE_WINDOW", lambda: finish(False))
@@ -877,40 +1152,99 @@ class SearchPopup:
 
     # ---- keyboard / mouse --------------------------------------------
 
+    def _chords(self) -> dict:
+        chords = dict(DEFAULT_SHORTCUTS)
+        try:
+            custom = self.settings.get("shortcuts")
+        except Exception:
+            custom = None
+        if isinstance(custom, dict):
+            chords.update({k: v for k, v in custom.items()
+                           if k in DEFAULT_SHORTCUTS and isinstance(v, str) and chord_sequences(v)})
+        return chords
+
+    def chord_label(self, action: str, fallback: str = "") -> str:
+        return self._chords().get(action, fallback)
+
     def _bind_keys(self) -> None:
-        def key(sequence: str, fn: Callable[[], Any], only_results: bool = False) -> None:
+        self._apply_shortcuts()
+
+    def _apply_shortcuts(self) -> None:
+        chords = self._chords()
+        if chords == self._chords_bound:
+            return
+        for seq in self._bound_seqs:
+            self.entry.unbind(seq)
+        self._bound_seqs = []
+        claimed: set = set()
+
+        def bind(sequence: str, handler: Callable[[Any], str]) -> None:
+            self.entry.bind(sequence, handler)
+            self._bound_seqs.append(sequence)
+
+        def make(fn: Callable[[], Any], only_results: bool) -> Callable[[Any], str]:
             def handler(_event) -> str:
                 if only_results and self.state != "results":
                     return ""
                 fn()
                 return "break"
-            self.entry.bind(sequence, handler)
+            return handler
 
-        key("<Return>", self.submit)
-        key("<KP_Enter>", self.submit)
-        key("<Control-Return>", lambda: self.invoke("reveal"), True)
-        key("<Alt-Return>", lambda: self.invoke("properties"), True)
-        key("<F2>", lambda: self.invoke("rename"), True)
-        key("<Shift-F10>", self._menu_at_selection, True)
-        key("<App>", self._menu_at_selection, True)
-        key("<Tab>", self.cycle_mode)
-        key("<Shift-Tab>", lambda: self.cycle_mode(-1))
-        key("<ISO_Left_Tab>", lambda: self.cycle_mode(-1))
-        key("<Up>", lambda: self.move(-1))
-        key("<Down>", lambda: self.move(1))
-        key("<Prior>", lambda: self.move(-VISIBLE_ROWS))
-        key("<Next>", lambda: self.move(VISIBLE_ROWS))
-        key("<Home>", lambda: self.select(0), True)
-        key("<End>", lambda: self.select(len(self.rows) - 1), True)
-        key("<Escape>", self._escape)
-        key("<F11>", self.fullpage)
-        key("<Control-m>", lambda: self.invoke("md_vault"), True)
-        key("<Control-f>", lambda: self.invoke("folder_listing"), True)
-        key("<Control-s>", self.cycle_sort, True)
-        key("<Control-S>", self.save_current)
-        key("<Control-d>", self.cycle_modified, True)
-        self.entry.bind("<Delete>", self._delete_key)
-        self.entry.bind("<Control-c>", self._copy_key)
+        def bind_action(action: str, handler: Callable[[Any], str]) -> None:
+            try:
+                for sequence in chord_sequences(chords[action]):
+                    bind(sequence, handler)
+                    claimed.add(sequence)
+            except tk.TclError:
+                log.warning("shortcut %r for %s is not usable; using the default", chords[action], action)
+                for sequence in chord_sequences(DEFAULT_SHORTCUTS[action]):
+                    bind(sequence, handler)
+                    claimed.add(sequence)
+
+        def key(action: str, fn: Callable[[], Any], only_results: bool = False) -> None:
+            bind_action(action, make(fn, only_results))
+
+        def raw(action: str, handler: Callable[[Any], str]) -> None:
+            bind_action(action, handler)
+
+        key("open", self.submit)
+        key("reveal", lambda: self.invoke("reveal"), True)
+        key("properties", lambda: self.invoke("properties"), True)
+        key("rename", lambda: self.invoke("rename"), True)
+        key("context_menu", self._menu_at_selection, True)
+        tab_cycles = chords["cycle_mode"].casefold() == "tab"
+        if tab_cycles:
+            raw("cycle_mode", self._tab)
+        else:
+            key("cycle_mode", self.cycle_mode)
+        key("md_vault", lambda: self.invoke("md_vault"), True)
+        key("folder_listing", lambda: self.invoke("folder_listing"), True)
+        key("cycle_sort", self.cycle_sort, True)
+        key("save_search", self.save_current)
+        key("cycle_date", self.cycle_modified, True)
+        key("full_page", self.fullpage)
+        key("close", self._escape)
+        raw("recycle", self._delete_key)
+        raw("copy_path", self._copy_key)
+
+        def fixed(sequence: str, fn: Callable[[], Any], only_results: bool = False) -> None:
+            if sequence not in claimed:
+                bind(sequence, make(fn, only_results))
+
+        fixed("<App>", self._menu_at_selection, True)
+        if not tab_cycles and "<Tab>" not in claimed:
+            bind("<Tab>", lambda _e: "break" if self.accept_suggestion() else "")
+        if tab_cycles:
+            fixed("<Shift-Tab>", lambda: self.cycle_mode(-1))
+            fixed("<ISO_Left_Tab>", lambda: self.cycle_mode(-1))
+        fixed("<Up>", lambda: self.move(-1))
+        fixed("<Down>", lambda: self.move(1))
+        fixed("<Prior>", lambda: self.move(-VISIBLE_ROWS))
+        fixed("<Next>", lambda: self.move(VISIBLE_ROWS))
+        fixed("<Home>", lambda: self.select(0), True)
+        fixed("<End>", lambda: self.select(len(self.rows) - 1), True)
+        fixed("<KP_Enter>", self.submit)
+        self._chords_bound = chords
 
     def _row_keys_live(self) -> bool:
         return (self.state == "results" and bool(self.rows) and self.var.get() == self.last_text
@@ -1048,8 +1382,12 @@ class SearchPopup:
         except ModeUnavailable:
             return
         p = gfx.px(PAD, s)
-        panel.rounded_rect(c, 1, 1, w - 1, h - 1, 14 * s, fill=gfx.INPUT_BORDER, outline=gfx.INPUT_BORDER)
-        panel.rounded_rect(c, 3, 3, w - 3, h - 3, 12 * s, fill=gfx.PANEL_BG, outline="")
+        if self.rounded:
+            c.configure(bg=gfx.INPUT_BORDER)
+            panel.rounded_rect(c, 2, 2, w - 2, h - 2, max(2, panel.DWM_RADIUS * s - 2), fill=gfx.PANEL_BG, outline="")
+        else:
+            panel.rounded_rect(c, 1, 1, w - 1, h - 1, 14 * s, fill=gfx.INPUT_BORDER, outline=gfx.INPUT_BORDER)
+            panel.rounded_rect(c, 3, 3, w - 3, h - 3, 12 * s, fill=gfx.PANEL_BG, outline="")
 
         badge = f"{mode.label} · {'local' if getattr(mode, 'local', False) else 'online'}"
         bold = self._font("bold")
@@ -1066,9 +1404,25 @@ class SearchPopup:
             fw = gfx.px(96, s)
             self._button(right - fw, p, fw, gfx.px(BAR_H, s), "Full page", "hit:full:x", "F11")
             right -= fw + gfx.px(8, s)
-        c.create_window(ex, p, window=self.entry, anchor="nw", width=max(40, right - ex),
-                        height=gfx.px(BAR_H, s))
-        self.entry.configure(font=self._font("input"))
+        bar_h = gfx.px(BAR_H, s)
+        look = field_colours()
+        key = (right - ex, bar_h, look["bg"], gfx.PANEL_BG)
+        if self._pill_key != key:
+            self._pill = pill_image(self.canvas, max(40, right - ex), bar_h, look["bg"], gfx.PANEL_BG)
+            self._pill_key = key
+        c.create_image(ex, p, image=self._pill, anchor="nw", tags="pill")
+        inset = bar_h // 2
+        self._entry_x = ex + inset
+        self._entry_w = max(40, right - ex - 2 * inset)
+        self._entry_cy = p + bar_h / 2
+        self.entry.configure(font=self._font("input"), bg=look["bg"], fg=look["fg"], insertbackground=look["fg"])
+        self.ghost_label.configure(font=self._font("input"), bg=look["bg"], fg=look["ghost"])
+        c.create_window(self._entry_x, self._entry_cy, window=self.entry, anchor="w", width=self._entry_w,
+                        height=bar_h - 8)
+        if not self.var.get():
+            c.create_text(self._entry_x + 1, self._entry_cy, text="Type to search…", anchor="w", fill=look["dim"],
+                          font=self._font("input"))
+        self._place_ghost()
 
         y = p + gfx.px(BAR_H, s) + gfx.px(4, s)
         if self.state == "input":
@@ -1076,11 +1430,55 @@ class SearchPopup:
         else:
             self._draw_results(y, w, h)
 
+    def suggestion_text(self) -> str:
+        if self.state == "closed" or self._listing_stack or self.entry.selection_present():
+            return ""
+        text = self.var.get()
+        if self.entry.index("insert") != len(text):
+            return ""
+        names = [row.name for row in self.rows[:GHOST_ROWS]]
+        for item in self._saved_cache:
+            names.extend((item.name, item.query))
+        return suggestion(text, names)
+
+    def _place_ghost(self) -> None:
+        if self.state == "closed":
+            return
+        self.canvas.delete("ghost")
+        self._ghost = self.suggestion_text()
+        if not self._ghost:
+            return
+        font = self._font("input")
+        try:
+            x_end = self.entry.bbox(len(self.var.get()))[0]
+        except (tk.TclError, TypeError):
+            return
+        if x_end + font.measure(self._ghost) > self._entry_w:
+            self._ghost = ""
+            return
+        self.ghost_label.configure(text=self._ghost)
+        self.canvas.create_window(self._entry_x + x_end + 1, self._entry_cy, window=self.ghost_label, anchor="w",
+                                  tags="ghost")
+
+    def _tab(self, _event) -> str:
+        if not self.accept_suggestion():
+            self.cycle_mode()
+        return "break"
+
+    def accept_suggestion(self) -> bool:
+        """Tab: append the ghost text; False when none is shown."""
+        self._place_ghost()
+        if not self._ghost:
+            return False
+        self.var.set(self.var.get() + self._ghost)
+        self.entry.icursor("end")
+        return True
+
     def _button(self, x: float, y: float, bw: float, bh: float, label: str, tag: str, hint: str = "",
                 active: bool = False, accent: str = "") -> None:
         c, s = self.canvas, self.scale
         fill = gfx.BLUE if active else gfx.BUTTON_BG
-        panel.rounded_rect(c, x, y, x + bw, y + bh, 7 * s, tag=(tag, "btn"), fill=fill, outline=accent or fill)
+        panel.rounded_rect(c, x, y, x + bw, y + bh, bh / 2, tag=(tag, "btn"), fill=fill, outline=accent or fill)
         c.create_text(x + bw / 2, y + bh / 2, text=label, fill=gfx.PANEL_FG, font=self._font("small" if hint else "base"),
                       tags=(tag, "btn"))
 
@@ -1175,7 +1573,7 @@ class SearchPopup:
         x = p
         bh = gfx.px(BTN_H, s)
         for verb, label, shortcut in self.BUTTONS:
-            text = f"{label} ({shortcut})"
+            text = f"{label} ({self.chord_label(verb, shortcut)})"
             bw = small.measure(text) + gfx.px(20, s)
             self._button(x, y, bw, bh, text, f"hit:act:{verb}", "act")
             x += bw + gfx.px(6, s)
@@ -1296,6 +1694,7 @@ class SearchPopup:
             "folder_listing": self._listing_stack[-1]["folder"] if self._listing_stack else None,
             "last_action": self.last_action,
             "dialog": dict(self._dialog) if self._dialog else None,
+            "answer_window": self.answer_window.snapshot() if self.answer_window is not None else None,
             "footer": self._footer(),
             "row_kind": sel.kind if sel else None,
             "passage_text": (self._passage.get("1.0", "end-1c") if self._passage is not None

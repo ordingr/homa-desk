@@ -69,10 +69,10 @@ _W_TOKEN = re.compile(
 def extract_docx(fh) -> dict:
     zf, budget = _open(fh)
     with zf:
-        xml = _text(budget.read("word/document.xml"))
+        xml = _text(budget.read("word/document.xml", MEMBER_CAP))
+        truncated = _member_size(zf, "word/document.xml") > MEMBER_CAP
     parts: list = []
     size = 0
-    truncated = False
     for m in _W_TOKEN.finditer(xml):
         token = m.group(0)
         if m.group(1) is not None:
@@ -91,6 +91,13 @@ def extract_docx(fh) -> dict:
             truncated = True
             break
     return {"text": "".join(parts)[:TEXT_CAP], "truncated": truncated}
+
+
+def _member_size(zf: zipfile.ZipFile, name: str) -> int:
+    try:
+        return zf.getinfo(name).file_size
+    except KeyError:
+        return 0
 
 
 def _numbered(names, prefix: str, suffix: str) -> list:
@@ -219,7 +226,9 @@ def extract_pptx(fh) -> dict:
         size = 0
         truncated = len(slide_names) > SLIDE_CAP or len(media) > MEDIA_CAP
         for number, name in enumerate(slide_names[:SLIDE_CAP], 1):
-            xml = _text(budget.read(name))
+            xml = _text(budget.read(name, MEMBER_CAP))
+            if _member_size(zf, name) > MEMBER_CAP:
+                truncated = True
             lines = ["" if m.group(1) is None else _unescape(m.group(1)) for m in _A_TOKEN.finditer(xml)]
             body = "".join(piece if piece else "\n" for piece in lines).strip()
             block = f"--- Slide {number} ---\n{body}\n"

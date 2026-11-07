@@ -13,6 +13,9 @@ index membership), then ``os.lstat`` decides placeholder / size before the file 
 checked once more (GetFinalPathNameByHandle) before any byte is read. The private-key scan covers the returned
 range plus a short overlap on each side.
 
+A ``hydrate`` query parameter is ignored: a cloud placeholder stays a placeholder and is never downloaded; the
+Open action is the only way the user causes a download.
+
 POST /v1/fullpage/close lives here too: it closes the Edge window ``overlay.fullpage`` opened.
 """
 import codecs
@@ -42,7 +45,7 @@ TEXT_DEFAULT_WINDOW = 262_144
 TEXT_MAX_WINDOW = 1_048_576
 HTTP_RANGE_TEXT_CAP = 4_194_304
 SVG_MAX_BYTES = 8_388_608
-SCAN_OVERLAP = 64
+SCAN_OVERLAP = 8192
 CHUNK = 262_144
 
 _PLACEHOLDER_ATTRS = 0x1000 | 0x40000 | 0x400000
@@ -124,6 +127,15 @@ def _handle_ok(fh, roots: list) -> bool:
         return False
     own = pathcheck._resolve(str(paths.home()))
     return not (own and pathcheck._inside(final, own))
+
+
+def _handle_attrs(fh) -> int:
+    """File attributes read through the open handle (R9-N12); a handle that cannot be queried reads as a placeholder."""
+    try:
+        import win32file
+        return win32file.GetFileInformationByHandle(msvcrt.get_osfhandle(fh.fileno()))[0]
+    except Exception:
+        return _PLACEHOLDER_ATTRS
 
 
 def _parse_window(raw: Optional[str], size: int, default_len: int) -> tuple:
@@ -251,6 +263,8 @@ def _preview_sync(index, settings, path: Any, range_param: Optional[str], range_
     try:
         if not _handle_ok(fh, _roots(index)):
             raise ApiError(403, "refused", R_MOVED, "path")
+        if _handle_attrs(fh) & (_PLACEHOLDER_ATTRS | _DIR_ATTR):
+            return {"kind": "placeholder", **base, "reason": R_PLACEHOLDER}
         size = os.fstat(fh.fileno()).st_size
         if size > cap:
             return {"kind": "too_large", **base, "size": size, "cap": cap}

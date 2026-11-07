@@ -41,16 +41,20 @@ const COMPONENTS = {
   },
 };
 
-export default function MarkdownView({ path, initial }) {
-  const chunks = useChunks(path, initial);
-  const body = useMemo(
+export function MarkdownText({ text }) {
+  return useMemo(
     () => (
       <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={COMPONENTS}>
-        {chunks.text}
+        {text}
       </ReactMarkdown>
     ),
-    [chunks.text],
+    [text],
   );
+}
+
+export default function MarkdownView({ path, initial }) {
+  const chunks = useChunks(path, initial);
+  const body = <MarkdownText text={chunks.text} />;
   return (
     <div className="pv-md" data-testid="preview-markdown">
       {body}

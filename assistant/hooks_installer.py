@@ -104,6 +104,23 @@ def _ours_in(data: dict) -> dict:
     return found
 
 
+def carries_bearer(bearer: str) -> bool:
+    """True when Assistant's installed hook entries authenticate with `bearer`, i.e. they belong to the
+    instance that owns that token. A second instance (another ASSISTANT_HOME, a test run) must not rewrite
+    entries that point at someone else's instance."""
+    try:
+        _, data = _load(settings_path())
+    except (HooksError, OSError):
+        return False
+    want = f"Bearer {bearer}"
+    for groups in _ours_in(data).values():
+        for group in groups:
+            for h in group.get("hooks", []):
+                if _is_ours(h) and isinstance(h.get("headers"), dict) and h["headers"].get("Authorization") == want:
+                    return True
+    return False
+
+
 def _dump(data: dict) -> bytes:
     return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 

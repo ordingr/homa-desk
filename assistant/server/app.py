@@ -126,22 +126,42 @@ def create_app(token_provider: Callable[[], str], store: Optional[CardStore] = N
 
 
 IDLE_TICK_SECONDS = 1.0
+GRACEFUL_SHUTDOWN_S = 2
+STOP_JOIN_S = 4.0
 
 
 class _QuietServer(uvicorn.Server):
-    """uvicorn's main loop wakes 10x/s; one wake per second is enough and keeps idle CPU near zero."""
+    """uvicorn's main loop wakes 10x/s; one wake per second is enough and keeps idle CPU near zero. An exit
+    request wakes it at once."""
+
+    _loop: Optional[asyncio.AbstractEventLoop] = None
+    _wake: Optional[asyncio.Event] = None
 
     async def main_loop(self) -> None:
+        self._loop, self._wake = asyncio.get_running_loop(), asyncio.Event()
         should_exit = await self.on_tick(0)
         while not should_exit:
-            await asyncio.sleep(IDLE_TICK_SECONDS)
+            try:
+                await asyncio.wait_for(self._wake.wait(), IDLE_TICK_SECONDS)
+            except asyncio.TimeoutError:
+                pass
             should_exit = await self.on_tick(0)
+
+    def request_exit(self) -> None:
+        self.should_exit = True
+        loop, wake = self._loop, self._wake
+        if loop is not None and wake is not None:
+            try:
+                loop.call_soon_threadsafe(wake.set)
+            except RuntimeError:
+                pass
 
 
 class ServerThread:
     def __init__(self, app: Starlette, port: int) -> None:
         config = uvicorn.Config(app, host=BIND_HOST, port=port, log_config=None,
-                                access_log=False, lifespan="off")
+                                access_log=False, lifespan="off",
+                                timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S)
         self._server = _QuietServer(config)
         self._thread: Optional[threading.Thread] = None
         self.port = port
@@ -181,7 +201,10 @@ class ServerThread:
             probe.close()
         return "startup failed; the port is bindable now, see earlier log lines"
 
+    def request_stop(self) -> None:
+        self._server.request_exit()
+
     def stop(self) -> None:
-        self._server.should_exit = True
+        self._server.request_exit()
         if self._thread is not None:
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=STOP_JOIN_S)

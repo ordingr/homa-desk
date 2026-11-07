@@ -271,6 +271,28 @@ code {
   font-size: 16px;
 }
 
+.queryghost {
+  position: absolute;
+  inset: 0;
+  padding: 0 14px 0 39px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: pre;
+  font: inherit;
+  font-size: 16px;
+  pointer-events: none;
+}
+
+.queryghost-typed {
+  visibility: hidden;
+}
+
+.queryghost-hint {
+  color: var(--dim);
+  opacity: 0.8;
+}
+
 .queryinput:focus {
   border-color: var(--accent);
   outline: none;
@@ -586,18 +608,79 @@ mark {
 }
 
 .pane {
-  flex: 0 0 38%;
-  min-width: 300px;
-  max-width: 640px;
+  --pv-zoom: 1;
+  flex: 0 0 var(--pane-basis, 50%);
+  min-width: 320px;
+  max-width: calc(100% - 326px);
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--hairline);
   min-height: 0;
+  outline: none;
+}
+
+.split.expanded .pane {
+  flex: 1 1 auto;
+  max-width: none;
+  border-left: 0;
+}
+
+.split.expanded .listwrap {
+  flex: 0 0 0;
+  min-width: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.split-handle {
+  position: relative;
+  flex: 0 0 6px;
+  margin: 0 -3px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.split-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.split-handle:hover::after,
+.split-handle:focus-visible::after,
+.split-handle:active::after {
+  background: var(--accent);
+}
+
+.pane-back {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.zoom-reset {
+  width: auto;
+  min-width: 44px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon-btn:disabled:hover {
+  background: transparent;
 }
 
 .pane-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
   padding: 12px 16px;
@@ -606,7 +689,7 @@ mark {
 
 .pane-title {
   flex: 1;
-  min-width: 0;
+  min-width: 140px;
   display: flex;
   flex-direction: column;
 }
@@ -619,6 +702,14 @@ mark {
 
 .pane-actions {
   display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.continue-btn {
+  height: 28px;
+  padding: 0 10px;
+  white-space: nowrap;
 }
 
 .pane-note {
@@ -628,7 +719,7 @@ mark {
 .pane-body {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: 20px 28px 40px;
 }
 
 .notice {
@@ -826,6 +917,10 @@ kbd {
     display: none;
   }
 
+  .split-handle {
+    display: none;
+  }
+
   .pane {
     position: fixed;
     inset: auto 0 0 0;
@@ -840,4 +935,118 @@ kbd {
   .topbar {
     gap: 8px;
   }
+}
+
+.menu-note {
+  padding: 0 8px 4px 40px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.menuitem:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sendbox {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  background: var(--cloud-bg);
+  border-left: 3px solid var(--cloud);
+  border-radius: 4px;
+}
+
+.sendbox div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.sendoption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.sendbox dt {
+  color: var(--dim);
+}
+
+.sendbox dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.askpane {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  width: min(560px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 3px solid var(--cloud);
+  box-shadow: var(--shadow-up);
+}
+
+.askpane .pane-title svg {
+  color: var(--cloud);
+  vertical-align: -3px;
+}
+
+.dialog.listing {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.listing-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.listing-head h2 {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.listing-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 96px;
+  gap: 12px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--hairline);
+  cursor: default;
+}
+
+.listing-row:hover {
+  background: var(--row-hover);
+}
+
+.listing-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-hint {
+  margin-bottom: 0;
+  font-size: 12px;
 }

@@ -34,38 +34,40 @@ def names(store, text, **kw):
 
 def test_design_md(store):
     res = run(store, "design md")
-    assert row_names(res.rows) == ["designer.md"]
-    assert res.interpretation == f'name contains "design" {DOT} ext: md'
+    assert row_names(res.rows) == ["designer.md", "x.md"], "the name hit first, then x.md under docs/design"
+    assert res.interpretation == f'name or path contains "design" {DOT} ext: md'
 
 
-def test_design_doc_finds_the_design_folder_under_docs_only(store):
+def test_design_doc_finds_the_design_folder_under_docs_then_what_lives_in_it(store):
     res = run(store, "design doc")
-    assert row_names(res.rows) == ["design"]
-    assert "docs" in row_paths(res.rows)[0].lower().replace("\\", "/").split("/")
-    assert res.interpretation == f'name contains "design" {DOT} path contains "doc"'
+    assert row_names(res.rows) == ["design", "x.md"]
+    assert all("docs" in p.lower().replace("\\", "/").split("/") for p in row_paths(res.rows))
+    assert res.interpretation == f'name or path contains "design" {DOT} name or path contains "doc"'
 
 
 def test_config_dash_e_yml(store):
     res = run(store, "config -e yml")
     assert row_names(res.rows) == ["config.yml"]
-    assert res.interpretation == f'name contains "config" {DOT} ext: yml'
+    assert res.interpretation == f'name or path contains "config" {DOT} ext: yml'
 
 
 def test_report_dash_p_documents(store):
     res = run(store, "report -p Documents")
     assert row_names(res.rows) == ["report.pdf"]
     assert "Documents" in row_paths(res.rows)[0]
-    assert res.interpretation == f'name contains "report" {DOT} path contains "Documents"'
+    assert res.interpretation == f'name or path contains "report" {DOT} path contains "Documents"'
 
 
-def test_plain_design_returns_every_name_match_best_first(store):
+def test_plain_design_returns_name_matches_best_first_then_path_only_rows(store):
     res = run(store, "design")
     got = row_names(res.rows)
     assert sorted(got, key=str.casefold) == sorted(
-        ["Design", "design", "designer.md", "design-system.html", "stepper-designs.html"], key=str.casefold)
+        ["Design", "design", "designer.md", "design-system.html", "stepper-designs.html", "logo.png", "x.md"],
+        key=str.casefold)
     assert set(got[:2]) == {"Design", "design"}, "exact folder names first"
-    assert got[2:] == ["designer.md", "design-system.html", "stepper-designs.html"]
-    assert res.total == 5 and res.interpretation == 'name contains "design"'
+    assert got[2:5] == ["designer.md", "design-system.html", "stepper-designs.html"]
+    assert set(got[5:]) == {"logo.png", "x.md"}, "files that only sit inside a design folder rank last"
+    assert res.total == 7 and res.interpretation == 'name or path contains "design"'
 
 
 # ---- grammar features end to end ----------------------------------------------------------------------------------------
@@ -112,22 +114,23 @@ def test_unicode_spaces_and_phrases(store):
     assert names(store, "my report final") == ["my report final.txt"]
 
 
-def test_first_term_must_match_the_name_other_terms_may_match_the_path(store):
-    assert names(store, "design doc") == ["design"]
-    assert "x.md" not in names(store, "design md"), "x.md matches only via its path, so a name term excludes it"
-    assert "x.md" in names(store, "x.md design"), "a later term may match anywhere in the path"
+def test_every_term_may_match_the_name_or_the_path_in_either_order(store):
+    assert names(store, "design doc") == ["design", "x.md"]
+    assert names(store, "doc design") == ["design", "x.md"], "term order no longer matters"
+    assert "x.md" in names(store, "design md"), "x.md matches through its path, a plain term is no longer name-only"
+    assert names(store, "x.md design")[0] == "x.md", "the name hit still outranks path-only rows"
 
 
 # ---- chips and dates ------------------------------------------------------------------------------------------------------------
 
 def test_chips_restrict_and_or_together_and_appear_in_the_interpretation(store):
     docs = run(store, "design", chips=["Docs"])
-    assert row_names(docs.rows) == ["designer.md"] and "Docs" in docs.interpretation
+    assert row_names(docs.rows) == ["designer.md", "x.md"] and "Docs" in docs.interpretation
     assert sorted(names(store, "design", chips=["code"])) == ["design-system.html", "stepper-designs.html"]
     folders = run(store, "design", chips=["Folders"])
     assert sorted(row_names(folders.rows)) == ["Design", "design"] and "Folders" in folders.interpretation
     both = names(store, "design", chips=["Docs", "Folders"])
-    assert sorted(both, key=str.casefold) == sorted(["Design", "design", "designer.md"], key=str.casefold)
+    assert sorted(both, key=str.casefold) == sorted(["Design", "design", "designer.md", "x.md"], key=str.casefold)
     assert sorted(names(store, "report", chips=["PDF"])) == ["report-old.pdf", "report.pdf"]
     assert "sheet.xlsx" in names(store, "sheet", chips=["Sheets"])
     assert "logo.png" in names(store, "logo", chips=["Images"])
@@ -146,17 +149,17 @@ def test_unknown_chip_is_rejected(store):
 
 def test_date_presets_and_custom_range(store):
     recent = names(store, "design", date_filter="7d")
-    assert "stepper-designs.html" in recent and "designer.md" not in recent
+    assert "stepper-designs.html" in recent and "designer.md" not in recent and "x.md" not in recent
     assert "stepper-designs.html" in names(store, "design", date_filter="today")
     lo, hi = datetime(2024, 1, 25).timestamp(), datetime(2024, 3, 2).timestamp()
     got = names(store, "design", date_filter=(lo, hi))
-    assert sorted(got) == ["design-system.html", "designer.md"]
+    assert sorted(got) == ["design-system.html", "designer.md", "x.md"]
     assert "modified" in run(store, "design", date_filter="30d").interpretation.lower()
 
 
 def test_date_filter_composes_with_chips(store):
     lo, hi = datetime(2024, 1, 25).timestamp(), datetime(2024, 3, 2).timestamp()
-    assert names(store, "design", date_filter=(lo, hi), chips=["Docs"]) == ["designer.md"]
+    assert names(store, "design", date_filter=(lo, hi), chips=["Docs"]) == ["designer.md", "x.md"]
 
 
 # ---- deny-list, paging, result shape ---------------------------------------------------------------------------------------------

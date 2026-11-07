@@ -109,10 +109,13 @@ class CardWindow:
         self.win.withdraw()
         ui.adopt_close(self.win)
         self.win.overrideredirect(True)
-        self.win.configure(bg=gfx.CHROMA_KEY)
+        self.rounded = win.round_corners(win.hwnd_of(self.win))
+        key = gfx.PANEL_BG if self.rounded else gfx.CHROMA_KEY
+        self.win.configure(bg=key)
         self.win.attributes("-topmost", True)
-        self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
-        self.canvas = tk.Canvas(self.win, bg=gfx.CHROMA_KEY, highlightthickness=0, bd=0)
+        if not self.rounded:
+            self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
+        self.canvas = tk.Canvas(self.win, bg=key, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Enter>", lambda _e: ui.hover(self.state.card.id))
         self.canvas.bind("<Motion>", self._motion)
@@ -196,7 +199,7 @@ class CardWindow:
 
     def draw_frame(self) -> None:
         panel.draw_panel(self.canvas, self.w, self.h, panel.kind_accent(self.state.card.kind),
-                         self.scale, self.blink_on)
+                         self.scale, self.blink_on, self.rounded)
 
     def set_blink(self, on: bool) -> None:
         if on != self.blink_on:
@@ -299,10 +302,13 @@ class MoreStrip:
         self.win.withdraw()
         ui.adopt_close(self.win)
         self.win.overrideredirect(True)
-        self.win.configure(bg=gfx.CHROMA_KEY)
+        self.rounded = win.round_corners(win.hwnd_of(self.win), small=True)
+        key = panel.TEXT_DIM if self.rounded else gfx.CHROMA_KEY
+        self.win.configure(bg=key)
         self.win.attributes("-topmost", True)
-        self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
-        self.canvas = tk.Canvas(self.win, bg=gfx.CHROMA_KEY, highlightthickness=0, bd=0,
+        if not self.rounded:
+            self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
+        self.canvas = tk.Canvas(self.win, bg=key, highlightthickness=0, bd=0,
                                 width=self.w, height=self.h)
         self.canvas.pack(fill="both", expand=True)
         self.font = ui.font(gfx.px(11, self.scale), "bold")
@@ -316,8 +322,13 @@ class MoreStrip:
         if count != self.count:
             self.count = count
             self.canvas.delete("all")
-            panel.rounded_rect(self.canvas, 1, 1, self.w - 1, self.h - 1, 6 * self.scale,
-                               fill=panel.BUTTON_BG, outline=panel.TEXT_DIM)
+            if self.rounded:
+                edge = max(1, round(self.scale))
+                panel.rounded_rect(self.canvas, edge, edge, self.w - edge, self.h - edge, 3 * self.scale,
+                                   fill=panel.BUTTON_BG, outline="")
+            else:
+                panel.rounded_rect(self.canvas, 1, 1, self.w - 1, self.h - 1, 6 * self.scale,
+                                   fill=panel.BUTTON_BG, outline=panel.TEXT_DIM)
             self.canvas.create_text(self.w / 2, self.h / 2, text=f"+{count} more",
                                     fill=panel.TEXT, font=self.font)
         if (x, y) != self.xy:
@@ -663,6 +674,7 @@ class CardsUI:
         self.root.after(TICK_MS, self._tick)
 
     def debug_state(self) -> list[dict]:
+        self.root.update_idletasks()
         mons = monitors.list_monitors()
         index = {m.handle: i for i, m in enumerate(mons)}
         out = []
@@ -684,6 +696,8 @@ class CardsUI:
                     "target_rect": [int(w.tx), int(w.ty), int(w.tx) + w.w, int(w.ty) + w.h],
                     "monitor": index.get(w.monitor.handle, -1),
                     "hwnd": w.hwnd,
+                    "rounded": w.rounded,
+                    "corner_preference": win.corner_preference(w.hwnd),
                     "seen": state.seen,
                     "blinking": not state.seen,
                     "timer": w.timer_str if state.card.kind == "waiting" else None,

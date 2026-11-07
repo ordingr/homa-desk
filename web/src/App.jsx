@@ -1,24 +1,62 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api.js";
-import { RANGE_RE, copyText, matchMode, plainPath, quotedPath } from "./format.js";
-import Header from "./components/Header.jsx";
+import { RANGE_RE, copyText, fmtSize, matchMode, plainPath, quotedPath } from "./format.js";
+import AskPane from "./components/AskPane.jsx";
+import FolderListing from "./components/FolderListing.jsx";
+import Header, { NEXT } from "./components/Header.jsx";
 import QueryBar, { SORTS } from "./components/QueryBar.jsx";
 import SavedPanel from "./components/SavedPanel.jsx";
 import ResultList from "./components/ResultList.jsx";
-import PreviewPane from "./components/PreviewPane.jsx";
+import PreviewPane, { EXPAND_HINT } from "./components/PreviewPane.jsx";
+import SplitHandle, { loadSplit, saveSplit } from "./components/SplitHandle.jsx";
+import { loadZoom, saveZoom } from "./preview/zoom.js";
 import ContextMenu from "./components/ContextMenu.jsx";
+import { buildShortcuts, chordLabel, defaultShortcuts, matches, parseChord } from "./shortcuts.js";
 import Modal from "./components/Modal.jsx";
 import { CloudOffIcon, LocalIcon } from "./components/Icons.jsx";
 
 const PAGE_SIZE = 100;
+const SEARCH_DELAY_MS = 150;
 const THEME_KEY = "assistant.theme";
 
-function initialTheme() {
+const THEME_PREFS = ["dark", "light", "system"];
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+const CLAUDE_MISSING = "Claude Code not found on this machine";
+const MODIFIED_CYCLE = ["", "today", "7d", "30d"];
+const EXPAND_CHORD = parseChord(EXPAND_HINT);
+
+function storedTheme() {
   try {
-    return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+    const value = localStorage.getItem(THEME_KEY);
+    return THEME_PREFS.includes(value) ? value : null;
   } catch {
-    return "dark";
+    return null;
   }
+}
+
+function systemPrefersDark() {
+  return window.matchMedia ? window.matchMedia(DARK_QUERY).matches : true;
+}
+
+const bytes = (n) => Number(n).toLocaleString("en-US");
+
+function sendsWhole(summary) {
+  return summary.mode ? summary.mode === "whole_file" : summary.whole_file === true;
+}
+
+function sendDetails(summary) {
+  const whole = sendsWhole(summary);
+  const details = [
+    ["File", plainPath(summary.path)],
+    ["Sends", `${bytes(summary.bytes_to_send)} of ${bytes(summary.file_bytes)} bytes (${fmtSize(summary.bytes_to_send)})`],
+    ["Form", whole ? "Whole file" : "Preview text only (the first part of the file)"],
+  ];
+  if (summary.what) details.push(["What", summary.what]);
+  if ("office_text" in summary) {
+    details.push(["Office text", summary.office_text ? "Yes, text extracted from an Office file" : "No"]);
+  }
+  if ("account" in summary) details.push(["Account", summary.account || "Not known"]);
+  return details;
 }
 
 function normaliseModified(value) {
@@ -61,8 +99,24 @@ export default function App({ session }) {
   return <Workspace initialQuery={session.q} onExpired={() => setExpired(true)} />;
 }
 
+function completion(word, name) {
+  const lower = name.toLowerCase();
+  const want = word.toLowerCase();
+  for (let at = lower.indexOf(want); at !== -1; at = lower.indexOf(want, at + 1)) {
+    if (at > 0 && /[a-z0-9]/.test(lower[at - 1])) continue;
+    const from = at + want.length;
+    const rest = name.slice(from);
+    const stop = rest.search(/[\s._-]/);
+    const tail = stop === -1 ? rest : rest.slice(0, stop);
+    return word === want ? tail.toLowerCase() : tail;
+  }
+  return "";
+}
+
 function Workspace({ initialQuery, onExpired }) {
-  const [theme, setTheme] = useState(initialTheme);
+  const [themePref, setThemePref] = useState(storedTheme);
+  const [appTheme, setAppTheme] = useState(null);
+  const [systemDark, setSystemDark] = useState(systemPrefersDark);
   const [text, setText] = useState(initialQuery);
   const [chips, setChips] = useState([]);
   const [modifiedKind, setModifiedKind] = useState("");
@@ -79,34 +133,110 @@ function Workspace({ initialQuery, onExpired }) {
   const [activeId, setActiveId] = useState(null);
   const [anchor, setAnchor] = useState(null);
   const [paneOpen, setPaneOpen] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [splitFrac, setSplitFrac] = useState(loadSplit);
+  const [zoom, setZoom] = useState(loadZoom);
 
   const [saved, setSaved] = useState([]);
   const [savedOpen, setSavedOpen] = useState(false);
   const [menu, setMenu] = useState(null);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState(null);
+  const [claude, setClaude] = useState({ available: false, reason: CLAUDE_MISSING });
+  const [ask, setAsk] = useState(null);
+  const [listing, setListing] = useState(null);
+  const [searchedText, setSearchedText] = useState("");
+  const [shortcuts, setShortcuts] = useState(defaultShortcuts);
+  const [continuing, setContinuing] = useState(false);
+  const [continueMissing, setContinueMissing] = useState(false);
 
   const inputRef = useRef(null);
+  const splitRef = useRef(null);
   const seq = useRef(0);
+  const inflight = useRef(null);
+  const debounce = useRef(0);
+  const lastRun = useRef("");
   const toastTimer = useRef(0);
+  const askSeq = useRef(0);
   const latest = useRef({});
 
+  const [ghostOff, setGhostOff] = useState(null);
   const rows = result ? result.rows : [];
   const activeRow = useMemo(() => rows.find((row) => row.id === activeId) || null, [rows, activeId]);
+  const showPane = paneOpen && activeRow;
+  const expandedNow = expanded && Boolean(showPane);
 
   latest.current = {
     text, chips, modifiedKind, rangeFrom, rangeTo, sort, rows, selected, activeId, anchor,
-    activeRow, menu, modal, savedOpen,
+    activeRow, menu, modal, savedOpen, ask, listing, searchedText, shortcuts, expanded: expandedNow,
+    paneOpen,
   };
+
+  const ghost = useMemo(() => {
+    if (text === ghostOff) return "";
+    const typed = /\S+$/.exec(text);
+    if (!typed || /\s$/.test(text)) return "";
+    const candidates = [];
+    if (result && result.rows.length > 0 && text === searchedText) candidates.push(result.rows[0].name);
+    saved.forEach((item) => candidates.push(item.name));
+    for (const name of candidates) {
+      const suffix = completion(typed[0], name || "");
+      if (suffix) return suffix;
+    }
+    return "";
+  }, [text, ghostOff, result, searchedText, saved]);
+
+  const themeChoice = themePref ?? (THEME_PREFS.includes(appTheme) ? appTheme : "dark");
+  const theme = themeChoice === "system" ? (systemDark ? "dark" : "light") : themeChoice;
+
+  useEffect(() => {
+    if (expanded && !showPane) setExpanded(false);
+  }, [expanded, showPane]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      /* theme preference is optional */
-    }
   }, [theme]);
+
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const query = window.matchMedia(DARK_QUERY);
+    const onChange = (event) => setSystemDark(event.matches);
+    setSystemDark(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  const chooseTheme = async () => {
+    const next = NEXT[themeChoice];
+    const previousPref = themePref;
+    setThemePref(next);
+    try {
+      const body = await api.post("/v1/settings/theme", { theme: next });
+      const saved = body && (body.theme ?? (body.settings && body.settings.theme));
+      setAppTheme(THEME_PREFS.includes(saved) ? saved : next);
+      setThemePref(null);
+      try {
+        localStorage.removeItem(THEME_KEY);
+      } catch {
+        /* theme preference is optional */
+      }
+    } catch (error) {
+      if (error.status === 404 || error.code === "route_missing") {
+        try {
+          localStorage.setItem(THEME_KEY, next);
+        } catch {
+          /* theme preference is optional */
+        }
+        return;
+      }
+      setThemePref(previousPref);
+      if (error.status === 401) {
+        onExpired();
+        return;
+      }
+      showToast(error.message || "Could not save the theme.", "error");
+    }
+  };
 
   const showToast = useCallback((message, kind = "ok") => {
     window.clearTimeout(toastTimer.current);
@@ -155,26 +285,41 @@ function Workspace({ initialQuery, onExpired }) {
         setProblem({ message: "Pick both dates for a custom range.", status: 0 });
         return;
       }
+      window.clearTimeout(debounce.current);
+      if (inflight.current) inflight.current.abort();
+      const controller = new AbortController();
+      inflight.current = controller;
+      if (!append) lastRun.current = q.trim();
       const mine = ++seq.current;
       setLoading(true);
       setProblem(null);
       try {
-        const body = await api.get("/v1/search", {
-          q,
-          chips: chipList,
-          modified,
-          sort: order,
-          limit: PAGE_SIZE,
-          offset: append ? now.rows.length : 0,
-        });
+        const body = await api.get(
+          "/v1/search",
+          {
+            q,
+            chips: chipList,
+            modified,
+            sort: order,
+            limit: PAGE_SIZE,
+            offset: append ? now.rows.length : 0,
+          },
+          controller.signal,
+        );
         if (mine !== seq.current) return;
         setResult((previous) =>
           append && previous ? { ...body, rows: [...previous.rows, ...body.rows] } : body,
         );
         if (!append) {
-          setSelected(new Set());
-          setActiveId(null);
-          setAnchor(null);
+          setSearchedText(q);
+          const keep = new Set(body.rows.map((r) => r.id));
+          if (now.activeId !== null && keep.has(now.activeId)) {
+            setSelected((previous) => new Set([...previous].filter((id) => keep.has(id))));
+          } else {
+            setSelected(new Set());
+            setActiveId(null);
+            setAnchor(null);
+          }
         }
         if (!health || (body.built_at && body.built_at !== health.built_at)) refreshHealth();
       } catch (error) {
@@ -191,9 +336,46 @@ function Workspace({ initialQuery, onExpired }) {
   useEffect(() => {
     refreshHealth();
     loadSaved();
+    api
+      .get("/v1/settings")
+      .then((body) => {
+        setAppTheme((body && (body.theme ?? (body.settings && body.settings.theme))) || null);
+        setShortcuts(buildShortcuts(body && body.shortcuts));
+      })
+      .catch(() => {});
+    api
+      .get("/v1/actions/ask_claude/status")
+      .then((body) =>
+        setClaude({
+          available: body.available === true,
+          reason: body.available === true ? null : body.reason || CLAUDE_MISSING,
+        }),
+      )
+      .catch(() => setClaude({ available: false, reason: CLAUDE_MISSING }));
     if (initialQuery.trim()) search({ text: initialQuery });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const trimmed = text.trim();
+    if (trimmed === lastRun.current) return undefined;
+    if (trimmed === "") {
+      clearAll();
+      return undefined;
+    }
+    debounce.current = window.setTimeout(() => search({ text }), SEARCH_DELAY_MS);
+    return () => window.clearTimeout(debounce.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
+  useEffect(() => {
+    const trimmed = text.trim();
+    const url = new URL(window.location.href);
+    if (trimmed) url.searchParams.set("q", text);
+    else url.searchParams.delete("q");
+    const rest = url.searchParams.toString();
+    window.history.replaceState(null, "", url.pathname + (rest ? "?" + rest : "") + url.hash);
+  }, [text]);
 
   const refine = (patch) => {
     const now = latest.current;
@@ -276,6 +458,115 @@ function Workspace({ initialQuery, onExpired }) {
     [callAction, showToast],
   );
 
+  const sendToClaude = useCallback(
+    async (row, wholeFile = false) => {
+      const mine = ++askSeq.current;
+      setAsk({ status: "loading", path: row.path });
+      const outcome = await callAction("ask_claude", row, wholeFile ? { confirm: true, whole_file: true } : { confirm: true });
+      if (mine !== askSeq.current) return;
+      if (outcome.ok === false || typeof outcome.answer !== "string") {
+        setAsk({
+          status: "error",
+          path: row.path,
+          message: outcome.message || "Claude did not return an answer.",
+        });
+      } else {
+        setAsk({ status: "done", path: row.path, answer: outcome.answer });
+      }
+    },
+    [callAction],
+  );
+
+  const askModal = useCallback(
+    (row, outcome, wholeFile, reload) => {
+      const summary = outcome.summary;
+      const blocked = summary.available === false;
+      return {
+        title: "Ask Claude about this file",
+        body: outcome.message,
+        details: sendDetails(summary),
+        warning: blocked ? summary.reason || CLAUDE_MISSING : null,
+        note:
+          wholeFile && !sendsWhole(summary)
+            ? `Only ${bytes(summary.bytes_to_send)} bytes fit in one request, so the file is cut off.`
+            : null,
+        option:
+          wholeFile || !sendsWhole(summary)
+            ? {
+                label: `Send the whole file (${bytes(summary.file_bytes)} bytes)`,
+                checked: wholeFile,
+                onChange: reload,
+              }
+            : null,
+        confirmLabel: "Send to Claude",
+        confirmDisabled: blocked,
+        cloud: true,
+        onConfirm: () => {
+          sendToClaude(row, wholeFile);
+          return null;
+        },
+      };
+    },
+    [sendToClaude],
+  );
+
+  const askClaude = useCallback(
+    async (row) => {
+      const request = (wholeFile) =>
+        callAction("ask_claude", row, wholeFile ? { confirm: false, whole_file: true } : { confirm: false });
+      const reload = async (wholeFile) => {
+        const again = await request(wholeFile);
+        if (!again.needs_confirmation || !again.summary) {
+          showToast(again.message || "Could not refresh what will be sent.", "error");
+          return false;
+        }
+        setModal(askModal(row, again, wholeFile, reload));
+        return true;
+      };
+      const outcome = await request(false);
+      if (!outcome.needs_confirmation || !outcome.summary) {
+        showToast(outcome.message || "Ask Claude is not available for this file.", "error");
+        return;
+      }
+      setModal(askModal(row, outcome, false, reload));
+    },
+    [askModal, callAction, showToast],
+  );
+
+  const continueInClaudeCode = async () => {
+    if (!ask || continuing) return;
+    setContinuing(true);
+    try {
+      await api.post("/v1/actions/ask_claude/continue", { path: ask.path });
+      showToast("Opened in Claude Code");
+    } catch (error) {
+      if (error.code === "route_missing") {
+        setContinueMissing(true);
+      } else {
+        showToast(fail(error), "error");
+      }
+    } finally {
+      setContinuing(false);
+    }
+  };
+
+  const closeAsk = () => {
+    askSeq.current += 1;
+    setAsk(null);
+  };
+
+  const loadListing = useCallback(
+    async (path, stack) => {
+      const outcome = await callAction("folder_listing", { path });
+      if (outcome.ok === false || !Array.isArray(outcome.rows)) {
+        showToast(outcome.message || "The folder could not be listed.", "error");
+        return;
+      }
+      setListing({ ...outcome, stack });
+    },
+    [callAction, showToast],
+  );
+
   const perform = useCallback(
     (verb, row, targets) => {
       if (!row) return;
@@ -315,24 +606,11 @@ function Workspace({ initialQuery, onExpired }) {
         });
         return;
       }
-      if (verb === "ask_claude") {
-        setModal({
-          title: "Ask Claude about this file",
-          body: `The contents of ${plainPath(row.path)} will be sent to Claude. Nothing else leaves this PC.`,
-          confirmLabel: "Send to Claude",
-          cloud: true,
-          onConfirm: async () => {
-            const outcome = await callAction("ask_claude", row, { confirm: true });
-            if (outcome.ok === false) return outcome.message || "The request failed.";
-            showToast(outcome.message || "Sent to Claude");
-            return null;
-          },
-        });
-        return;
-      }
+      if (verb === "ask_claude") return askClaude(row);
+      if (verb === "folder_listing") return loadListing(row.path, []);
       return runVerb(verb, row);
     },
-    [afterChange, callAction, copyPaths, runVerb, showToast],
+    [afterChange, askClaude, callAction, copyPaths, loadListing, runVerb, showToast],
   );
 
   const targetsFor = (row) => {
@@ -406,7 +684,20 @@ function Workspace({ initialQuery, onExpired }) {
     }
   }, []);
 
+  const changeSplit = (frac, commit) => {
+    setSplitFrac(frac);
+    if (commit) saveSplit(frac);
+  };
+
+  const changeZoom = (value) => {
+    setZoom(value);
+    saveZoom(value);
+  };
+
   const clearAll = () => {
+    window.clearTimeout(debounce.current);
+    if (inflight.current) inflight.current.abort();
+    lastRun.current = "";
     setText("");
     setResult(null);
     setProblem(null);
@@ -420,28 +711,76 @@ function Workspace({ initialQuery, onExpired }) {
   useEffect(() => {
     const onKeyDown = (event) => {
       const now = latest.current;
-      if (now.menu || now.modal) return;
+      if (now.menu || now.modal || now.listing) return;
       const tag = event.target.tagName;
       const typing = tag === "INPUT" || tag === "TEXTAREA";
-      const control = event.ctrlKey || event.metaKey;
       const key = event.key;
+      const chord = (action) => matches(event, now.shortcuts[action]);
 
-      if (key === "F11") {
+      if (chord("full_page")) {
         event.preventDefault();
         api.closeFullPage();
         return;
       }
-      if (control && key === "Enter") {
+      if (now.ask) {
+        if (chord("close")) {
+          event.preventDefault();
+          closeAsk();
+        }
+        return;
+      }
+      const inQuery = event.target === inputRef.current;
+      const otherField = tag === "SELECT" || (typing && !inQuery);
+      const hasSelection = window.getSelection().toString() !== "";
+      const rowLive =
+        now.activeRow && !otherField && !hasSelection && (!inQuery || now.text === now.searchedText);
+      if (rowLive && chord("copy_path")) {
+        event.preventDefault();
+        copyPaths(targetsFor(now.activeRow));
+        return;
+      }
+      if (rowLive && chord("recycle")) {
+        event.preventDefault();
+        perform("recycle", now.activeRow);
+        return;
+      }
+      if (now.activeRow && !otherField && chord("rename")) {
+        event.preventDefault();
+        perform("rename", now.activeRow);
+        return;
+      }
+      if (now.activeRow && !otherField && chord("properties")) {
+        event.preventDefault();
+        perform("properties", now.activeRow);
+        return;
+      }
+      if (now.activeRow && !otherField && chord("folder_listing")) {
+        event.preventDefault();
+        loadListing(now.activeRow.path, []);
+        return;
+      }
+      if (chord("cycle_date")) {
+        event.preventDefault();
+        changeModified(MODIFIED_CYCLE[(MODIFIED_CYCLE.indexOf(now.modifiedKind) + 1) % MODIFIED_CYCLE.length]);
+        return;
+      }
+      if (chord("reveal")) {
         event.preventDefault();
         perform("reveal", now.activeRow);
         return;
       }
-      if (control && (key === "m" || key === "M")) {
+      if (chord("md_vault")) {
         event.preventDefault();
         perform("md_vault", now.activeRow);
         return;
       }
-      if (control && (key === "s" || key === "S")) {
+      if (chord("save_search")) {
+        event.preventDefault();
+        if (now.text.trim()) saveCurrent(now.text.trim().slice(0, 80));
+        else showToast("Type a query to save.", "error");
+        return;
+      }
+      if (chord("cycle_sort")) {
         event.preventDefault();
         const order = SORTS.map(([k]) => k);
         const next = order[(order.indexOf(now.sort) + 1) % order.length];
@@ -449,7 +788,17 @@ function Workspace({ initialQuery, onExpired }) {
         refine({ sort: next });
         return;
       }
-      if (key === "Escape") {
+      if (chord("close") && now.expanded) {
+        event.preventDefault();
+        setExpanded(false);
+        return;
+      }
+      if (now.activeRow && now.paneOpen && matches(event, EXPAND_CHORD)) {
+        event.preventDefault();
+        setExpanded(!now.expanded);
+        return;
+      }
+      if (chord("close")) {
         event.preventDefault();
         if (now.selected.size > 0) {
           setSelected(new Set());
@@ -466,10 +815,10 @@ function Workspace({ initialQuery, onExpired }) {
       } else if ((key === "Home" || key === "End") && !typing) {
         event.preventDefault();
         move(0, event.shiftKey, key === "Home" ? "home" : "end");
-      } else if (key === "Enter" && !typing && tag !== "BUTTON") {
+      } else if (chord("open") && !typing && tag !== "BUTTON") {
         event.preventDefault();
         perform("open", now.activeRow);
-      } else if (key === "ContextMenu" || (key === "F10" && event.shiftKey)) {
+      } else if (key === "ContextMenu" || chord("context_menu")) {
         if (!now.activeRow) return;
         event.preventDefault();
         const el = document.querySelector(`[data-path="${CSS.escape(now.activeRow.path)}"]`);
@@ -479,8 +828,7 @@ function Workspace({ initialQuery, onExpired }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perform, move, result]);
+  });
 
   const saveCurrent = async (name) => {
     const modified = modifiedParam(modifiedKind, rangeFrom, rangeTo) || "";
@@ -545,15 +893,13 @@ function Workspace({ initialQuery, onExpired }) {
   const builtAt = (result && result.built_at) || (health && health.built_at) || 0;
   const entries = health && typeof health.entries === "number" ? health.entries : null;
   const hasMore = result && result.rows.length < result.total && result.rows.length < 100000;
-  const showPane = paneOpen && activeRow;
-
   return (
     <div className={`app ${showPane ? "with-pane" : ""}`}>
       <Header
         entries={entries}
         builtAt={builtAt}
-        theme={theme}
-        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        theme={themeChoice}
+        onToggleTheme={chooseTheme}
         onPanel={openPanel}
       />
       <QueryBar
@@ -561,6 +907,9 @@ function Workspace({ initialQuery, onExpired }) {
         text={text}
         onText={setText}
         onSubmit={() => search({})}
+        ghost={ghost}
+        onAcceptGhost={() => setText(text + ghost)}
+        onDismissGhost={() => setGhostOff(text)}
         chips={chips}
         onToggleChip={toggleChip}
         modifiedKind={modifiedKind}
@@ -619,10 +968,14 @@ function Workspace({ initialQuery, onExpired }) {
         )}
       </div>
 
-      <main className="split">
-        <section className="listwrap" aria-label="Results">
+      <main
+        ref={splitRef}
+        className={`split ${expandedNow ? "expanded" : ""}`}
+        style={{ "--pane-basis": `${(splitFrac * 100).toFixed(2)}%` }}
+      >
+        <section className="listwrap" aria-label="Results" aria-hidden={expandedNow || undefined}>
           {!result && !problem && !loading && (
-            <p className="empty">Type a query and press Enter. Try <code>design md</code>.</p>
+            <p className="empty">Start typing to search. Try <code>design md</code>.</p>
           )}
           {problem && problem.status === 503 && (
             <p className="empty">The index is not ready yet. Try again in a moment.</p>
@@ -655,10 +1008,17 @@ function Workspace({ initialQuery, onExpired }) {
             </>
           )}
         </section>
+        {showPane && !expandedNow && (
+          <SplitHandle containerRef={splitRef} frac={splitFrac} onChange={changeSplit} />
+        )}
         {showPane && (
           <PreviewPane
             row={activeRow}
             extraSelected={Math.max(0, selected.size - 1)}
+            expanded={expandedNow}
+            zoom={zoom}
+            onZoom={changeZoom}
+            onToggleExpand={() => setExpanded(!expandedNow)}
             onCopy={(row) => copyPaths([row])}
             onClose={() => setPaneOpen(false)}
           />
@@ -669,6 +1029,8 @@ function Workspace({ initialQuery, onExpired }) {
         <ContextMenu
           x={menu.x}
           y={menu.y}
+          claude={claude}
+          shortcuts={shortcuts}
           onClose={() => setMenu(null)}
           onPick={(verb) => {
             const row = menu.row;
@@ -678,6 +1040,30 @@ function Workspace({ initialQuery, onExpired }) {
         />
       )}
       {modal && <Modal modal={modal} onClose={() => setModal(null)} />}
+      {ask && (
+        <AskPane
+          ask={ask}
+          closeKey={chordLabel(shortcuts.close)}
+          continuing={continuing}
+          continueMissing={continueMissing}
+          onContinue={continueInClaudeCode}
+          onCopy={async () => {
+            const ok = await copyText(ask.answer);
+            showToast(ok ? "Answer copied" : "Could not copy to the clipboard", ok ? "ok" : "error");
+          }}
+          onClose={closeAsk}
+        />
+      )}
+      {listing && (
+        <FolderListing
+          listing={listing}
+          canGoBack={listing.stack.length > 0}
+          onBack={() => loadListing(listing.stack[listing.stack.length - 1], listing.stack.slice(0, -1))}
+          onOpenFolder={(item) => loadListing(item.path, [...listing.stack, listing.folder])}
+          onOpenFile={(item) => perform("open", item)}
+          onClose={() => setListing(null)}
+        />
+      )}
       {toast && (
         <div className={`toast ${toast.kind}`} role="status" data-testid="toast">
           {toast.message}

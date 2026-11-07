@@ -22,6 +22,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("demo", help="show sample cards without installing anything")
 
+    update = sub.add_parser("update", help="update this install (git pull, or a release zip from update.source)")
+    update.add_argument("--dry-run", action="store_true", help="print what would be done without doing it")
+    update.add_argument("--yes", action="store_true",
+                        help="release-zip route: also run pip on the new copy's requirements (otherwise it is printed)")
+
     hooks = sub.add_parser("hooks", help="manage Claude Code hook entries")
     hooks.add_argument("action", choices=("install", "remove"))
     hooks.add_argument("--dry-run", action="store_true", help="print the entries without writing")
@@ -57,6 +62,9 @@ def main(argv=None) -> int:
     if args.command == "demo":
         from . import demo
         return demo.main(extra)
+    if args.command == "update":
+        from . import update
+        return update.run(args)
     if args.command == "hooks":
         from . import hooks_installer
         return hooks_installer.run(args)

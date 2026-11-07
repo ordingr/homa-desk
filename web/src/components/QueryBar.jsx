@@ -44,7 +44,11 @@ export default function QueryBar({
   savedOpen,
   onToggleSaved,
   savedCount,
+  ghost,
+  onAcceptGhost,
+  onDismissGhost,
 }) {
+  const [focused, setFocused] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveName, setSaveName] = useState("");
 
@@ -66,13 +70,31 @@ export default function QueryBar({
             type="text"
             className="queryinput"
             value={text}
-            placeholder="Search files, e.g. design md   (Enter to search)"
+            placeholder="Search files, e.g. design md"
             spellCheck={false}
             autoComplete="off"
             autoFocus
             onChange={(event) => onText(event.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.ctrlKey) {
+              const input = event.currentTarget;
+              const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+              if (ghost && atEnd && !event.ctrlKey && !event.altKey && !event.metaKey) {
+                if (event.key === "Tab" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onAcceptGhost();
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDismissGhost();
+                  return;
+                }
+              }
+              if (event.key === "Enter" && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
                 onSubmit();
@@ -80,6 +102,12 @@ export default function QueryBar({
             }}
             data-testid="query"
           />
+          {ghost && focused && (
+            <div className="queryghost" aria-hidden="true" data-testid="query-ghost">
+              <span className="queryghost-typed">{text}</span>
+              <span className="queryghost-hint">{ghost}</span>
+            </div>
+          )}
         </div>
         <button type="button" className="btn primary" onClick={onSubmit} data-testid="search-btn">
           Search

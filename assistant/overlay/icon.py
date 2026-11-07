@@ -93,10 +93,14 @@ class Icon:
         self.win.withdraw()
         self.win.protocol("WM_DELETE_WINDOW", lambda: self.actions.quit())
         self.win.overrideredirect(True)
-        self.win.configure(bg=gfx.CHROMA_KEY)
+        self.rounded = win.round_corners(win.hwnd_of(self.win))
+        key = gfx.PURPLE if self.rounded else gfx.CHROMA_KEY
+        self.win.configure(bg=key)
         self.win.attributes("-topmost", True)
-        self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
-        self.canvas = tk.Canvas(self.win, bg=gfx.CHROMA_KEY, highlightthickness=0, bd=0)
+        if not self.rounded:
+            self.win.attributes("-transparentcolor", gfx.CHROMA_KEY)
+        self.images: list = []
+        self.canvas = tk.Canvas(self.win, bg=key, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True)
 
         x, y = self._initial_position()
@@ -133,16 +137,39 @@ class Icon:
     def _draw(self) -> None:
         c = self.canvas
         c.delete("all")
+        self.images = []
         s = self.size
-        pad = max(2, s * 0.06)
         body = gfx.GREY if self.muted else gfx.PURPLE
-        c.create_oval(pad, pad, s - pad, s - pad, fill=body, outline=gfx.WHITE,
-                      width=max(1, s // 30), tags="body")
-        gfx.draw_bell(c, s / 2, s / 2, s * 0.42, gfx.WHITE)
-        if self.muted:
-            gfx.draw_cross(c, s / 2, s / 2, s * 0.42, gfx.RED, max(2, s / 14))
+        loaded = gfx.load_png("icon-muted" if self.muted else "icon", s)
+        if self.rounded:
+            c.configure(bg=body)
+        else:
+            c.configure(bg=gfx.CHROMA_KEY)
+            pad = max(1, s * 0.02)
+            c.create_oval(pad, pad, s - pad, s - pad, fill=body, outline=gfx.WHITE,
+                          width=max(1, s // 30), tags="body")
+        if loaded is None:
+            gfx.draw_bell(c, s / 2, s / 2, s * 0.42, gfx.WHITE)
+            if self.muted:
+                gfx.draw_cross(c, s / 2, s / 2, s * 0.42, gfx.RED, max(2, s / 14))
+        else:
+            image, family = loaded
+            if not self.rounded:
+                image = gfx.crop_centre(image, 0.68)
+            self.images.append(image)
+            c.create_image(s / 2, s / 2, image=image, tags="glyph")
         if self.count > 0:
-            gfx.draw_badge(c, s * 0.76, s * 0.24, s * 0.19, self.count)
+            self._draw_badge(loaded[1] if loaded else s)
+
+    def _draw_badge(self, family: int) -> None:
+        s = self.size
+        key = "plus" if self.count > 9 else str(self.count)
+        badge = gfx.load_png(f"badge_{key}", family) if self.rounded else None
+        if badge is None:
+            gfx.draw_badge(self.canvas, s * 0.76, s * 0.24, s * 0.19, self.count)
+            return
+        self.images.append(badge[0])
+        self.canvas.create_image(s * 0.76, s * 0.24, image=badge[0], tags="badge")
 
     def set_count(self, count: int) -> None:
         count = max(0, int(count))
@@ -270,6 +297,8 @@ class Icon:
                 "muted": self.muted,
                 "body_colour": gfx.GREY if self.muted else gfx.PURPLE,
                 "scale": self.scale,
+                "rounded": self.rounded,
+                "corner_preference": win.corner_preference(self.hwnd),
             },
             "menu": menu_labels(self.muted, sounds.is_enabled()),
             "mute_choices": [t for t, _ in MUTE_CHOICES],
@@ -290,6 +319,7 @@ def create_root() -> tk.Tk:
     win.set_dpi_aware()
     root = tk.Tk()
     root.withdraw()
+    win.set_app_icon(root)
     return root
 
 

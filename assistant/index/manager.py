@@ -29,11 +29,16 @@ DELTA_FOLD_LIMIT = 50_000
 HINT_REPLAY_LIMIT = 200_000
 MINI_SCAN_BUDGET = 50_000
 OVERFLOW_DEBOUNCE_S = 1.0
+FOLD_QUIET_S = 90.0
 HINT_IDLE_WAIT_S = 5.0
 HINT_BATCH_S = 0.25
 HINT_BATCH_MAX = 5000
+BATCH_SCAN_BUDGET = 50_000
+HINT_PACE_FACTOR = 4.0
+HINT_PACE_MAX_S = 2.0
 BATTERY_RETRY_S = 900.0
 BATTERY_REASONS = ("start", "daily", "overflow")
+STOP_JOIN_S = 2.0
 
 
 def _default_builder_factory() -> Callable[[], Any]:
@@ -107,6 +112,8 @@ class IndexManager:
         self._root_timeout = 60.0
         self._pause_on_battery = True
         self._delta_ops = 0
+        self._last_hint_at = float("-inf")
+        self._batch_scan_left = BATCH_SCAN_BUDGET
         self._delta_paths: set = set()
         self._overflow_count = 0
         self._rewalks_scheduled = 0
@@ -163,11 +170,12 @@ class IndexManager:
             self._cond.notify_all()
         with self._lifecycle:
             threads = (self._walk_thread, self._hint_thread)
+        deadline = time.monotonic() + STOP_JOIN_S
         for th in threads:
             if th is None or th is threading.current_thread():
                 continue
             try:
-                th.join(timeout=3)
+                th.join(timeout=max(0.0, deadline - time.monotonic()))
             except RuntimeError:
                 pass
         daily, self._daily = self._daily, None
@@ -192,6 +200,8 @@ class IndexManager:
             if self._requested is None:
                 self._requested, self._due = reason, when
             else:
+                if self._requested == "delta-fold" and reason != "delta-fold":
+                    self._requested = reason
                 self._due = min(self._due, when)
             self._cond.notify_all()
 
@@ -332,7 +342,12 @@ class IndexManager:
                     self._cond.wait()
                 if self._stop.is_set():
                     return
-                wait = self._due - time.monotonic()
+                now = time.monotonic()
+                wait = self._due - now
+                if wait <= 0 and self._requested == "delta-fold":
+                    wait = FOLD_QUIET_S - (now - self._last_hint_at)
+                    if wait > 0:
+                        self._due = now + wait
                 if wait > 0:
                     self._cond.wait(timeout=wait)
                     continue
@@ -417,6 +432,7 @@ class IndexManager:
             r.path: {"state": r.state, "entries": r.entries, "last_walk_s": round(r.seconds, 3),
                      "error": r.error, "errors": r.errors}
             for r in result.roots}
+        self._batch_scan_left = BATCH_SCAN_BUDGET
         for action, path, root in pending:
             self._apply_hint(action, path, root)
         if overflowed:
@@ -453,12 +469,17 @@ class IndexManager:
                     batch.append(self._hints.get(timeout=left))
                 except queue.Empty:
                     break
-            last = None
+            self._last_hint_at = time.monotonic()
+            self._batch_scan_left = BATCH_SCAN_BUDGET
+            seen: dict = {}
             for hint in batch:
-                if hint is None or hint == last:
+                if hint is None:
                     continue
-                last = hint
                 action, path, root = hint
+                if action == watcher_mod.ACTION_MODIFIED and seen.get(path) in (
+                        watcher_mod.ACTION_ADDED, watcher_mod.ACTION_MODIFIED, watcher_mod.ACTION_RENAMED_NEW):
+                    continue
+                seen[path] = action
                 try:
                     with self._replay_lock:
                         if self._walking:
@@ -469,6 +490,9 @@ class IndexManager:
                     self._apply_hint(action, path, root)
                 except Exception:
                     log.exception("hint handling failed")
+            spent = time.monotonic() - self._last_hint_at
+            if spent > HINT_BATCH_S:
+                self._stop.wait(min(spent * HINT_PACE_FACTOR, HINT_PACE_MAX_S))
 
     def _excluded(self, root: str, path: str, leaf_is_dir: bool) -> bool:
         excludes = self._excludes
@@ -541,7 +565,7 @@ class IndexManager:
 
     def _scan_into_delta(self, root: str, top: str, delta) -> None:
         stack = [top]
-        budget = MINI_SCAN_BUDGET
+        budget = start = min(MINI_SCAN_BUDGET, self._batch_scan_left)
         while stack and budget > 0 and not self._stop.is_set():
             d = stack.pop()
             try:
@@ -566,10 +590,12 @@ class IndexManager:
                     budget -= 1
                     if is_dir and not attrs & crawler_mod.ATTR_REPARSE:
                         stack.append(entry.path)
-        self._bump_delta(MINI_SCAN_BUDGET - budget)
+        self._batch_scan_left -= start - budget
+        self._bump_delta(start - budget)
+        if stack and not self._stop.is_set():
+            self.request_rescan("delta-fold", delay=FOLD_QUIET_S)
 
     def _bump_delta(self, n: int) -> None:
         self._delta_ops += n
         if self._delta_ops > DELTA_FOLD_LIMIT:
-            self._delta_ops = 0
-            self.request_rescan("delta-fold", delay=OVERFLOW_DEBOUNCE_S)
+            self.request_rescan("delta-fold", delay=FOLD_QUIET_S)

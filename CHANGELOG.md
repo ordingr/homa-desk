@@ -96,7 +96,7 @@
 
 ## 2026-11-07
 - M3a (Files search, Ask notes, MCP file tools): built on the working tree 2026-11-07, uncommitted when this entry was written.
-  No pull request number is available to doc-keeper. Commit: **[placeholder: git-keeper to fill in]**. Merge: pending git-keeper.
+  No pull request number is available to doc-keeper. Commit: 847b8a5 … e9367d4 on main (four commits: 847b8a5, 09f25d48, 6fb1f5b5, e9367d4; `a9bdbf8` is the M3-0 commit and is not part of M3a). Merge: pending git-keeper.
   Why: plan section 7.3, so Files mode and Ask notes run in the popup and Claude can search and read indexed files through MCP,
   without a second app.
   - Pieces: index store, excludes and deny-list (M3a-1: `assistant/index/{store,excludes}.py`, `assistant/security/{denylist,pathcheck}.py`);
@@ -122,7 +122,7 @@
     fix (`docs/security/2026-11-07-m3a-review.md`).
   - Not yet observed: the quiet-machine re-measure (the numbers above were taken under load); the work-laptop probes (user-run,
     not run by doc-keeper); the popup on a live desktop with the hotkey registered, and the qa driver run of the popup (qa M3a-8
-    result **[placeholder: not in brief]**); a re-check of the R7-F1 and R7-F2 fixes by security (not yet in `docs/security/`).
+    result: full suite 711 passed (non-e2e), per the tech-lead's brief); a re-check of the R7-F1 and R7-F2 fixes by security (not yet in `docs/security/` when this entry was written; see the update below).
   - Known gaps, recorded not fixed: hidden and system files are indexed (PRD AC-FI-1 says excluded); a full scan runs at every
     start (AC-FI-4); result actions (Open, Explorer, MD Vault, folder) and the Full page button do nothing yet (M3b); the popup
     shows no placeholder marker (AC-FI-6); no custom date range in the popup (AC-FI-15); saved-search sort is stored but not
@@ -136,10 +136,12 @@
     security facts and troubleshooting, with dated correction notes where M1 and M2 text is now wrong. `docs/api.md` section 11
     gives the search, roots, saved-search and health routes, the MCP file tools with every refusal text, and the differences from
     the PRD. `docs/search-grammar.md` is new.
+  - Update 2026-11-07, commit: the four M3a commits are on main in this order (from `.git/logs/HEAD`): 847b8a5 (`feat(m3a): file index, query grammar, search popup, hotkey, Ask notes`), 09f25d48 (`feat(m3a): search routes, four read-only MCP file tools, app wiring, Roots/Search settings pages`), 6fb1f5b5 (`test(m3a): ...`), e9367d4 (`docs(m3a): ...`). The reflog has no commit between e9367d4 and 56c3aa8, so the M3a-11 and M3a-12 changes (the R7-F1 and R7-F2 fixes and the bigram prefilter) are in 56c3aa8, the M3b commit. This is an inference from the reflog; it was not checked against the diff.
+  - Update 2026-11-07, security re-check: `docs/security/2026-11-07-m3a-review.md`, section "Re-check after M3a-11/12 (2026-11-07)". Its verdict line reads: "### Verdict: PASS — zero BLOCK, zero FIX-BEFORE-M3B. R7-F1 and R7-F2 are CLOSED by observation in all the layers the fix claims; …" It carries eight NOTEs (R8-N1 to R8-N8), none a merge gate. The suite figure of 711 in that section is cited "per the dispatch" and was not re-run by security.
 
 ## 2026-11-07
 - M3b (full page, previews, result actions): built on the working tree 2026-11-07, uncommitted when this entry was written.
-  No pull request exists (the repo has no remote). Commit: **[placeholder: git-keeper to fill in]**. Merge: pending git-keeper.
+  No pull request exists (the repo has no remote). Commit: 56c3aa8 `feat(m3b): full-page React app, previews, shell actions, index fixes`, on main, committed 2026-11-07 (200 files, +18806/−155, per the tech-lead's brief; the diffstat was not re-run by doc-keeper). Merge: pending git-keeper.
   Security review of M3b: **pending (M3b-7)**. Why: plan section 7.4, so the full page replaces the `fastsearch` full view, files
   can be previewed in the page, and results can be opened, revealed, renamed, moved to the Recycle Bin or listed without another app.
   - Pieces: M3b-0 leftovers (plan 18.3, items (a) to (p)): hidden and system entries excluded by default (`index.include_hidden`);
@@ -159,8 +161,8 @@
     M3b-5: `assistant/overlay/search_ui.py` (context menu, action keys, Full page button and F11, full Esc chain).
     M3b-9: wiring in `assistant/app.py`.
   - Dispatched by tech-lead. Planned roles (plan 7.4 and 18.3 to 18.4): ui (M3b-1, M3b-2), dev (M3b-0, M3b-3, M3b-4, M3b-5, M3b-9),
-    qa (M3b-6). The brief does not name the agent that ran each task: **[placeholder: agent per task]**. Verifiers: qa M3b-6,
-    result **[placeholder: not in the brief]**; security M3b-7, pending.
+    qa (M3b-6). Agent per task, attributed by file ownership (per the tech-lead's brief): ui for M3b-1, M3b-2 and M3b-10 (`web/**`, `assistant/static/app/**`); dev for M3b-0, M3b-3, M3b-4, M3b-5, M3b-9 and M3b-11; qa for M3b-6; security for M3b-7; doc-keeper for M3b-8; commit by git-keeper. Verifiers: qa M3b-6,
+    result: 886 non-e2e tests passed; e2e 70 passed, and 6 overlay tests not run because they need an unlocked desktop (per the brief); security M3b-7, verdicts in the update below.
   - Reported numbers (from the tech-lead's M3b brief; not repo artifacts, not re-measured by doc-keeper): M3b-1 browser checks 70 of 70
     passed; M3b-2 headless-Edge checks 40 of 40 passed, including hostile preview fixtures with no alert and no navigation; popup queries of
     one letter plus a path term 25 to 85 ms; heavy queries on a 2,000,000-entry store at most 445 ms. No work-laptop result.
@@ -175,3 +177,7 @@
     the range rules, the nonce exchange, the action verbs and errors, the settings keys and the differences from the PRD, with correction
     notes in sections 3.6, 8, 11.7 and 11.9. `docs/search-grammar.md` section 11 gives the custom date range, the sort values and
     `index.known_exts`, with correction notes in sections 5 and 9.
+  - Update 2026-11-07, security review: the M3b security review is `docs/security/2026-11-07-m3b-review.md`. Its Review 9 verdict line reads: "### Verdict: BLOCK — one BLOCK finding (R9-B1: a Mermaid block in a previewed Markdown file makes the page fetch an attacker-chosen URL through CSS `url()`; demonstrated, fix verified both ways). Four FIX-BEFORE-M4 (R9-F1..F4), twelve NOTEs (R9-N1..N12)." The section "Re-check after M3b-10/11 (2026-11-07)" then lifts the block. Its verdict line reads: "### Verdict: BLOCK LIFTED — PASS for merge. R9-B1 is closed by three observed layers (locked Mermaid config keys, style guard, CSP header); …" The re-check's open items are R10-F1 (FIX-BEFORE-M4), R10-N1 to R10-N4 (any time), and R10-N5 and R10-N6 (informational).
+  - Update 2026-11-07, R10-F1 status (not settled by this entry): the re-check lists R10-F1 as open ("14 s for a 128 KB member and no per-member cap on docx/pptx"). The re-check records no re-test of a fix. The current source has the regex half: the three patterns use `[^<>]` (`assistant/preview/extract.py` lines 66, 114 and 209). The member-cap half is not in the source: `word/document.xml` and the slides are read with no limit (`extract.py` lines 72 and 222). Timing was not re-measured for this entry.
+  - Update 2026-11-07, carried items (per the re-check): before M4, R10-F1. Any time, R10-N1 to R10-N4. Carried unchanged: R9-N5, R9-N7, R9-N8, R9-N9, R9-N10 (katex), R9-N12, R5-N7 second half, and the B1 tail.
+  - Update 2026-11-07, qa: the "qa full-suite result for M3b" in the list above is now known. The brief reports 886 non-e2e tests passed; e2e 70 passed; 6 overlay tests need an unlocked desktop and were not run. The "not yet observed" bullet above is kept as written.

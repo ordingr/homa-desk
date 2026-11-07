@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import REPO_ROOT, Api, SearchApp, _free_port, build_search_tree, launch_app, wait_index, wait_until, BULK_COUNT
+from conftest import REPO_ROOT, browser_env, Api, SearchApp, _free_port, build_search_tree, launch_app, wait_index, wait_until, BULK_COUNT
 
 WEB = REPO_ROOT / "web"
 EDGE = [p for p in (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -300,7 +300,7 @@ def test_hostile_mermaid_config_and_svg_cause_zero_external_requests_and_the_dia
             assert isinstance(index, dict) and index.get("entries", 0) >= 6, index
             script = tmp_path / "beacon_driver.cjs"
             script.write_text(BEACON_DRIVER, encoding="utf-8")
-            env = dict(os.environ, NODE_PATH=str(Path(pw_dir) / "node_modules"), BEACON_PORT=str(port))
+            env = browser_env(NODE_PATH=str(Path(pw_dir) / "node_modules"), BEACON_PORT=str(port))
             done = subprocess.run([node, str(script), base_url, token], capture_output=True, text=True, timeout=240,
                                   env=env)
     finally:

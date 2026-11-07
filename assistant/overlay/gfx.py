@@ -1,4 +1,9 @@
+import re
 import tkinter as tk
+from pathlib import Path
+from typing import Optional
+
+from . import theme
 
 AMBER = "#F5A623"
 GREEN = "#2E9E5B"
@@ -8,19 +13,7 @@ RED = "#E5352B"
 GREY = "#7A7A7A"
 WHITE = "#FFFFFF"
 CHROMA_KEY = "#010203"
-
-PANEL_BG = "#22252B"
-PANEL_FG = "#F2F2F2"
-PANEL_DIM = "#9AA0A6"
-PANEL_ERR = "#F28B82"
-PANEL_OK = "#A8D5A2"
-INPUT_BG = "#2F333A"
-INPUT_BORDER = "#444A53"
-PANEL_BG_BLINK = "#3A3F48"
-PANEL_DIM_CARD = "#A9AFB8"
-PANEL_LINK = "#7FB6FF"
-BUTTON_BG = "#343942"
-BUTTON_BG_HOVER = "#4A505B"
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
 KIND_COLOURS = {
     "waiting": AMBER,
@@ -37,6 +30,27 @@ def kind_colour(kind: str) -> str:
 
 def px(value: float, scale: float) -> int:
     return max(1, int(round(value * scale)))
+
+
+def load_png(prefix: str, px: float) -> Optional[tuple[tk.PhotoImage, int]]:
+    """Pre-rendered `<prefix>_<size>.png` from assets/ whose size is nearest to px, with that size; None if absent."""
+    best: Optional[tuple[float, int, Path]] = None
+    for path in ASSETS.glob(f"{prefix}_*.png"):
+        m = re.fullmatch(re.escape(prefix) + r"_(\d+)\.png", path.name)
+        if m and (best is None or abs(int(m.group(1)) - px) < best[0]):
+            best = (abs(int(m.group(1)) - px), int(m.group(1)), path)
+    if best is None:
+        return None
+    try:
+        return tk.PhotoImage(file=str(best[2])), best[1]
+    except tk.TclError:
+        return None
+
+
+def crop_centre(image: tk.PhotoImage, fraction: float) -> tk.PhotoImage:
+    w, h = image.width(), image.height()
+    mx, my = int(w * (1 - fraction) / 2), int(h * (1 - fraction) / 2)
+    return image.copy(from_coords=(mx, my, w - mx, h - my))
 
 
 def draw_bell(canvas: tk.Canvas, cx: float, cy: float, size: float, colour: str, tag: str = "bell") -> None:
@@ -76,3 +90,10 @@ def draw_badge(canvas: tk.Canvas, cx: float, cy: float, radius: float, count: in
     canvas.create_text(cx, cy, text=text, fill=WHITE,
                        font=(font_family, -int(radius * (1.15 if len(text) == 1 else 0.95)), "bold"),
                        tags="badge")
+
+
+def __getattr__(name: str) -> str:
+    """PANEL_BG, PANEL_FG, INPUT_BG, BUTTON_BG and the other theme-dependent names resolve to the active palette."""
+    if name in theme.NAMES:
+        return theme.colour(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

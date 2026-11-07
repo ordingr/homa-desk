@@ -1,10 +1,11 @@
 <#
 Installs Assistant for the current user. No elevation, no service, no executable.
-Run:  powershell -ExecutionPolicy Bypass -File install.ps1 [-Hooks] [-NoStart]
+Run:  powershell -ExecutionPolicy Bypass -File install.ps1 [-Hooks] [-NoStart] [-NoShortcut]
 #>
 param(
     [switch]$Hooks,
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$NoShortcut
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -63,6 +64,10 @@ try {
     $lnk.WorkingDirectory = $repo
     $lnk.Description = 'Assistant'
     $lnk.Save()
+
+    if (-not $NoShortcut) {
+        & (Join-Path $repo 'scripts\install-shortcut.ps1')
+    }
 
     if (-not $NoStart) {
         Start-Process -FilePath $pythonw -ArgumentList '-m', 'assistant' -WorkingDirectory $repo

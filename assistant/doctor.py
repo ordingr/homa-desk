@@ -76,6 +76,21 @@ def _claude_version() -> str:
     return f"{shown} (below minimum {minimum}, FAIL)"
 
 
+def _ask_claude_state() -> str:
+    try:
+        from .actions import claude
+        status = claude.status()
+    except ImportError:
+        return "not in this build"
+    except Exception as exc:
+        return f"unavailable ({type(exc).__name__})"
+    if not isinstance(status, dict):
+        return "unavailable"
+    if status.get("available"):
+        return f"available, claude {status.get('version') or 'version unknown'}"
+    return str(status.get("reason") or "not available")
+
+
 def _outlook_com() -> str:
     try:
         from .calendar.outlook import OutlookSource
@@ -189,6 +204,42 @@ def _notes_state() -> str:
         return f"unavailable ({type(exc).__name__})"
 
 
+def _edge_state() -> str:
+    try:
+        from .overlay import fullpage
+        path = fullpage.edge_path()
+    except Exception as exc:
+        return f"unavailable ({type(exc).__name__})"
+    return f"found at {path}" if path else "msedge.exe not found (the full page cannot open)"
+
+
+def _static_state() -> str:
+    try:
+        from .server import static
+        folder = static.static_dir()
+        source = f"{static.ENV_VAR} override" if os.environ.get(static.ENV_VAR) else "packaged"
+        return f"{folder} ({source}), " + ("index.html present" if (folder / "index.html").is_file()
+                                          else "index.html MISSING")
+    except Exception as exc:
+        return f"unavailable ({type(exc).__name__})"
+
+
+def _recycle_bin_state() -> str:
+    try:
+        from .actions import shell
+        drive = os.environ.get("SystemDrive", "C:") + "\\"
+        capacity, nuke = shell._bin_settings(drive)
+        policy = shell._no_recycle_policy()
+    except Exception as exc:
+        return f"unavailable ({type(exc).__name__})"
+    if capacity is None and nuke is None:
+        state = f"{drive} has no per-volume settings key (never opened its Recycle Bin properties); size limit not checked"
+    else:
+        state = (f"{drive} MaxCapacity {capacity if capacity is not None else 'unset'} MB, "
+                 f"NukeOnDelete {nuke if nuke is not None else 'unset'}")
+    return state + (", NoRecycleFiles policy ON" if policy else "")
+
+
 def report() -> List[Tuple[str, str]]:
     version = sys.version_info
     lines = [
@@ -202,6 +253,7 @@ def report() -> List[Tuple[str, str]]:
         ("token file", "present" if token.present() else "missing"),
         ("hooks installed", hooks_installer.installed()),
         ("Claude Code", _claude_version()),
+        ("Ask Claude", _ask_claude_state()),
         ("Outlook COM", _outlook_com()),
         ("MCP", _mcp_mount()),
         ("calendars configured", _calendars_configured()),
@@ -209,6 +261,9 @@ def report() -> List[Tuple[str, str]]:
         ("index size and age", _index_state()),
         ("index roots", _index_roots()),
         ("notes index", _notes_state()),
+        ("Edge (full page)", _edge_state()),
+        ("static folder", _static_state()),
+        ("Recycle Bin", _recycle_bin_state()),
     ]
     lines.extend((name, "n/a") for name in _NOT_YET)
     return lines

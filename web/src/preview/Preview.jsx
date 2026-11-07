@@ -11,43 +11,34 @@ import TextView from "./TextView.jsx";
 import { loadPreview } from "./load.js";
 import "./preview.css";
 
-function useServerPreview(path, hydrate) {
+function useServerPreview(path) {
   const [state, setState] = useState({ status: "loading" });
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
-    loadPreview(path, { hydrate }).then(
+    loadPreview(path).then(
       (result) => !cancelled && setState({ status: "ready", ...result }),
       (error) => !cancelled && setState({ status: "error", message: error.message || "Preview failed." }),
     );
     return () => {
       cancelled = true;
     };
-  }, [path, hydrate]);
+  }, [path]);
   return state;
 }
 
-function Placeholder({ data, row, hydrated, onHydrate }) {
+function Placeholder({ data, row }) {
   return (
     <div className="pv-placeholder" data-testid="preview-placeholder">
       <Notice title="Cloud placeholder - not downloaded">
-        {data.reason || "This file is stored in the cloud and is not on this PC."}
+        The file is in the cloud and is not downloaded to this PC, so there is no preview. Open downloads it.
       </Notice>
-      {hydrated ? (
-        <p className="pv-reason" data-testid="preview-hydrate-result">
-          Cloud placeholders are never downloaded by Assistant; open the file in Explorer to download it
-        </p>
-      ) : (
-        <button type="button" className="pv-btn" onClick={onHydrate} data-testid="preview-hydrate">
-          Download and preview
-        </button>
-      )}
       <MetaCard row={row} data={data} />
     </div>
   );
 }
 
-function Rendered({ state, row, hydrated, onHydrate }) {
+function Rendered({ state, row }) {
   if (state.blob) {
     if (state.type.startsWith("image/")) return <ImageView blob={state.blob} name={row.name} />;
     if (state.type === "application/pdf") return <PdfView blob={state.blob} />;
@@ -75,7 +66,7 @@ function Rendered({ state, row, hydrated, onHydrate }) {
         </Notice>
       );
     case "placeholder":
-      return <Placeholder data={data} row={row} hydrated={hydrated} onHydrate={onHydrate} />;
+      return <Placeholder data={data} row={row} />;
     case "too_large":
       return (
         <Notice title="File too large to preview">
@@ -91,9 +82,8 @@ function Rendered({ state, row, hydrated, onHydrate }) {
 }
 
 export default function Preview({ row }) {
-  const [hydrate, setHydrate] = useState(false);
-  const state = useServerPreview(row.path, hydrate);
+  const state = useServerPreview(row.path);
   if (state.status === "loading") return <p className="dim" data-testid="preview-loading">Loading preview...</p>;
   if (state.status === "error") return <Notice title="Preview not available" tone="warn">{state.message}</Notice>;
-  return <Rendered state={state} row={row} hydrated={hydrate} onHydrate={() => setHydrate(true)} />;
+  return <Rendered state={state} row={row} />;
 }

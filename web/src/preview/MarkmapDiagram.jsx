@@ -81,6 +81,26 @@ function MarkmapDiagram({ content }) {
     };
   }, [content, theme]);
 
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver === "undefined") return undefined;
+    let frame = 0;
+    let first = true;
+    const observer = new ResizeObserver(() => {
+      if (first) {
+        first = false;
+        return;
+      }
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => mapRef.current?.fit());
+    });
+    observer.observe(svg);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
   useEffect(
     () => () => {
       mapRef.current?.destroy();

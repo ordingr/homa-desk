@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from .. import __version__, paths, uibus
 from ..cards.model import strip_control
+from ..settings import DEFAULT_SHORTCUTS, THEMES as THEME_MODES
 from . import gfx, monitors, win
 
 log = logging.getLogger("assistant.overlay.settings_ui")
@@ -21,6 +22,12 @@ PAGES = ("General", "Cards", "Calendars", "Claude Code", "MCP", "About")
 RESTART_NOTE = "takes effect after restart"
 COVERAGE_SENTENCE = ("Assistant sees permission prompts and task completion; it cannot yet see "
                      "AskUserQuestion or plan-approval waits (hook coverage probe pending).")
+SHORTCUT_LABELS = (("open", "Open"), ("reveal", "Reveal in Explorer"), ("copy_path", "Copy path"),
+                   ("rename", "Rename"), ("properties", "Properties"), ("recycle", "Move to Recycle Bin"),
+                   ("md_vault", "Open in MD Vault"), ("folder_listing", "List folder"),
+                   ("cycle_sort", "Cycle sort"), ("save_search", "Save search"), ("cycle_date", "Cycle date filter"),
+                   ("cycle_mode", "Cycle search mode"), ("context_menu", "Context menu"),
+                   ("full_page", "Full page"), ("close", "Close"))
 MUTE_LABELS = (("hooks", "Claude Code hooks"), ("http", "HTTP API"), ("mcp", "MCP"),
                ("file", "File drop"), ("reminders", "Reminders"), ("calendar", "Calendar meetings"))
 SAVE_DELAY_MS = 400
@@ -195,6 +202,7 @@ class SettingsWindow:
         self.current = name
         if name == "General":
             self.sound_var.set(bool(self.settings.get("sound_on", True)))
+            self.theme_var.set(self._theme_text())
             self._refresh_hotkey()
         elif name == "Calendars":
             self._refresh_status()
@@ -386,9 +394,22 @@ class SettingsWindow:
         self.sound_var = self._check(page, "Play sounds for new cards", bool(self.settings.get("sound_on", True)),
                                      lambda v: self._save("General", "sound_on", v))
         row = self._row(page, "Theme")
-        tk.Label(row, text="Dark (more themes later)", bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM,
-                 font=self._small).pack(side="left")
+        self.theme_var = tk.StringVar(value=self._theme_text())
+        self.theme_menu = tk.OptionMenu(row, self.theme_var, *(m.capitalize() for m in THEME_MODES),
+                                        command=lambda choice: self._save("General", "theme", choice.lower()))
+        self.theme_menu.configure(bg=gfx.BUTTON_BG, fg=gfx.PANEL_FG, activebackground=gfx.BUTTON_BG_HOVER,
+                                  activeforeground=gfx.PANEL_FG, highlightthickness=0, relief="flat",
+                                  font=self._small, bd=0, width=8)
+        self.theme_menu["menu"].configure(bg=gfx.PANEL_BG, fg=gfx.PANEL_FG, activebackground=gfx.BUTTON_BG_HOVER,
+                                          activeforeground=gfx.PANEL_FG, font=self._small, bd=0)
+        self.theme_menu.pack(side="left")
+        tk.Label(row, text="Follow system uses the Windows app setting", bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM,
+                 font=self._small).pack(side="left", padx=10)
         self._error_line("General")
+
+    def _theme_text(self) -> str:
+        value = self.settings.get("theme", "dark")
+        return (value if value in THEME_MODES else "dark").capitalize()
 
     def _build_cards(self) -> None:
         page = self._p("Cards", "Cards")
@@ -715,7 +736,16 @@ class SettingsWindow:
         self._button(row, "README", lambda: self._open(_ROOT_DIR / "README.md")).pack(side="left")
         self._button(row, "API reference (api.md)", lambda: self._open(_ROOT_DIR / "docs" / "api.md")
                      ).pack(side="left", padx=8)
+        self._text(page, "Keyboard shortcuts (read-only here; edit \"shortcuts\" in settings.json to remap)",
+                   pady=(14, 2))
+        self.shortcuts_label = self._text(page, self._shortcuts_text(), dim=False, mono=True)
         self._error_line("About")
+
+    def _shortcuts_text(self) -> str:
+        chords = dict(DEFAULT_SHORTCUTS)
+        chords.update(self.settings.get("shortcuts") or {})
+        width = max(len(label) for _, label in SHORTCUT_LABELS)
+        return "\n".join(f"{label.ljust(width)}  {chords.get(action, '')}" for action, label in SHORTCUT_LABELS)
 
     def _open(self, target: Path) -> None:
         if not target.exists():

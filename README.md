@@ -63,6 +63,8 @@ about a file (M4). The menu entries for Search and Settings are placeholders for
 >
 > **Correction, 2026-11-07 (M3b):** the full page, previews and result actions are in this version (see [Full page and previews](#full-page-and-previews) and [Actions on a file](#actions-on-a-file)). Plugins (M5) are still to come. Ask Claude (M4) is a confirmation stub in this build and sends nothing.
 
+> **Correction, 2026-11-07 (M3):** Search is live. The search box opens beside the icon from the hotkey (default `ctrl+alt+space`) or from the menu, and the full page opens from the box's **Full page** button or F11. See [Search files](#search-files) and [Full page and previews](#full-page-and-previews). The sentence above is kept as written.
+
 ## Install (Windows, no admin)
 
 You need:
@@ -139,6 +141,8 @@ Right-click menu, in this order: **Search** (placeholder for now), **Remind meâ€
 > **Correction, 2026-11-06 (M2):** the **Settings** entry opens the Settings window from M2 (see [Settings](#settings)). **Search** is still a placeholder.
 
 > **Correction, 2026-11-07 (M3a):** **Search** opens the search box from M3a (see [Search files](#search-files)). The sentence above is kept as written.
+
+> **Correction, 2026-11-07 (M3):** **Search** is live: the popup from the hotkey or from this menu entry, and the full page from the popup (**Full page** button or F11). See [Search files](#search-files) and [Full page and previews](#full-page-and-previews). The sentence above is kept as written.
 
 ### Card kinds
 
@@ -1205,7 +1209,7 @@ recorded in `docs/security/`, the points below describe the design and the code,
   the four read-only MCP file tools, the Roots & excludes and Search settings pages, and the `--doctor` lines. Plan:
   `docs/plans/2026-11-06-assistant-v1-plan.md` (sections 7.3 and 17.4). Requirements: `docs/prds/2026-11-06-assistant-v1.md`
   (sections 6.3, 6.4, 6.5 and 6.11). Security review: `docs/security/2026-11-07-m3a-review.md` (Review 7, PASS, zero BLOCK;
-  R7-F1 and R7-F2 fixed 2026-11-07 by M3a-11). Commit: **[placeholder: git-keeper]**.
+  R7-F1 and R7-F2 fixed 2026-11-07 by M3a-11). Commit: 847b8a5 â€¦ e9367d4 on main (filled 2026-11-07).
   Not yet observed: the popup on a live desktop with the hotkey registered; the quiet-machine re-measure; the work-laptop probes.
   Not built in M3a: the full page and previews (M3b); result actions (M3b); sort buttons, custom date range and placeholder markers
   in the popup (PRD gaps listed in [docs/api.md](docs/api.md) section 11.9).
@@ -1218,7 +1222,7 @@ recorded in `docs/security/`, the points below describe the design and the code,
   (`docs/security/2026-11-07-m3a-review.md`) and its re-check report PASS. The M3b security review is **pending (M3b-7)**. Not yet
   observed: the unlocked-desktop checks (clipboard, and the real Ctrl, Delete, F2 and Alt+Enter keys in the popup); the popup's
   action feedback, which does not reach the popup in this build; the work-laptop probe of Edge app mode (P2); and the qa full-suite
-  result for M3b. Commit: **[placeholder: git-keeper]**.
+  result for M3b. Commit: 56c3aa8 on main (filled 2026-11-07).
 - **M4 next:** Ask Claude, where the stub becomes a real send after the confirmation, and polish.
 - **Later:** M3 files search and Ask notes, M4 Ask Claude and polish, M5 plugins (PRD section 15).
 

@@ -19,9 +19,10 @@ from collections import deque
 from typing import Any, Optional
 
 from .. import paths
+from ..preview import extract
 from ..security import denylist, pathcheck
 from ..server import mcp as _mcp
-from . import names
+from . import claude, names
 
 log = logging.getLogger("assistant.actions.shell")
 
@@ -45,6 +46,7 @@ _SEE_MASK_FLAG_NO_UI = 0x00000400
 _FOF_SILENT, _FOF_ALLOWUNDO, _FOF_NOERRORUI, _FOF_WANTNUKEWARNING = 0x0004, 0x0040, 0x0400, 0x4000
 _FO_DELETE = 3
 _DRIVE_FIXED = 3
+_REPARSE_ATTR = 0x400
 _ASSOCSTR_COMMAND = 1
 _BITBUCKET_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume"
 _SVSI_SELECT_VISIBLE_FOCUS = 1 | 4 | 8 | 16
@@ -303,8 +305,31 @@ def copy_path(path: str, *, quoted: bool = False, index: Any = None) -> dict:
     return _res(True, "Copied the quoted path." if quoted else "Copied the path.", **both)
 
 
+def _link_or_target(index: Any, path: Any, resolved: str) -> str:
+    """The given path when it names a symlink or junction that itself sits inside an indexed root (R9-N8), so
+    rename and recycle act on the link the row showed; otherwise the resolved path."""
+    given = pathcheck._plain(path)
+    if ".." in given.replace("/", "\\").split("\\"):
+        return resolved
+    try:
+        if not getattr(os.lstat(given), "st_file_attributes", 0) & _REPARSE_ATTR:
+            return resolved
+    except OSError:
+        return resolved
+    roots = [r["path"] for r in index.status().get("roots", [])] if index is not None else []
+    parent = os.path.dirname(given.rstrip("\\/"))
+    home = pathcheck._resolve(str(paths.home()))
+    real_parent = pathcheck.resolve_in_roots(parent, roots) if parent else None
+    if real_parent is None or (home and pathcheck._inside(real_parent, home)):
+        return resolved
+    if denylist.matches(given):
+        return resolved
+    return given
+
+
 def rename(path: str, new_name: Any, *, index: Any = None) -> dict:
     resolved = _vet(index, path, protected_ok=True, not_root=True)
+    resolved = _link_or_target(index, path, resolved)
     reason = names.validate(new_name)
     if reason:
         return _res(False, reason, "invalid")
@@ -357,6 +382,22 @@ def _bin_settings(path: str) -> tuple:
         return None, None
 
 
+def _no_recycle_policy() -> bool:
+    """True when group policy (HKCU or HKLM Policies\\Explorer\\NoRecycleFiles) says files are deleted immediately."""
+    try:
+        import winreg
+    except ImportError:
+        return False
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer") as key:
+                if int(winreg.QueryValueEx(key, "NoRecycleFiles")[0]) == 1:
+                    return True
+        except (OSError, TypeError, ValueError):
+            continue
+    return False
+
+
 def _item_size(path: str) -> tuple:
     """(bytes, complete): file sizes under `path` without following links, stopping after SIZE_WALK_CAP entries."""
     try:
@@ -387,6 +428,8 @@ def _item_size(path: str) -> tuple:
 
 def _bin_problem(path: str) -> Optional[str]:
     """Why the Recycle Bin would delete `path` permanently instead of holding it, or None."""
+    if _no_recycle_policy():
+        return "a policy on this PC turns the Recycle Bin off"
     capacity_mb, nuke = _bin_settings(path)
     if nuke:
         return "this drive's Recycle Bin is set to delete files immediately"
@@ -410,6 +453,7 @@ def _recycle_item(path: str) -> None:
 
 def recycle(path: str, *, confirm: bool = False, index: Any = None) -> dict:
     resolved = _vet(index, path, protected_ok=True, not_root=True)
+    resolved = _link_or_target(index, path, resolved)
     problem = _volume_problem(resolved)
     if problem:
         return _res(False, f"Not moved: {problem}, so there is no Recycle Bin to hold it. "
@@ -495,39 +539,86 @@ def folder_listing(path: str, *, limit: int = LISTING_DEFAULT_LIMIT, index: Any 
                 truncated=total > len(rows), hidden_protected=hidden)
 
 
-def ask_claude(path: str, *, confirm: bool = False, index: Any = None) -> dict:
+_OFFICE_KINDS = {"docx": "docx", "xlsx": "xlsx", "xlsm": "xlsx", "pptx": "pptx"}
+
+
+def _ask_text(resolved: str, ext: str, whole_file: bool) -> tuple:
+    """(text, total_text_bytes, file_bytes, office); raises _Stop on a refusal. Only text ever leaves this function."""
+    office = _OFFICE_KINDS.get(ext)
+    if ext in _mcp._BINARY_EXTS and not office:
+        raise _Stop(_res(False, f"refused: .{ext} is a binary file type, only text can be sent", "refused"))
+    cap = claude.STDIN_CAP - 4096 if whole_file else ASK_CLAUDE_BYTES
+    try:
+        attrs = getattr(os.stat(resolved), "st_file_attributes", 0)
+        if attrs & _mcp._PLACEHOLDER_ATTRS:
+            raise _Stop(_res(False, "refused: the file is a cloud placeholder that is not downloaded; it is never "
+                                    "fetched", "refused"))
+        size = os.path.getsize(resolved)
+        with builtins.open(resolved, "rb") as fh:
+            if office:
+                try:
+                    text = extract.result_text(getattr(extract, f"extract_{office}")(fh))
+                except extract.ExtractError as exc:
+                    raise _Stop(_res(False, f"refused: the Office file could not be read as text ({exc})",
+                                     "refused"))
+                head = text.encode("utf-8")
+            else:
+                head = fh.read(_mcp.PREVIEW_SCAN_BYTES)
+                if _mcp._looks_binary(head):
+                    raise _Stop(_res(False, "refused: the file content looks binary, only text can be sent",
+                                     "refused"))
+                if whole_file and size > len(head):
+                    if size > cap:
+                        raise _Stop(_res(False, f"refused: the file is {size} bytes, over the {cap} byte limit "
+                                                "for sending the whole file", "refused"))
+                    head += fh.read(size - len(head))
+    except OSError:
+        raise _Stop(_res(False, "unavailable: the file could not be read", "error"))
+    if denylist.content_has_private_key(head.decode("utf-8", "replace")):
+        raise _Stop(_res(False, "refused: the file contains a private key (secrets deny-list)", "refused"))
+    total = len(head)
+    cut = head[:cap]
+    text = cut.decode("utf-8", "ignore" if len(cut) < total else "replace")
+    return text, total, size, bool(office)
+
+
+def ask_claude(path: str, *, confirm: bool = False, index: Any = None, whole_file: bool = False) -> dict:
     resolved = _vet(index, path, protected_ok=False)
     if _is_dir(resolved):
         return _res(False, "refused: that is a folder, not a file", "refused")
     ext = os.path.splitext(resolved)[1].lstrip(".").casefold()
-    if ext in _mcp._BINARY_EXTS:
-        return _res(False, f"refused: .{ext} is a binary file type, only text can be sent", "refused")
-    try:
-        attrs = getattr(os.stat(resolved), "st_file_attributes", 0)
-        if attrs & _mcp._PLACEHOLDER_ATTRS:
-            return _res(False, "refused: the file is a cloud placeholder that is not downloaded; it is never fetched",
-                        "refused")
-        size = os.path.getsize(resolved)
-        with builtins.open(resolved, "rb") as fh:
-            head = fh.read(_mcp.PREVIEW_SCAN_BYTES)
-    except OSError:
-        return _res(False, "unavailable: the file could not be read", "error")
-    if _mcp._looks_binary(head):
-        return _res(False, "refused: the file content looks binary, only text can be sent", "refused")
-    if denylist.content_has_private_key(head.decode("utf-8", "replace")):
-        return _res(False, "refused: the file contains a private key (secrets deny-list)", "refused")
-    send = min(size, ASK_CLAUDE_BYTES)
-    summary = {"path": resolved, "bytes_to_send": send, "file_bytes": size, "whole_file": send >= size,
-               "what": "the first part of the file's text" if send < size else "the whole file's text"}
+    text, total, size, office = _ask_text(resolved, ext, whole_file)
+    send = len(text.encode("utf-8"))
+    if send == 0:
+        return _res(False, "refused: the file has no text to send", "refused")
+    name = os.path.basename(resolved)
+    found = claude.status()
+    complete = send >= total
+    if office:
+        what = ("the extracted text; the file itself is not sent" if complete
+                else "the first part of the extracted text; the file itself is not sent")
+    else:
+        what = "the whole file's text" if complete else "the first part of the file's text"
+    summary = {"path": resolved, "bytes_to_send": send, "file_bytes": size, "whole_file": complete,
+               "what": what, "mode": "whole_file" if complete else "preview_text", "office_text": office,
+               "available": found["available"], "reason": found["reason"], "account": claude.account()}
     if not confirm:
-        return _res(False, f"Ask Claude would send {send} of {size} bytes of {os.path.basename(resolved)} "
-                           "to Claude. Nothing is sent until you confirm.", needs_confirmation=True, summary=summary)
-    return _res(False, "Sending to Claude is not available in this build; nothing was sent.", "not_implemented",
-                summary=summary)
+        if not found["available"]:
+            return _res(False, str(found["reason"]), needs_confirmation=True, summary=summary)
+        return _res(False, f"Ask Claude would send {send} bytes from {name} to Claude: {what}"
+                           f"{' using your ' + summary['account'] + ' sign-in' if summary['account'] else ''}. "
+                           "Nothing is sent until you confirm.", needs_confirmation=True, summary=summary)
+    if not found["available"]:
+        return _res(False, str(found["reason"]), "unavailable", summary=summary)
+    sent = claude.send(resolved, name, text)
+    if not sent["ok"]:
+        return _res(False, sent["message"], "error", summary=summary)
+    return _res(True, f"Claude answered about {name} ({sent['bytes']} bytes sent).", answer=sent["answer"],
+                logged=True, summary=summary)
 
 
 def dispatch(verb: str, path: Any, new_name: Any = None, confirm: bool = False, *, index: Any = None,
-             settings: Any = None, limit: int = LISTING_DEFAULT_LIMIT) -> dict:
+             settings: Any = None, limit: int = LISTING_DEFAULT_LIMIT, whole_file: bool = False) -> dict:
     """Run one action; always returns a result dict and appends one action_log line. Raises KeyError on an unknown verb."""
     if verb not in VERBS:
         raise KeyError(verb)
@@ -551,7 +642,7 @@ def dispatch(verb: str, path: Any, new_name: Any = None, confirm: bool = False, 
         elif verb == "folder_listing":
             result = folder_listing(path, limit=limit, index=index)
         else:
-            result = ask_claude(path, confirm=confirm, index=index)
+            result = ask_claude(path, confirm=confirm, index=index, whole_file=whole_file)
     except _Stop as stop:
         result = stop.result
     except Exception as exc:

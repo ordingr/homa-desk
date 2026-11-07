@@ -124,10 +124,17 @@ def test_default_list_excludes_each_named_directory_category(rel):
 
 @pytest.mark.parametrize("rel,is_dir", [
     ("proj/Cache", True), ("proj/Cache/keep.txt", False), ("Documents/report.pdf", False),
-    ("src/main.py", False), ("AppData/Local/App/settings.dat", False), ("notes/cache-notes.md", False),
+    ("src/main.py", False), ("notes/cache-notes.md", False),
 ])
 def test_default_list_keeps_cache_dirs_outside_appdata_and_ordinary_files(rel, is_dir):
     assert not excluded(Excludes(default_patterns()), rel, is_dir), rel
+
+
+def test_default_list_excludes_the_whole_appdata_tree_so_its_files_are_never_indexed():
+    ex = Excludes(default_patterns())
+    assert excluded(ex, "AppData", True)
+    assert excluded(ex, "AppData/Local/App/settings.dat")
+    assert excluded(ex, "AppData/Roaming/Notes/todo.txt")
 
 
 def test_default_list_excludes_vhdx_anywhere():
@@ -165,3 +172,37 @@ def test_pathological_patterns_do_not_hang_or_crash():
     t0 = time.perf_counter()
     excluded(ex, "a" * 300 + "/" + "b" * 300, True)
     assert time.perf_counter() - t0 < 1.0
+
+
+# ---- installed software and app data are not indexed (2026-11-07) ---------------------------------------------------
+
+def walk_from_drive_root(ex, path: str, is_dir: bool = True):
+    drive, *parts = path.split("\\")
+    full, rel = drive + "\\", ""
+    for i, part in enumerate(parts):
+        full = full + ("" if full.endswith("\\") else "\\") + part
+        rel = f"{rel}/{part}" if rel else part
+        hit = ex.matching_rule(full, rel, part, True if i < len(parts) - 1 else is_dir)
+        if hit:
+            return hit
+    return None
+
+
+@pytest.mark.parametrize("path", ["C:\\Program Files\\Git", "C:\\Program Files\\Git\\cmd\\git.exe",
+                                  "C:\\Program Files (x86)\\X", "D:\\Program Files (x86)\\X\\a.dll",
+                                  "C:\\ProgramData\\X", "C:\\ProgramData\\X\\data.db",
+                                  "C:\\Users\\u\\AppData", "C:\\Users\\u\\AppData\\Roaming\\App\\notes.txt"])
+def test_default_excludes_drop_installs_and_app_data(path):
+    assert walk_from_drive_root(Excludes(default_patterns()), path), path
+
+
+@pytest.mark.parametrize("path", ["C:\\Users\\u\\Documents", "C:\\Users\\u\\Documents\\report.docx",
+                                  "C:\\Users\\u\\Desktop\\a.txt", "C:\\Data\\Program Files notes.txt",
+                                  "C:\\Users\\u\\Documents\\ProgramData-backup\\a.txt", "D:\\Projects\\AppDataTool\\x.py"])
+def test_default_excludes_keep_documents_and_lookalike_names(path):
+    assert walk_from_drive_root(Excludes(default_patterns()), path, is_dir=False) is None, path
+
+
+def test_the_four_new_rules_sit_right_after_windows_in_the_default_list():
+    assert default_patterns()[:5] == ["*:\\Windows\\", "*:\\Program Files\\", "*:\\Program Files (x86)\\",
+                                      "*:\\ProgramData\\", "AppData/"]
