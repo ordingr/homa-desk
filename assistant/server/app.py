@@ -9,6 +9,7 @@ from typing import Callable, Optional
 import uvicorn
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.routing import Mount
 
 from ..cards.claude_sessions import ClaudeSessions
 from ..cards.filedrop import FileDrop
@@ -75,7 +76,7 @@ class BodyLimitMiddleware:
     @staticmethod
     async def _reject(scope, send) -> None:
         log.warning("rejected http %r with 413 (payload too large)", scope.get("path", "")[:200])
-        body = json.dumps({"error": "payload too large"}).encode("utf-8")
+        body = json.dumps({"error": {"code": "payload_too_large", "message": "payload too large", "field": None}}).encode("utf-8")
         await send({"type": "http.response.start", "status": 413,
                     "headers": [(b"content-type", b"application/json"),
                                 (b"content-length", str(len(body)).encode("ascii")),
@@ -85,15 +86,18 @@ class BodyLimitMiddleware:
 
 def create_app(token_provider: Callable[[], str], store: Optional[CardStore] = None,
                reminders: Optional[ReminderStore] = None,
-               scheduler: Optional[Scheduler] = None) -> Starlette:
+               scheduler: Optional[Scheduler] = None, mcp_app=None) -> Starlette:
     """Card, hook and file-drop routes need `store`; reminder routes need `reminders`.
-    With `scheduler` as well, the events/ folder watcher is started on it."""
+    With `scheduler` as well, the events/ folder watcher is started on it.
+    `mcp_app` (an ASGI app) is mounted at /mcp behind the same middleware."""
     routes = list(routes_health.routes)
     if store is not None:
         routes.extend(routes_cards.routes)
         routes.extend(routes_hooks.routes)
     if reminders is not None:
         routes.extend(routes_reminders.routes)
+    if mcp_app is not None:
+        routes.append(Mount("/mcp", app=mcp_app))
     app = Starlette(
         routes=routes,
         middleware=[Middleware(AuthMiddleware, token_provider=token_provider),

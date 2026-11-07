@@ -14,12 +14,16 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import __version__, netinfo, paths, uibus
+from .calendar.ics import IcsSource
+from .calendar.meetings import MeetingScheduler
+from .calendar.outlook import OutlookSource
 from .cards.model import Card
 from .cards.store import CardStore
 from .reminders.store import Reminder, ReminderStore
 from .scheduler import Handle, Scheduler
 from .security import token as token_store
 from .server.app import ServerThread, create_app
+from .server.mcp import build_mcp
 from .settings import Settings
 
 log = logging.getLogger("assistant.app")
@@ -27,6 +31,7 @@ log = logging.getLogger("assistant.app")
 TEST_MODE_VAR = "ASSISTANT_TEST_MODE"
 DEBUG_TIMEOUT_S = 3.0
 TICK_SLACK_S = 0.05
+MCP_PATH = "/mcp"
 
 
 class _ProactorResetFilter(logging.Filter):
@@ -53,6 +58,18 @@ def _setup_logging() -> None:
     logging.getLogger("asyncio").addFilter(_ProactorResetFilter())
 
 
+class _ExactMount:
+    """Serves the mounted app for the path without its trailing slash instead of a 307 redirect."""
+
+    def __init__(self, app, prefix: str) -> None:
+        self._app = app
+        self._prefix = prefix
+
+    async def __call__(self, scope, receive, send):
+        inner = dict(scope, path="/", raw_path=b"/", root_path=scope.get("root_path", "") + self._prefix)
+        await self._app(inner, receive, send)
+
+
 def pid_file():
     return paths.home() / "assistant.pid"
 
@@ -68,7 +85,11 @@ class App:
         self.root = None
         self.icon = None
         self.cards_ui = None
+        self.meetings: Optional[MeetingScheduler] = None
+        self.settings_window = None
+        self._started_at = time.monotonic()
         self._token = ""
+        self._sources_key: tuple = ()
         self._shown: set[str] = set()
         self._tick_lock = threading.Lock()
         self._tick_handle: Optional[Handle] = None
@@ -88,11 +109,19 @@ class App:
 
         self.store = CardStore()
         self.scheduler.start()
+        self.settings.watch(self.scheduler)
         self.reminders = ReminderStore(self.scheduler, fire=self._fire_reminder)
         self.reminders.start()
         self.store.subscribe(self._on_store_event_any_thread)
+        self.meetings = MeetingScheduler(self._calendar_sources(), self.store, self.scheduler, self.settings)
+        self.settings.on_change("calendars", self._on_calendars_changed)
+        self.settings.on_change("mute_sources", self._on_mute_sources_changed)
+        self.meetings.start()
 
-        web_app = create_app(lambda: self._token, self.store, self.reminders, self.scheduler)
+        _, mcp_asgi = build_mcp(self.store, self.reminders)
+        web_app = create_app(self._current_token, self.store, self.reminders, self.scheduler, mcp_app=mcp_asgi)
+        web_app.router.routes.insert(0, Route("/v1/health", self._health_route, methods=["GET"]))
+        web_app.router.routes.append(Route(MCP_PATH, _ExactMount(mcp_asgi, MCP_PATH)))
         web_app.router.routes.append(Route("/v1/shutdown", self._shutdown_route, methods=["POST"]))
         if self._test_mode:
             log.warning("%s=1: serving /v1/_debug/ui", TEST_MODE_VAR)
@@ -100,6 +129,7 @@ class App:
         self.server = ServerThread(web_app, self.settings.port)
         if not self.server.start():
             log.error("could not start the HTTP server on port %d", self.settings.port)
+            self.meetings.stop()
             self.scheduler.stop()
             self._report_bind_failure()
             return 1
@@ -174,7 +204,7 @@ class App:
             remind_submit=self._remind_submit,
             mute=self._mute,
             unmute=lambda: self.store.set_mute(None),
-            settings=lambda: log.info("settings not yet available"),
+            settings=self._open_settings,
             quit=self.shutdown,
         )
         self.icon = icon_mod.Icon(self.root, actions)
@@ -184,6 +214,67 @@ class App:
         self._sync_indicators()
         self._sync_visible()
         self._arm_tick()
+
+    def _current_token(self) -> str:
+        try:
+            self._token = token_store.read()
+        except (OSError, ValueError):
+            pass
+        return self._token
+
+    async def _health_route(self, request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "version": __version__,
+                             "uptime_s": int(time.monotonic() - self._started_at),
+                             "index": None, "plugins": [],
+                             "calendars": self.meetings.status()["calendars"] if self.meetings else []})
+
+    def _calendar_sources(self) -> list:
+        cal = self.settings.get("calendars") or {}
+        sources: list = []
+        for url in cal.get("ics_urls", []):
+            try:
+                sources.append(IcsSource.from_url(url))
+            except ValueError:
+                log.warning("ignoring a calendar address that is not an http(s) URL")
+        if cal.get("outlook", True):
+            outlook = OutlookSource()
+            if outlook.available():
+                sources.append(outlook)
+        self._sources_key = (tuple(cal.get("ics_urls", [])), bool(cal.get("outlook", True)))
+        return sources
+
+    def _on_calendars_changed(self, key: str, value) -> None:
+        old = self._sources_key
+        sources = self._calendar_sources()
+        if self._sources_key != old and self.meetings is not None:
+            self.meetings.set_sources(sources)
+
+    def _source_muted(self, source: Optional[str]) -> bool:
+        muted = self.settings.get("mute_sources") or {}
+        return bool(source) and muted.get(source) is True
+
+    def _on_mute_sources_changed(self, key: str, value) -> None:
+        if self.cards_ui is not None and not self.stop.is_set():
+            self._sync_visible()
+            self._sync_indicators()
+
+    def _open_settings(self) -> None:
+        from .overlay import settings_ui
+        win = self.settings_window
+        if win is not None and win.open:
+            try:
+                win.win.deiconify()
+                win.win.lift()
+                win.win.focus_force()
+                return
+            except Exception:
+                self.settings_window = None
+        try:
+            self.settings_window = settings_ui.SettingsWindow(
+                self.root, self.settings, self._current_token, self.server.port, scale=self.icon.scale)
+        except Exception:
+            log.exception("could not open the settings window")
+            self.settings_window = None
 
     def _open_url(self, url: str) -> None:
         if not url.lower().startswith(("http://", "https://")):
@@ -214,7 +305,8 @@ class App:
             self._sync_visible()
         elif card is not None:
             if event in ("added", "updated", "snooze_ended"):
-                if not self.store.is_muted() and card.dismissed_at is None and card.snoozed_until is None:
+                if (not self.store.is_muted() and not self._source_muted(card.source)
+                        and card.dismissed_at is None and card.snoozed_until is None):
                     self._shown.add(card.id)
                     self.cards_ui.on_store_event(event, card)
             else:
@@ -229,7 +321,7 @@ class App:
         self.icon.set_muted(self.store.is_muted(), self.store.mute_until())
 
     def _sync_visible(self) -> None:
-        wanted = {c.id: c for c in self.store.visible()}
+        wanted = {c.id: c for c in self.store.visible() if not self._source_muted(c.source)}
         for card_id in list(self._shown - wanted.keys()):
             self._shown.discard(card_id)
             self.cards_ui.remove(card_id)
@@ -299,6 +391,8 @@ class App:
         self.stop.set()
         log.info("shutting down")
         uibus.stop()
+        if self.meetings is not None:
+            self.meetings.stop()
         self.scheduler.stop()
         if self.server is not None:
             self.server.stop()

@@ -1,5 +1,6 @@
 import importlib
 import importlib.metadata
+import json
 import os
 import re
 import shutil
@@ -15,7 +16,6 @@ _DEPS = ("mcp", "starlette", "uvicorn", "pydantic", "pywin32")
 _WHEELS = ("pydantic_core", "cryptography", "rpds", "win32gui")
 _NOT_YET = (
     "hotkey",
-    "Outlook COM",
     "index size and age",
     "plugins",
 )
@@ -76,6 +76,35 @@ def _claude_version() -> str:
     return f"{shown} (below minimum {minimum}, FAIL)"
 
 
+def _outlook_com() -> str:
+    try:
+        from .calendar.outlook import OutlookSource
+        return "available" if OutlookSource().available() else "unavailable"
+    except Exception as exc:
+        return f"unavailable ({type(exc).__name__})"
+
+
+def _mcp_mount() -> str:
+    try:
+        importlib.import_module("assistant.server.mcp")
+    except Exception as exc:
+        return f"FAIL ({type(exc).__name__})"
+    return "mounted at /mcp (static: module imports; the running app serves it behind the token)"
+
+
+def _calendars_configured() -> str:
+    try:
+        raw = json.loads(paths.settings_file().read_text(encoding="utf-8"))
+        cal = raw.get("calendars") if isinstance(raw, dict) else None
+    except (OSError, ValueError):
+        cal = None
+    cal = cal if isinstance(cal, dict) else {}
+    urls = cal.get("ics_urls")
+    count = len(urls) if isinstance(urls, list) else 0
+    outlook = cal.get("outlook", True) is not False
+    return f"{count} ICS feed(s), Outlook {'on' if outlook else 'off'}"
+
+
 def report() -> List[Tuple[str, str]]:
     version = sys.version_info
     lines = [
@@ -89,6 +118,9 @@ def report() -> List[Tuple[str, str]]:
         ("token file", "present" if token.present() else "missing"),
         ("hooks installed", hooks_installer.installed()),
         ("Claude Code", _claude_version()),
+        ("Outlook COM", _outlook_com()),
+        ("MCP", _mcp_mount()),
+        ("calendars configured", _calendars_configured()),
     ]
     lines.extend((name, "n/a") for name in _NOT_YET)
     return lines
