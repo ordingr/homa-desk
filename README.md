@@ -18,6 +18,8 @@ executables. Nothing leaves your PC.
 >
 > **Correction, 2026-11-07 (M3b):** M3b shipped 2026-11-07 with the full page (Microsoft Edge in app mode), previews and result actions. Its security review is still pending, and M4 (Ask Claude, which is a stub in this build) is next. See [Full page and previews](#full-page-and-previews), [Actions on a file](#actions-on-a-file) and [Status](#status).
 
+> **Correction, 2026-11-07 (commit 3d7bc25):** the features listed under "What 3d7bc25 adds" in [Features](#features) are in the code at 3d7bc25 (commit subject: `feat: M4 full page, path search, live search, theme, rounded UI, hooks safety, bounded shutdown`). Several earlier sections now carry correction notes for them. The text above is kept as written.
+
 ## Contents
 
 - [What it is](#what-it-is)
@@ -91,7 +93,9 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 6. Creates a Startup-folder shortcut, `Assistant.lnk`, that runs `pythonw -m assistant` at logon.
 7. Starts the app. Look for the round icon at the bottom-right.
 
-Options: `-Hooks` asks about the hook entries even when `claude` is not found. `-NoStart` installs without starting.
+Options: `-Hooks` asks about the hook entries even when `claude` is not found. `-NoStart` installs without starting. `-NoShortcut` skips the Desktop shortcut.
+
+> **Correction, 2026-11-07 (commit 3d7bc25):** `install.ps1` also creates a Desktop shortcut, `Assistant.lnk`, by running `scripts\install-shortcut.ps1`. The shortcut starts `pythonw -m assistant` with no console window, using `assistant\assets\assistant.ico`. It uses `.venv\Scripts\pythonw.exe` in the repo when that file exists, and otherwise the `pythonw.exe` beside the `python` found on `PATH`. Steps 6 and 7 above are otherwise unchanged. `uninstall.ps1` removes only the Startup shortcut, so delete the Desktop `Assistant.lnk` by hand.
 
 ### Connect Claude Code (hooks)
 
@@ -358,6 +362,8 @@ Press **Ctrl+Alt+Space** (the default hotkey) or choose **Search** from the icon
 icon. Type a query and press **Enter**; the box grows into a result list. Search runs on Enter, not on every keystroke.
 The hotkey and the icon both toggle the box, so pressing either again closes it.
 
+> **Correction, 2026-11-07 (commit 3d7bc25):** the popup now searches while you type. A query runs 120 ms after the last keystroke (`assistant/overlay/search_ui.py`, `LIVE_DELAY_MS`), so the sentence "Search runs on Enter, not on every keystroke" above is out of date. **Enter** opens the selected result.
+
 **The box.** At the left is the mode badge: `Files · local` or `Ask notes · local`. **Tab** switches between the two. A
 leading `?` runs one query in Ask notes. Below the text, the results header shows the count, `index from <date time>`,
 the elapsed time in milliseconds, and the interpretation of your query. Then come the chips and the date filter:
@@ -395,6 +401,8 @@ and `path:docs` are the long forms of `-e` and `-p`. `*` and `?` are wildcards, 
 same as `rep`. `doc` is deliberately not an extension word: `design doc` looks for "doc" in the path, so use `design -e doc`
 for Word files. The full grammar, the caps and every interpretation string are in
 [docs/search-grammar.md](docs/search-grammar.md).
+
+> **Correction, 2026-11-07 (commit 3d7bc25), which words must match where:** every plain word and every quoted phrase may match the file name **or** the full path. The first word no longer has to be in the name. Results where every word matches the name rank first, and path-only matches follow. When a word is too common to search by its letters, the search matches names only and the result is marked **truncated**: the popup says `truncated — refine the query`, and the full page shows `partial: refine the query`. The rules are in [docs/search-grammar.md](docs/search-grammar.md) section 12. The sentence "The first word must appear in the file name" above is superseded.
 
 **Chips and date filter** combine with the query: a chip or date limits the results further. The popup has no sort control in
 M3a; results are ranked exact name, then name start, then word start, then inside the name, then path only, with shorter
@@ -486,6 +494,8 @@ Ctrl+right-click copies the path.
 reveals. Ctrl+M opens in MD Vault. Ctrl+S, and Ctrl+Shift+S, change the sort. Shift+F10 or the Menu key opens the action menu. Esc
 and F11 are described above. The page has no Ctrl+C, Delete, F2, Alt+Enter, Ctrl+F or Ctrl+D. Use the menu for Copy path, Move to
 Recycle Bin, Rename and Properties. The folder listing is in the popup only.
+
+> **Correction, 2026-11-07 (commit 3d7bc25):** the page's query bar also does the following, from `web/src/App.jsx` at 3d7bc25. A query runs 150 ms after your last change, so no Enter is needed. Tab accepts the grey completion when one is shown: it completes the last word you typed from the first result's name or from a saved search's name. The address bar keeps the query as `q=`, and the popup opens the page with its query. The full page hides the search popup when it opens (`assistant/app.py`, `_open_fullpage`). The header's theme button cycles through Dark, Light and System and saves the choice to Assistant's settings (`theme` in `settings.json`, through `POST /v1/settings/theme`), so the popup follows it; the page reads the saved theme when it loads. Previews, Markdown included, zoom from 80 to 200 percent (default 100): use the buttons in the pane, or Ctrl+=, Ctrl+- and Ctrl+0 while the pane has focus. The zoom is remembered in the page's browser profile.
 
 **What each file type shows.**
 
@@ -588,6 +598,8 @@ With an `http://` or `https://` address, the action opens that address in your d
 this build, so you pick the note inside MD Vault. Without an address, the note opens with its default app. There is no Settings
 field for this key, and Assistant checks only that the address starts with `http://` or `https://`.
 
+> **Correction, 2026-11-07 (commit 3d7bc25):** Ask Claude is no longer a stub. From the code at 3d7bc25 (`assistant/actions/shell.py`, `ask_claude`; `assistant/actions/claude.py`, `send`), Ask Claude first asks for confirmation and states the byte count and what it would send: the first 32 KB of the file's text, or the whole text when you choose that. It sends only after you confirm. It runs `claude -p` with no tools and no session saved, through your Claude Code sign-in. Office files send their extracted text, not the file. Binary, protected, cloud-placeholder and too-large files are refused. The HTTP route is in [docs/api.md](docs/api.md) section 13.4. The next paragraph describes the M3b stub and is kept as written.
+
 **Ask Claude about this file.** A stub. The menu item and the confirmation exist. After you confirm, the page says `Sending to Claude
 is not available in this build; nothing was sent.` The popup writes that message to the log instead. Nothing leaves the PC.
 
@@ -622,6 +634,8 @@ Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists 
 > **Correction, 2026-11-07 (M3b):** hidden and system files are **left out** of results by default now (`index.include_hidden` is `false`). Turn on **Include hidden and system files in results** on the Roots & excludes page to see them; the change applies to results at once, with no rescan. The sentence above is kept as written.
 >
 > **Correction, 2026-11-07 (M3b), excludes:** a list you save on the Roots & excludes page **replaces** the default list; it does not add to it. **Restore defaults** on that page puts the built-in list back. The Windows entries in the built-in list are written for any drive (for example `*:\Windows\`), so they match on every drive letter. The "Default excludes" paragraph above describes the built-in list.
+
+> **Correction, 2026-11-07 (commit 3d7bc25), default excludes:** the built-in list now also excludes `Program Files`, `Program Files (x86)`, `ProgramData` and every `AppData` folder, plus the Windows search data under `ProgramData`. The index is for your own documents and files, so these are left out. The exclude rules match a pattern with a `/` against the root-relative path or its tail (`assistant/index/excludes.py`, lines 8 to 9 and 36), so `AppData` is excluded at any depth under a root, not only the cache folders listed above. A whole drive such as `C:\` can be added as a root; the Windows, Program Files and ProgramData entries then apply to that drive. A new file under a root is picked up by the file watcher in about 1 second. That figure is the target, not a measurement by doc-keeper: the watcher batches events for 0.25 s (`assistant/index/manager.py`, `HINT_BATCH_S`).
 - **Your Assistant folder is never indexed.** The folder `~/.assistant` (or the folder named by `ASSISTANT_HOME`) and any
   `.assistant` folder are left out, even when a root contains your whole user profile. Claude cannot read them either.
 - **Protected files.** Files whose names or folders match the secrets list are flagged when the index is built. They are
@@ -989,6 +1003,19 @@ What M3b adds (2026-11-07):
 - **Roots & excludes:** a toggle for hidden and system files, and **Restore defaults** for the excludes list. **Search:** an editable
   list of known extensions. The new keys are in [Settings](#settings).
 
+What 3d7bc25 adds (2026-11-07). These are read from the code at 3d7bc25. The commit diff was not read, and none of these has been observed on a live desktop:
+
+- **Rounded cards and icon:** on Windows 11 the card and icon windows ask Windows for rounded corners. Where Windows does not offer that, the window keeps a square shape with a rounded outline (`assistant/overlay/win.py`).
+- **Desktop shortcut:** `install.ps1` creates `Assistant.lnk` on the Desktop as well as in the Startup folder. Pass `-NoShortcut` to skip it. See [Install](#install-windows-no-admin).
+- **Claude Code hooks:** `python -m assistant hooks install` adds the eight hook entries and `hooks remove` takes them out. When Claude is waiting for you, an amber card appears; when a task is done, a green card appears. See [Connect Claude Code (hooks)](#connect-claude-code-hooks).
+- **Full page:** opens with the query from the popup, and the popup closes. It has live search (150 ms), Tab completion, the search URL (`q=`), a light and dark theme saved in `settings.json` and shared with the popup, and zoomable previews from 80 to 200 percent. See [Full page and previews](#full-page-and-previews).
+- **Search words:** every word may match the name or the path, and name matches come first. A very common word gives a result marked truncated. See [Search files](#search-files).
+- **Live search in the popup:** results update while you type (120 ms). Enter opens the selected result.
+- **Whole-drive indexing:** a root can be a whole drive. The default excludes now also leave out Windows, Program Files, Program Files (x86), ProgramData and AppData. A new file reaches the results in about 1 second through the file watcher, which is a target and not a measurement (see [Roots, excludes and protected files](#roots-excludes-and-protected-files)).
+- **Ask Claude:** sends a file's text only after your confirmation (see [Actions on a file](#actions-on-a-file)).
+- **Shutdown:** the teardown steps share a 3-second deadline (`assistant/app.py`, `SHUTDOWN_STEPS_S`). The full bound, including the server stop, is in [docs/api.md](docs/api.md) section 13.6.
+- **`update --yes`:** on a git clone, `update` runs `git pull --ff-only` and then pip on the requirements, with no flag needed. On a release zip (with `update.source` set), it downloads and unpacks the zip; pip runs only with `--yes`, and otherwise the command is printed (`assistant/update.py`).
+
 ## Security & privacy
 
 Facts about this version, with the source for each. The security review is in
@@ -1183,6 +1210,14 @@ recorded in `docs/security/`, the points below describe the design and the code,
 - **Known issues, recorded.** The popup does not show action results or the folder listing (see
   [Actions on a file](#actions-on-a-file)). The page's **Download and preview** button does not download.
 
+> **Correction, 2026-11-07 (M3b review):** the M3b security review is `docs/security/2026-11-07-m3b-review.md`, not pending. Review 9 (M3b-7) returned BLOCK on R9-B1. Its re-check section, "Re-check after M3b-10/11 (2026-11-07)", returns "BLOCK LIFTED — PASS for merge". R10-F1 (FIX-BEFORE-M4, the member-size cap on docx and pptx) and NOTEs R10-N1 to R10-N4 remain open. The "pending" wording above is kept as written.
+
+### 3d7bc25 additions (2026-11-07)
+
+- **Ask Claude sends file text after confirmation only.** Nothing is sent unless the request has `confirm: true`. The text goes to Claude Code in print mode (`claude -p`, no tools, no session saved), which sends it to Anthropic under your Claude Code sign-in. This is a second outbound path, next to the MCP file tools described in the M3a note above. Source: `assistant/actions/shell.py` and `assistant/actions/claude.py`.
+- **Settings route.** `GET /v1/settings` returns the theme, shortcuts, search placement, hotkey, Markdown vault URL and known extensions. It does not return calendar addresses, the token, roots, excludes, the notes folder or the update source (`assistant/server/routes_settings.py`).
+- **Security review of 3d7bc25:** `docs/security/2026-11-07-m4-review.md`. Review 11 returned BLOCK on R11-F1 (the Continue launcher's working folder). Review 12, in the same file, returns "BLOCK LIFTED — PASS for commit" with R11-F1 closed by observation, and three low NOTEs: R12-N1 (resolved in place), R12-N2 (search budget overshoot on wildcard-only queries) and R12-N3 (typed query text persists in the Edge app profile's History). Review 11's scope was the working tree against HEAD 56c3aa8, which is the 3d7bc25 change set. The code was read by doc-keeper, and no test or live run was done.
+
 ## Status
 
 - **M1 shipped 2026-11-06:** the overlay, the card model and store, Claude Code hooks, the HTTP card and reminder API,
@@ -1223,8 +1258,13 @@ recorded in `docs/security/`, the points below describe the design and the code,
   observed: the unlocked-desktop checks (clipboard, and the real Ctrl, Delete, F2 and Alt+Enter keys in the popup); the popup's
   action feedback, which does not reach the popup in this build; the work-laptop probe of Edge app mode (P2); and the qa full-suite
   result for M3b. Commit: 56c3aa8 on main (filled 2026-11-07).
+  > **Correction, 2026-11-07 (M3b review):** the M3b security review is no longer pending. Review 9 returned BLOCK on R9-B1, and the re-check in `docs/security/2026-11-07-m3b-review.md` returns "BLOCK LIFTED — PASS for merge" with R10-F1 open (FIX-BEFORE-M4). The bullet above is kept as written.
 - **M4 next:** Ask Claude, where the stub becomes a real send after the confirmation, and polish.
 - **Later:** M3 files search and Ask notes, M4 Ask Claude and polish, M5 plugins (PRD section 15).
+- **Commit 3d7bc25, 2026-11-07, on main (no pull request; the repo has no remote):** the full page with live search, Tab completion, the search URL and the shared light and dark theme; the path-matching search rules; rounded cards and icon; the Desktop shortcut in `install.ps1`; whole-drive indexing with the wider default excludes; Ask Claude sending after confirmation; `GET /v1/settings`, `POST /v1/settings/theme` and the Ask Claude status and continue routes; bounded shutdown; `update --yes`. Contents are as read from the code at 3d7bc25. Reference: [docs/api.md](docs/api.md) section 13, [docs/search-grammar.md](docs/search-grammar.md) section 12 and [CHANGELOG.md](CHANGELOG.md), 2026-11-07.
+  - Not yet observed: the live desktop pass for the page, the popup's live search and the theme; the test run for this commit (not run by doc-keeper).
+  - Security review: `docs/security/2026-11-07-m4-review.md` (Review 11 BLOCK on R11-F1; Review 12 PASS for commit, with low NOTEs R12-N2 and R12-N3 open).
+  - Known issues: a 401 on the theme route reverts the page's theme (fixed after 3d7bc25, pending commit: the 401 now restores `<html data-theme>`); a caret in the home folder path breaks Continue (fixed after 3d7bc25, pending commit: Continue now works with `^ & ! ( )` in the home path); the performance and churn tests are flaky under load; the remind-me end-to-end test is flaky on a busy desktop.
 
 ## Documentation
 

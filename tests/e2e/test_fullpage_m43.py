@@ -202,12 +202,11 @@ def test_confirmation_form_row_agrees_with_what_is_sent(driver_run):
 
 
 def test_a_401_on_the_theme_post_leaves_the_page_theme_unchanged(driver_run):
-    line = next((l for l in driver_run["lines"] if l.startswith(("KNOWN-PASS 5j", "KNOWN-FAIL 5j"))), None)
-    assert line, "the 5j check did not run"
-    if line.startswith("KNOWN-FAIL"):
-        pytest.xfail("product: web/src/App.jsx chooseTheme() on 401 calls onExpired() in the same tick as "
-                     "setThemePref(previousPref), so the Workspace unmounts first and <html data-theme> stays at the "
-                     "optimistic new value (" + line.split("  | ", 1)[-1][:80] + ")")
+    hits = [(v, n) for v, n in _checks(driver_run) if n.startswith("5j POST 401: ") and "theme" in n]
+    names = [n for _, n in hits]
+    assert any("before the click" in n for n in names), f"the before-state check did not run: {names}"
+    assert any("is unchanged (dark)" in n for n in names), f"the after-401 check did not run: {names}"
+    assert all(v == "PASS" for v, _ in hits), hits
 
 
 # ---- what the browser cannot see: the committed bundle ----------------------------------------------------------------

@@ -209,6 +209,7 @@ function Workspace({ initialQuery, onExpired }) {
   const chooseTheme = async () => {
     const next = NEXT[themeChoice];
     const previousPref = themePref;
+    const previousTheme = theme;
     setThemePref(next);
     try {
       const body = await api.post("/v1/settings/theme", { theme: next });
@@ -231,6 +232,7 @@ function Workspace({ initialQuery, onExpired }) {
       }
       setThemePref(previousPref);
       if (error.status === 401) {
+        document.documentElement.dataset.theme = previousTheme;
         onExpired();
         return;
       }

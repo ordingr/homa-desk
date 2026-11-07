@@ -249,3 +249,43 @@ Unchanged. `doc` is not in the default list, and section 6 stands. For Word file
 - The popup has no range entry (section 11.1).
 - Whether an empty query with `sort=best` reports the change to date order in `notes` was not checked (section 9 item 8 stands).
 - Section 9 item 9 (Ask notes has no operators) is by design.
+
+## 12. 3d7bc25 additions: which words match where, truncation and live search (2026-11-07)
+
+Supersedes: section 4, items 1 and 2 (the first plain term must match the file name, and only later terms may match the full path). The earlier text is kept as written.
+
+- Date: 2026-11-07. Commit 3d7bc25 on `main` (subject: `feat: M4 full page, path search, live search, theme, rounded UI, hooks safety, bounded shutdown`).
+- Written by: doc-keeper, from the code at 3d7bc25: `assistant/index/search.py` (module docstring, lines 1 to 9, and `_candidates`), `assistant/overlay/search_ui.py` (`LIVE_DELAY_MS`, `_on_text`, `completion`), `web/src/App.jsx` (`SEARCH_DELAY_MS`, `completion`, the `truncated` badge, the ghost completion) and `web/src/components/QueryBar.jsx` (Tab handling).
+- Verification: code read only. The commit diff was not read, and no query was run against an index. Items marked "code" below are read from the source, not observed.
+
+### 12.1 Which words match where (code)
+
+- Each plain word and each quoted phrase must match the file name or the full path, case-insensitively. The first word has no special position any more. Items 1 and 2 of section 4 no longer describe the rule.
+- Example: `reports q1` matches `…\reports\q1.md`. `q1` is in the name, and `reports` is only in the path. Under section 4 item 1 this query found nothing, because its first word was not in the name.
+- Ranking: rows where every word matches the name come before rows where some word matches only the path. Within each group the tiers of section 7 apply. A word that matches only the path has tier 4 (Path), so it sorts after name matches.
+- Items 3 to 7 of section 4 (path flags, negations, extension filters, chips, the modified filter) are not re-read in this entry.
+
+### 12.2 Common words: name-only fallback and `truncated` (code)
+
+- When a word's longest separator-free literal run is too common for the directory index to give a complete candidate set, the search uses the names that contain that run. Path-only matches are then not found, and the result carries `truncated: true` (`search.py`, module docstring lines 4 to 6, and the `_candidates` docstring).
+- The flag is the same one that the section 2 limits set. It is shown as:
+  - popup: the interpretation line reads `truncated — refine the query` (`search_ui.py`, around line 218);
+  - full page: a badge reads `partial: refine the query` (`App.jsx`, around line 955). The page's badge text is different from the popup's and from the API field name;
+  - HTTP and MCP: `truncated: true`.
+
+### 12.3 Live search (code)
+
+- Popup: a query runs 120 ms after the last keystroke (`LIVE_DELAY_MS = 120`). An empty box clears the results. Enter opens the selected result.
+- Full page: a query runs 150 ms after the last change (`SEARCH_DELAY_MS = 150`). The `q=` value in the address bar follows the box, and a `q=` value in the address runs a search when the page loads.
+
+### 12.4 Completion on the full page (code)
+
+- Tab accepts the grey completion when the caret is at the end of the text and no Ctrl, Alt or Meta key is held (`QueryBar.jsx`, lines 83 to 93).
+- The completion is for the last word typed. It is the rest of a word in the first result's name, or in a saved search's name, that starts with the typed word at a word boundary, up to the next space, dot, underscore or hyphen (`App.jsx`, `completion` and the `ghost` memo).
+- The popup also shows a grey completion (`search_ui.py`, `completion` and `suggestion_text`). Which key accepts it there depends on how Tab is bound, and that was not traced in this entry.
+
+### 12.5 Not observed in this entry
+
+- A query on a live index, including a multi-word query that relies on 12.1, and a query that hits the `truncated` path.
+- The popup's live search and the page's Tab completion on a live desktop.
+- The "about 1 second" figure for a new file in the README (the watcher batch is 0.25 s in `assistant/index/manager.py`; the end-to-end time was not measured).

@@ -388,10 +388,19 @@ def test_a_caret_percent_folder_under_a_percent_home_works_end_to_end(shim, tmp_
     assert call["argv"][:2] == ["--add-dir", str(odd)] and call["cwd"] == str(weird_home)
 
 
-@pytest.mark.xfail(reason="product bug: with a ^ in ASSISTANT_HOME the launcher path reaches `cmd /c` unquoted and "
-                          "cmd eats the caret, so the launch fails (claude.py _launch / continue_session)", strict=True)
 def test_a_caret_in_the_home_path_survives_the_launcher(shim, tmp_path, monkeypatch):
     weird_home = tmp_path / "h^x"
+    weird_home.mkdir()
+    monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
+    monkeypatch.setattr(claude, "_launch", run_launcher_hidden)
+    claude.send(str(weird_home / "n.txt"), "n.txt", "x")
+    assert claude.continue_session()["ok"] is True
+    (call,) = shim.calls("interactive")
+    assert call["cwd"] == str(weird_home)
+
+
+def test_a_home_path_with_ampersand_bang_and_paren_survives_the_launcher(shim, tmp_path, monkeypatch):
+    weird_home = tmp_path / "h&x!(y)"
     weird_home.mkdir()
     monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
     monkeypatch.setattr(claude, "_launch", run_launcher_hidden)
@@ -804,7 +813,15 @@ def test_continue_after_a_send_launches_the_shim_once_and_cleans_up(app):
     assert "case test" in call["ctx"] and "Earlier answer from you:" in call["ctx"] and "SHIM ANSWER: ok" in call["ctx"]
     assert Path(call["argv"][ctx_flag + 1]).parent == app.home / "tmp"
     assert len(app.shim.sends()) == 1, "the interactive launch is not a second send"
-    left = lambda: [p for p in (app.home / "tmp").glob("claude-*") if p.stat().st_size]
+    def left():
+        found = []
+        for p in (app.home / "tmp").glob("claude-*"):
+            try:
+                if p.stat().st_size:
+                    found.append(p)
+            except FileNotFoundError:
+                pass
+        return found
     assert wait_until(lambda: not left(), timeout=20), f"context content left behind: {left()}"
     rows = [r for r in send_log(app.home) if r[1] == "claude interactive"]
     assert rows and rows[-1][3] == "launched" and rows[-1][4].lower().endswith("case.txt")

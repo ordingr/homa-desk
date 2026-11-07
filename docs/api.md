@@ -1255,3 +1255,122 @@ Sources: plan 18.3 (c) to (k), code read in `index/search.py`, `server/routes_se
 - Unlocked-desktop checks: clipboard, the real Ctrl, Delete, F2 and Alt+Enter keys in the popup, and the popup feedback in 12.9 item 4.
 - The work-laptop P2 probe (Edge app mode). Until it passes, previews on the work laptop are not confirmed (plan 7.4).
 - Reported, not measured by doc-keeper: the page bundle size (7.3 MB) and the browser check counts (70 and 40), listed in CHANGELOG.
+
+## 13. 3d7bc25 additions, as shipped (2026-11-07)
+
+Supersedes: section 1, step 5 (the plain-text `404` and `405` bodies: the router handlers in `routes_cards.py` now return the object shape, see 13.1); section 12.6 (the `ask_claude` stub that returned `501 not_implemented`); section 12.9, item 9 (Ask Claude as a stub); and section 3.6 for the Ask Claude part of the M3b text. The earlier text is kept as written.
+
+- Date: 2026-11-07. Commit 3d7bc25 on `main`, subject `feat: M4 full page, path search, live search, theme, rounded UI, hooks safety, bounded shutdown`. Reflog timestamp 2026-11-07, -0600.
+- Written by: doc-keeper, from the code at 3d7bc25, read on 2026-11-07. The commit diff was not read: this session had no shell or git tool, so `git show --stat 3d7bc25` was not run.
+- Sources read: `assistant/server/{routes_settings,routes_actions,routes_cards,routes_hooks,auth,app}.py`, `assistant/actions/{shell,claude}.py`, `assistant/app.py`, `assistant/settings.py`, `web/src/App.jsx`.
+- Verification: code read only. Nothing in this section was run against a live instance or a test. Status codes are from the route code, not observed.
+
+### 13.1 `GET /v1/settings`
+
+Source: `routes_settings.py`, `get_settings`. Returns `200` with:
+
+```json
+{"theme": "dark", "shortcuts": {"open": "Enter", "...": "..."}, "search_placement": "icon",
+ "hotkey": "ctrl+alt+space", "md_vault": {"url": ""}, "index": {"known_exts": ["..."]}}
+```
+
+- `shortcuts` is the built-in map of 15 actions merged with the saved `shortcuts` setting.
+- `index.known_exts` is the saved list, sorted.
+- Not returned: calendar addresses, the token, index roots and excludes, the notes folder, the update source.
+- No valid token: `401` with code `unauthorized` and `WWW-Authenticate: Bearer` (`auth.py`).
+- Settings not attached yet: `503` with code `settings_unavailable`.
+
+### 13.2 `POST /v1/settings/theme`
+
+Body: `{"theme": "dark"}`, `"light"` or `"system"`. Source: `routes_settings.py`, `post_theme`. On success the value is saved with `settings.set("theme", …)`, which is what the popup listens to, and the response is the same body as 13.1.
+
+| Case | Status and code (code read) |
+|---|---|
+| Valid theme | `200`, the 13.1 body. Saved to `settings.json`. |
+| No token, or a wrong token | `401` `unauthorized`. The route does not run. |
+| Malformed JSON | `400` `invalid_json` (`routes_cards.read_json`). |
+| Body over 256 bytes | `413` `payload_too_large`. |
+| Empty body, body not an object, `theme` missing, not a string, or not one of the three names | `422` `invalid_parameter`, `field: "theme"`, message `theme must be dark, light or system.` |
+| Settings not attached yet | `503` `settings_unavailable`. |
+| Unknown path (router) | `404` `not_found`, `No such route.` |
+| `GET` on this path | `405` `method_not_allowed`. |
+
+Points to note:
+
+- A bad theme value is `422`, not `400`. `400` is only for malformed JSON.
+- The route has no `404` of its own. A `404` on this path means the running app does not register the route, for example an older build. The page handles it: `web/src/App.jsx`, `chooseTheme`, treats `404` as "route missing", stores the choice in browser storage under `assistant.theme`, and does not show an error.
+- A `401` on this route makes the page put back the theme it showed before the change and call its expired-session handler. Nothing is saved. Listed as a known issue in CHANGELOG 2026-11-07. Fixed after 3d7bc25, pending commit: the 401 now restores `<html data-theme>`. The page's own handling is in `chooseTheme`, the `catch` branch.
+
+### 13.3 Ask Claude status and continue
+
+Source: `routes_actions.py` (`ask_claude_status`, `ask_claude_continue`) and `actions/claude.py` (`status`, `continue_session`).
+
+`GET /v1/actions/ask_claude/status`, optional query `refresh=1` or `refresh=true`:
+
+- `200` with `{"available": true, "version": "<text>", "reason": null}`, or `{"available": false, "version": null, "reason": "<why>"}`.
+- The probe result is cached. `refresh` forces a new probe.
+
+`POST /v1/actions/ask_claude/continue`, body `{"path": "<file path>"}`:
+
+- `200` with `{"ok": true, "message": "Opened Claude Code in a new window."}`.
+- `422` `invalid_parameter`, `field: "path"`, when `path` is missing, blank or not a string.
+- `404` `no_answer`, `field: "path"`, when there is no Claude answer for that path in this session.
+- `500` `error` with the message, when continuing fails. If Claude Code is missing, the message is the probe's reason.
+- `413` above 4 KiB (the action body cap).
+
+Known issue: a caret (`^`) in the home folder path breaks Continue (CHANGELOG 2026-11-07). Fixed after 3d7bc25, pending commit: Continue now works with `^ & ! ( )` in the home path.
+
+### 13.4 `POST /v1/actions/ask_claude`: send after confirmation, and `whole_file`
+
+Body: `{"path": "<file path>", "confirm": false, "whole_file": false}`. `confirm` and `whole_file` are optional booleans. Any other type is `422` `invalid_parameter`. Source: `routes_actions.py` (`_body`, `action`) and `actions/shell.py` (`ask_claude`, `_ask_text`).
+
+Two steps:
+
+1. Without `confirm: true`, nothing is sent. The response is `200` with `"ok": false`, `"needs_confirmation": true`, a message that gives the byte count and what would be sent, and a `summary`:
+   `{"path", "bytes_to_send", "file_bytes", "whole_file", "what", "mode", "office_text", "available", "reason", "account"}`.
+   `mode` is `whole_file` or `preview_text`.
+2. With `confirm: true` and Claude Code available, the text goes to `claude -p --no-session-persistence --tools ""` on standard input (`actions/claude.py`, `send`). The response is `200` with `{"ok": true, "message": "Claude answered about <name> (<n> bytes sent).", "answer": "<text>", "logged": true, "summary": {…}}`.
+
+`whole_file`:
+
+- `false` (default): the first 32,768 bytes of the file's text (`ASK_CLAUDE_BYTES`). `mode` is `preview_text` when the file is longer.
+- `true`: the whole text, up to 10 MiB minus 4 KiB (`claude.STDIN_CAP - 4096`). A larger file is refused with `403` `refused`, and the message gives the limit.
+
+Other responses (code read):
+
+- `403` `refused`: a binary file type other than Office, binary-looking content, a cloud placeholder that is not downloaded, a file that contains a private-key header, a folder, and protected files (`_vet` with `protected_ok=False`).
+- Office files (`docx`, `xlsx`, `xlsm`, `pptx`): the extracted text is sent, not the file.
+- `503` `unavailable`: Claude Code is missing when confirmed. `500` `error`: `claude -p` failed, timed out or returned no answer.
+- `503` `index_unavailable`: the file index is not ready.
+- `422` `invalid_parameter`, `field: "path"`: `path` missing or blank.
+
+This route is the only one that sends a file's text to Claude Code, and it sends only after `confirm: true`. The MCP file tools (section 11.5) are a separate path.
+
+### 13.5 `POST /v1/hooks/claude-code`
+
+The contract in sections 3.3 and 4 still describes this route. Source at 3d7bc25: `routes_hooks.py`, `claude_code_hook`.
+
+- Authentication and Host and Origin checks as in section 1. The body cap is the server-wide 1 MiB; the route sets no cap of its own.
+- `400` `invalid_json` for malformed JSON, and `400` `invalid_body` for valid JSON that is not an object.
+- Otherwise `200` with `{}`. An exception in the session handler is logged and still answered with `200 {}`.
+- The route never returns a permission decision.
+
+The diff of 3d7bc25 was not read, so whether this handler changed in that commit is not recorded here.
+
+### 13.6 Shutdown bound
+
+Source: `assistant/app.py` (`SHUTDOWN_STEPS_S = 3.0`, `HARD_EXIT_S = 10.0`, `_run_steps`, `_hard_exit`, `shutdown`) and `assistant/server/app.py` (`STOP_JOIN_S = 4.0`, `ServerThread.stop`).
+
+- The teardown steps (calendar, hotkey, display watch, full page, index, notes, scheduler) run side by side. They share one 3-second deadline. A step still running after that is logged and left behind, so the shutdown moves on.
+- After the teardown steps, the HTTP server thread is joined for up to 4 seconds.
+- A hard exit (`os._exit(1)`) runs 10 seconds after shutdown starts if the shutdown has not finished.
+
+So "about 3 seconds" is the bound on the teardown steps. The whole shutdown can take longer, up to about 7 seconds before the hard exit at 10 seconds in the worst case. These are code values, not measurements.
+
+Supersedes: section 3.5, the "exit code 0 within 15 s" observation from Review 3, which predates these bounds (kept as written).
+
+### 13.7 Not observed
+
+- Any route above, on a live instance.
+- Security review of 3d7bc25: `docs/security/2026-11-07-m4-review.md`. Review 11 returned BLOCK on R11-F1 (the Continue launcher's working folder). Review 12 returns PASS for commit, with low NOTEs R12-N2 and R12-N3 open. Review 11's file list covers `assistant/actions/{claude,shell}.py`, `assistant/server/{routes_actions,routes_settings}.py` and `assistant/app.py`, which are the code of 13.1, 13.3, 13.4 and 13.6. It does not list `routes_hooks.py`, so 13.5 is not covered by that list.
+- The four known issues in CHANGELOG 2026-11-07 are listed there, not re-tested here.

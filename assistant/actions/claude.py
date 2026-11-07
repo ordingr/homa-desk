@@ -301,11 +301,15 @@ def continue_session(path: Optional[str] = None) -> dict:
     if wrapper and add_dir and "^" in source:
         set_dir = f'set "ASSIST_ADD_DIR={_bat(source)}"\r\n'
         add_dir = ' --add-dir "%%ASSIST_ADD_DIR%%"'
+    ctx_arg = f'"{arg(str(ctx))}"'
+    if wrapper and "^" in str(ctx):
+        set_dir += f'set "ASSIST_CTX={_bat(str(ctx))}"\r\n'
+        ctx_arg = '"%%ASSIST_CTX%%"'
     script = ("@echo off\r\n"
               f'cd /d "{_bat(cwd)}"\r\n'
               f"{set_dir}"
               f'{"call " if wrapper else ""}"{_bat(found["exe"])}"{add_dir} '
-              f'--append-system-prompt-file "{arg(str(ctx))}" "{FIRST_MESSAGE}"\r\n'
+              f'--append-system-prompt-file {ctx_arg} "{FIRST_MESSAGE}"\r\n'
               f'del "{_bat(str(ctx))}" 2>nul\r\n'
               '(goto) 2>nul & del "%~f0"\r\n')
     try:
@@ -315,7 +319,7 @@ def continue_session(path: Optional[str] = None) -> dict:
         ctx.write_bytes(data)
         launcher.write_bytes(script.encode("utf-8"))
         target = str(launcher)
-        if "%" in target:
+        if any(c in target for c in "%^&!()"):
             target = os.path.relpath(target, cwd)
         _launch(target, cwd)
     except OSError as exc:

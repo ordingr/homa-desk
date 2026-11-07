@@ -337,9 +337,10 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     await page.evaluate(() => localStorage.removeItem("assistant.theme"));
     await page.route("**/v1/settings/theme", (r) => r.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: { code: "unauthorized", message: "no" } }) }));
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
+    check("5j POST 401: before the click the theme is dark", (await th()) === "dark");
     await page.click("[data-testid=theme-toggle]");
     await page.waitForTimeout(500);
-    known("5j POST 401: the theme is unchanged (dark)", (await th()) === "dark", [await th(), await page.locator("body").innerText()]);
+    check("5j POST 401: the theme is unchanged (dark)", (await th()) === "dark", [await th(), await page.locator("body").innerText()]);
     check("5j POST 401: nothing is written to localStorage", (await page.evaluate(() => localStorage.getItem("assistant.theme"))) === null);
     await ctx.close();
     await setRealTheme("dark");
