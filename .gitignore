@@ -5,3 +5,7 @@ __pycache__/
 .venv/
 dist/
 build/
+*.egg-info/
+.pytest_cache/
+!assistant/static/
+!assistant/static/**

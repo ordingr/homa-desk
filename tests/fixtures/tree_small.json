@@ -1,0 +1,244 @@
+{
+ "entries": [
+  {
+   "path": "docs",
+   "type": "dir"
+  },
+  {
+   "path": "docs/notes",
+   "type": "dir"
+  },
+  {
+   "path": "src",
+   "type": "dir"
+  },
+  {
+   "path": "src/pkg",
+   "type": "dir"
+  },
+  {
+   "path": "archive",
+   "type": "dir"
+  },
+  {
+   "path": "empty_dir",
+   "type": "dir"
+  },
+  {
+   "path": ".aws",
+   "type": "dir"
+  },
+  {
+   "path": ".docker",
+   "type": "dir"
+  },
+  {
+   "path": ".kube",
+   "type": "dir"
+  },
+  {
+   "path": "docs/readme.md",
+   "type": "file",
+   "size": 1200,
+   "mtime": "2024-01-15T09:30:00"
+  },
+  {
+   "path": "docs/notes/todo.txt",
+   "type": "file",
+   "size": 340,
+   "mtime": "2024-02-01T12:00:00"
+  },
+  {
+   "path": "docs/notes/ideas.md",
+   "type": "file",
+   "size": 2048,
+   "mtime": "2024-03-10T08:15:00"
+  },
+  {
+   "path": "docs/report 2024.docx",
+   "type": "file",
+   "size": 52000,
+   "mtime": "2023-12-31T23:59:58"
+  },
+  {
+   "path": "docs/caf\u00e9.txt",
+   "type": "file",
+   "size": 77,
+   "mtime": "2024-04-04T04:04:04"
+  },
+  {
+   "path": "src/main.py",
+   "type": "file",
+   "size": 900,
+   "mtime": "2024-05-01T10:00:00"
+  },
+  {
+   "path": "src/util.py",
+   "type": "file",
+   "size": 450,
+   "mtime": "2024-05-02T10:00:00"
+  },
+  {
+   "path": "src/pkg/__init__.py",
+   "type": "file",
+   "size": 0,
+   "mtime": "2024-05-03T10:00:00"
+  },
+  {
+   "path": "src/pkg/core.py",
+   "type": "file",
+   "size": 3100,
+   "mtime": "2024-05-04T10:00:00"
+  },
+  {
+   "path": "src/pkg/data.json",
+   "type": "file",
+   "size": 128,
+   "mtime": "2024-05-05T10:00:00"
+  },
+  {
+   "path": "archive/old.zip",
+   "type": "file",
+   "size": 65536,
+   "mtime": "2020-06-30T18:00:00"
+  },
+  {
+   "path": "archive/big.bin",
+   "type": "file",
+   "size": 1048576,
+   "mtime": "2021-07-01T00:00:00"
+  },
+  {
+   "path": "photo.jpg",
+   "type": "file",
+   "size": 250000,
+   "mtime": "2022-08-20T14:45:00"
+  },
+  {
+   "path": "zero.txt",
+   "type": "file",
+   "size": 0,
+   "mtime": "2024-09-09T09:09:09"
+  },
+  {
+   "path": ".env",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".env.local",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "id_rsa",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "id_rsa.pub",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "id_ed25519",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "server.pem",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "tls.key",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "cert.pfx",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "store.p12",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "putty.ppk",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "vault.kdbx",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".git-credentials",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".netrc",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".npmrc",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".pypirc",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".aws/credentials",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".docker/config.json",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": ".kube/config",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-01T00:00:00"
+  },
+  {
+   "path": "link_to_docs",
+   "type": "junction",
+   "target": "docs"
+  },
+  {
+   "path": "archive/cloud_only.docx",
+   "type": "file",
+   "size": 4096,
+   "mtime": "2024-07-07T07:07:07",
+   "offline": true
+  }
+ ]
+}
