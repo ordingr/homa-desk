@@ -1,0 +1,399 @@
+{
+ "entries": [
+  {
+   "path": "Design",
+   "type": "dir"
+  },
+  {
+   "path": "docs",
+   "type": "dir"
+  },
+  {
+   "path": "docs/design",
+   "type": "dir"
+  },
+  {
+   "path": "Documents",
+   "type": "dir"
+  },
+  {
+   "path": "archive",
+   "type": "dir"
+  },
+  {
+   "path": "src",
+   "type": "dir"
+  },
+  {
+   "path": "tools",
+   "type": "dir"
+  },
+  {
+   "path": "data",
+   "type": "dir"
+  },
+  {
+   "path": "notes",
+   "type": "dir"
+  },
+  {
+   "path": "secrets",
+   "type": "dir"
+  },
+  {
+   "path": "cloud",
+   "type": "dir"
+  },
+  {
+   "path": "node_modules",
+   "type": "dir"
+  },
+  {
+   "path": "node_modules/pkg",
+   "type": "dir"
+  },
+  {
+   "path": "$RECYCLE.BIN",
+   "type": "dir"
+  },
+  {
+   "path": "$RECYCLE.BIN/S-1-5-21-1",
+   "type": "dir"
+  },
+  {
+   "path": "vm",
+   "type": "dir"
+  },
+  {
+   "path": "AppData",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local/App",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local/App/Code Cache",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local/Microsoft",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local/Microsoft/Office",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local/Microsoft/Office/16.0",
+   "type": "dir"
+  },
+  {
+   "path": "AppData/Local/Microsoft/Office/16.0/OfficeFileCache",
+   "type": "dir"
+  },
+  {
+   "path": "proj",
+   "type": "dir"
+  },
+  {
+   "path": "proj/Cache",
+   "type": "dir"
+  },
+  {
+   "path": ".aws",
+   "type": "dir"
+  },
+  {
+   "path": ".docker",
+   "type": "dir"
+  },
+  {
+   "path": "spaced dir",
+   "type": "dir"
+  },
+  {
+   "path": "\u00fcn\u00ef c\u00f6d\u00e9",
+   "type": "dir"
+  },
+  {
+   "path": "design-system.html",
+   "type": "file",
+   "size": 3000,
+   "mtime": "2024-03-01T10:00:00"
+  },
+  {
+   "path": "designer.md",
+   "type": "file",
+   "size": 800,
+   "mtime": "2024-02-01T09:00:00"
+  },
+  {
+   "path": "Design/logo.png",
+   "type": "file",
+   "size": 5000,
+   "mtime": "2024-01-05T09:00:00"
+  },
+  {
+   "path": "docs/design/x.md",
+   "type": "file",
+   "size": 120,
+   "mtime": "2024-02-15T09:00:00"
+  },
+  {
+   "path": "md-notes.txt",
+   "type": "file",
+   "size": 60,
+   "mtime": "2024-01-20T09:00:00"
+  },
+  {
+   "path": "config.yml",
+   "type": "file",
+   "size": 200,
+   "mtime": "2024-01-21T09:00:00"
+  },
+  {
+   "path": "config.json",
+   "type": "file",
+   "size": 200,
+   "mtime": "2024-01-22T09:00:00"
+  },
+  {
+   "path": "Documents/report.pdf",
+   "type": "file",
+   "size": 90000,
+   "mtime": "2024-01-23T09:00:00"
+  },
+  {
+   "path": "archive/report-old.pdf",
+   "type": "file",
+   "size": 90000,
+   "mtime": "2023-06-01T09:00:00"
+  },
+  {
+   "path": "stepper-designs.html",
+   "type": "file",
+   "size": 4000
+  },
+  {
+   "path": "docs/notes.md",
+   "type": "file",
+   "size": 300,
+   "mtime": "2024-04-01T09:00:00"
+  },
+  {
+   "path": "docs/plan-final.md",
+   "type": "file",
+   "size": 300,
+   "mtime": "2024-04-02T09:00:00"
+  },
+  {
+   "path": "docs/plan-draft.md",
+   "type": "file",
+   "size": 300,
+   "mtime": "2024-04-03T09:00:00"
+  },
+  {
+   "path": "docs/readme.txt",
+   "type": "file",
+   "size": 40000,
+   "mtime": "2024-04-04T09:00:00"
+  },
+  {
+   "path": "src/tool.py",
+   "type": "file",
+   "size": 500,
+   "mtime": "2024-05-01T09:00:00"
+  },
+  {
+   "path": "src/sheet.xlsx",
+   "type": "file",
+   "size": 500,
+   "mtime": "2024-05-02T09:00:00"
+  },
+  {
+   "path": "my-x foo.txt",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-05-03T09:00:00"
+  },
+  {
+   "path": "foo.txt",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-05-04T09:00:00"
+  },
+  {
+   "path": "node_modules/pkg/probe_nm.txt",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "node_modules/leftpad.js",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "$RECYCLE.BIN/S-1-5-21-1/recycled.txt",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "disk.vhdx",
+   "type": "file",
+   "size": 1000,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "vm/disk2.vhdx",
+   "type": "file",
+   "size": 1000,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "AppData/Local/App/Code Cache/x",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "AppData/Local/App/settings.dat",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "AppData/Local/Microsoft/Office/16.0/OfficeFileCache/cache.bin",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "proj/Cache/keep.txt",
+   "type": "file",
+   "size": 10,
+   "mtime": "2024-06-01T09:00:00"
+  },
+  {
+   "path": "linkdir",
+   "type": "junction",
+   "target": "node_modules"
+  },
+  {
+   "path": "docs_link",
+   "type": "junction",
+   "target": "docs"
+  },
+  {
+   "path": "cloud/cloud-doc.docx",
+   "type": "file",
+   "size": 4096,
+   "mtime": "2024-07-07T07:07:07",
+   "offline": true
+  },
+  {
+   "path": "cloud/cloud-note.md",
+   "type": "file",
+   "size": 4096,
+   "mtime": "2024-07-07T07:07:08",
+   "offline": true
+  },
+  {
+   "path": ".env",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": ".env.local",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": "id_rsa",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": "id_ed25519",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": "vault.kdbx",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": ".aws/credentials",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": ".docker/config.json",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": "secrets/server.pem",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": "notes/keybackup.txt",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-02T09:00:00"
+  },
+  {
+   "path": "tools/setup.exe",
+   "type": "file",
+   "size": 64,
+   "mtime": "2024-06-03T09:00:00"
+  },
+  {
+   "path": "data/binary.txt",
+   "type": "file",
+   "size": 2048,
+   "mtime": "2024-06-03T09:00:00"
+  },
+  {
+   "path": "spaced dir/my report final.txt",
+   "type": "file",
+   "size": 20,
+   "mtime": "2024-06-04T09:00:00"
+  },
+  {
+   "path": "\u00fcn\u00ef c\u00f6d\u00e9/r\u00e9sum\u00e9.txt",
+   "type": "file",
+   "size": 20,
+   "mtime": "2024-06-04T09:00:00"
+  },
+  {
+   "path": "\u65e5\u672c\u8a9e\u30e1\u30e2.txt",
+   "type": "file",
+   "size": 20,
+   "mtime": "2024-06-04T09:00:00"
+  },
+  {
+   "path": "docs/hostile-note.txt",
+   "type": "file",
+   "size": 80,
+   "mtime": "2024-04-05T09:00:00"
+  }
+ ]
+}

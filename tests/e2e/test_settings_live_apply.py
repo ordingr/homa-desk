@@ -138,7 +138,7 @@ def test_per_source_mute_toggles_exist_for_every_source_and_persist(ui):
     root, settings, window = ui
     window.show("Cards")
     page = window.pages["Cards"]
-    for source in ("hooks", "http", "mcp", "file", "reminders"):
+    for source in ("hooks", "http", "mcp", "file", "reminders", "calendar"):
         find_check(page, f"({source})")
     find_check(page, "(mcp)").invoke()
     pump(root, 0.3)
@@ -161,10 +161,13 @@ def test_lead_time_edit_is_saved_within_one_second_and_bad_values_are_refused(ui
     assert read_file()["calendars"]["lead_minutes"] == 3, "out of range must not overwrite the saved value"
 
 
-def test_port_and_hotkey_say_takes_effect_after_restart(ui):
+def test_port_says_takes_effect_after_restart_and_hotkey_is_live(ui):
     root, settings, window = ui
     window.show("General")
-    assert any("takes effect after restart" in t for t in texts(window.pages["General"]))
+    assert "takes effect after restart" in window.port_note.cget("text")
+    assert "restart" not in str(window.hotkey_note.cget("text")).lower(), "the hotkey applies live"
+    window.hotkey_var.set("ctrl+alt+f10")
+    assert wait_until(lambda: (pump(root, 0.05), read_file().get("hotkey") == "ctrl+alt+f10")[1], timeout=2.5, step=0),         "a hotkey edit must be written to settings.json without a restart"
 
 
 def test_mcp_page_shows_the_claude_code_command_and_the_claude_desktop_snippet(ui):
@@ -188,8 +191,12 @@ def test_no_default_names_an_organisation_and_the_feed_list_starts_empty(ui):
     assert settings.get("calendars")["ics_urls"] == []
     assert window.ics_list.size() == 0
     dumped = json.dumps(settings._data).lower()
-    for word in ("notes_dir", "roots", "http://", "https://"):
+    for word in ("notes_dir", "http://", "https://"):
         assert word not in dumped
+    # The index/notes keys exist from M3a-1, but they must start empty: no
+    # default roots and no default notes folder may ever name a machine or org.
+    assert settings.get("index")["roots"] == []
+    assert settings.get("notes")["dir"] == ""
 
 
 def test_a_saved_feed_url_is_masked_in_the_window_and_the_settings_file_gets_a_user_only_acl(ui):
@@ -338,3 +345,233 @@ def test_lead_time_changed_in_settings_json_applies_to_the_next_card_without_res
                        "(or the plan's wording 'changing lead time' means only the Settings window, which is covered above)")
         assert cards[0]["title"] == "Live apply starts in 3 minutes"
         assert time.time() < start - 60, "the card must come at the new lead, not the old one"
+
+
+# ---- M3-0: log viewer, calendar labels and status, port re-install offer, regenerate off the UI thread ---------
+
+SECRETPATH = "SECRETPATH77"
+LABEL_URL = f"https://cal.example.test/{SECRETPATH}/basic.ics"
+
+
+@pytest.fixture
+def ui2(tk_root, tmp_path, monkeypatch):
+    """Window factory with an injectable calendar status and runner; yields (root, settings, make)."""
+    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path / "ui2_home"))
+    paths.ensure_layout()
+    settings = Settings()
+    settings.load()
+    made = []
+
+    def make(**kw):
+        w = settings_ui.SettingsWindow(tk_root, settings, lambda: TOKEN, PORT, **kw)
+        made.append(w)
+        pump(tk_root, 0.2)
+        return w
+
+    yield tk_root, settings, make
+    for w in made:
+        try:
+            w.close()
+        except Exception:
+            pass
+    pump(tk_root, 0.1)
+
+
+def all_text(window):
+    return "\n".join(texts(window.win)) + "\n" + "\n".join(str(window.ics_list.get(i)) for i in range(window.ics_list.size()))
+
+
+def test_c_mcp_page_log_viewer_shows_exactly_the_last_100_lines_of_the_tail_and_refreshes(ui2):
+    from assistant.server import routes_health
+    root, settings, make = ui2
+    log_file = paths.logs_dir() / "mcp.log"
+    log_file.write_text("".join(f"2026-01-01T00:00:00 tools/call tool=t{n} args=[] result_bytes=1 ok\n" for n in range(150)),
+                        encoding="utf-8")
+    window = make()
+    window.show("MCP")
+    pump(root, 0.2)
+    expected = routes_health.mcp_log_tail(100)
+    assert len(expected) == 100 and "tool=t149" in expected[-1] and "tool=t50 " in expected[0]
+    assert window.mcp_log_text.get("1.0", "end").rstrip("\n") == "\n".join(expected)
+    with open(log_file, "a", encoding="utf-8") as fh:
+        fh.write("2026-01-01T00:00:01 tools/call tool=newest args=[] result_bytes=1 ok\n")
+    assert "newest" not in window.mcp_log_text.get("1.0", "end")
+    refresh = [b for b in widgets(window.pages["MCP"]) if isinstance(b, tk.Button) and str(b.cget("text")) == "Refresh"]
+    assert len(refresh) == 1
+    refresh[0].invoke()
+    pump(root, 0.2)
+    now = window.mcp_log_text.get("1.0", "end").rstrip("\n")
+    assert now == "\n".join(routes_health.mcp_log_tail(100)) and "newest" in now
+    assert window.mcp_log_text.cget("state") == "disabled"
+
+
+def test_c_empty_log_shows_a_placeholder(ui2):
+    root, settings, make = ui2
+    f = paths.logs_dir() / "mcp.log"
+    if f.exists():
+        f.unlink()
+    window = make()
+    window.show("MCP")
+    assert "no MCP calls" in window.mcp_log_text.get("1.0", "end")
+
+
+def test_d_labels_round_trip_never_show_the_path_and_removing_a_feed_drops_its_label(ui2):
+    root, settings, make = ui2
+    other = "https://other.example.test/p/zzz/b.ics"
+    settings.set("calendars", {**settings.get("calendars"), "ics_urls": [LABEL_URL, other]})
+    window = make()
+    window.show("Calendars")
+    window.ics_list.selection_set(0)
+    window._load_label()
+    window.label_var.set("Team " + "x" * 100)
+    window._set_label()
+    pump(root, 0.3)
+    saved = read_file()["calendars"]
+    assert saved["ics_urls"] == [LABEL_URL, other], "ics_urls must stay the plain list of strings"
+    assert saved["labels"] == {LABEL_URL: ("Team " + "x" * 100)[:64]}
+    row = window.ics_list.get(0)
+    assert row.startswith("Team ") and "cal.example.test" in row and "(path hidden)" in row
+    assert SECRETPATH not in all_text(window)
+    assert window.ics_list.get(1).startswith("other.example.test")
+    window.ics_list.selection_clear(0, "end")
+    window.ics_list.selection_set(0)
+    window.label_var.set("")
+    window._load_label()
+    assert window.label_var.get() == saved["labels"][LABEL_URL]
+    window.label_var.set("   ")
+    window._set_label()
+    assert read_file()["calendars"]["labels"] == {}
+    window.label_var.set("again")
+    window.ics_list.selection_clear(0, "end")
+    window.ics_list.selection_set(0)
+    window._set_label()
+    assert read_file()["calendars"]["labels"] == {LABEL_URL: "again"}
+    window.ics_list.selection_clear(0, "end")
+    window.ics_list.selection_set(0)
+    window._remove_ics()
+    pump(root, 0.3)
+    after = read_file()["calendars"]
+    assert after["ics_urls"] == [other] and after["labels"] == {}
+
+
+def test_d_label_without_a_selection_is_refused_with_a_message(ui2):
+    root, settings, make = ui2
+    window = make()
+    window.show("Calendars")
+    window.label_var.set("x")
+    window._set_label()
+    assert "select a feed" in window._errors["Calendars"].cget("text")
+    assert read_file()["calendars"].get("labels", {}) == {}
+
+
+def test_d_status_line_per_feed_shows_label_host_time_error_and_never_the_path(ui2):
+    root, settings, make = ui2
+    now = time.time()
+    entries = [{"label": "Team", "host": "cal.example.test", "last_ok": now, "last_error": None, "events": 3},
+               {"label": "other.example.test", "host": "other.example.test", "last_ok": None,
+                "last_error": "HTTP 404", "events": 0}]
+    window = make(calendar_status=lambda: entries)
+    window.show("Calendars")
+    pump(root, 0.2)
+    lines = window.status_label.cget("text").split("\n")
+    assert len(lines) == 2
+    assert lines[0].startswith("Team") and "cal.example.test" in lines[0]
+    assert "last ok " + time.strftime("%H:%M", time.localtime(now)) in lines[0]
+    assert "not read yet" in lines[1] and "error: HTTP 404" in lines[1]
+    assert SECRETPATH not in all_text(window)
+    assert settings_ui.format_calendar_status([]) == "No calendars are being read."
+
+
+def test_d_status_refreshes_on_its_own_timer(ui2, monkeypatch):
+    root, settings, make = ui2
+    monkeypatch.setattr(settings_ui, "STATUS_REFRESH_MS", 300)
+    state = [{"label": "A", "host": "h.example.test", "last_ok": None, "last_error": None, "events": 0}]
+    window = make(calendar_status=lambda: list(state))
+    window.show("Calendars")
+    assert "not read yet" in window.status_label.cget("text")
+    state[0]["last_error"] = "timed out"
+    pump(root, 1.0)
+    assert "error: timed out" in window.status_label.cget("text")
+
+
+def test_h_changing_the_port_offers_a_reinstall_button_that_runs_hooks_install(ui2):
+    root, settings, make = ui2
+    calls = []
+
+    def runner(*args):
+        calls.append(args)
+        return 0, "ok"
+
+    window = make(runner=runner)
+    window.show("General")
+    assert not window.hooks_offer.winfo_ismapped()
+    window.port_var.set("18000")
+    pump(root, 0.9)
+    assert read_file()["port"] == 18000
+    assert window.hooks_offer_button.cget("text") == "Re-install Claude Code hooks for port 18000"
+    assert window.hooks_offer.winfo_ismapped()
+    window.hooks_offer_button.invoke()
+    pump(root, 0.5)
+    assert calls == [("hooks", "install")]
+    assert "re-installed" in window._errors["General"].cget("text")
+    window.port_var.set(str(PORT))
+    pump(root, 0.9)
+    assert not window.hooks_offer.winfo_ismapped(), "back on the running port: no offer"
+
+
+def test_h_a_failing_runner_is_reported_not_swallowed(ui2):
+    root, settings, make = ui2
+    window = make(runner=lambda *a: (1, "boom"))
+    window.show("General")
+    window.port_var.set("18001")
+    pump(root, 0.9)
+    window.hooks_offer_button.invoke()
+    pump(root, 0.5)
+    assert "failed" in window._errors["General"].cget("text")
+
+
+def test_r6_4_regenerate_runs_off_the_ui_thread_and_reports_error_then_success(ui2, tmp_path, monkeypatch):
+    root, settings, make = ui2
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("HOME", str(profile))
+    from assistant.security import token as token_mod
+    token_mod.ensure()
+    window = make()
+    window.show("MCP")
+    old = paths.token_file().read_text("ascii")
+    held = open(paths.token_file(), "rb")
+    try:
+        gaps = []
+        t0 = last = time.monotonic()
+        window.regenerate_token()
+        first = window._regen_thread
+        window.regenerate_token()
+        assert window._regen_thread is first, "a second click while one runs must be ignored"
+        assert window.regen_button.cget("state") == "disabled"
+        while time.monotonic() - t0 < 9 and (first.is_alive() or time.monotonic() - t0 < 1):
+            root.update()
+            uibus.drain()
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+            time.sleep(0.01)
+        first.join(10)
+        pump(root, 0.3)
+        assert time.monotonic() - t0 > 4, "the token file was not actually held for the retry budget"
+        ordered = sorted(gaps)
+        p99 = ordered[int(len(ordered) * 0.99) - 1]
+        # a blocked UI thread would show one ~5 s gap (the replace budget); a loaded machine can add a stray 0.9 s hiccup
+        assert p99 < 0.1 and max(gaps) < 2.0, f"UI thread stalled: p99 {p99:.3f}s, worst {max(gaps):.3f}s over {len(gaps)} ticks"
+        assert "could not regenerate" in window._errors["MCP"].cget("text"), window._errors["MCP"].cget("text")
+        assert window.regen_button.cget("state") == "normal"
+        assert paths.token_file().read_text("ascii") == old
+    finally:
+        held.close()
+    window.regenerate_token()
+    window._regen_thread.join(15)
+    pump(root, 0.4)
+    assert paths.token_file().read_text("ascii") != old
+    assert "could not regenerate" not in window._errors["MCP"].cget("text")
+    assert window._token_override and window._token_override != old

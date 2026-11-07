@@ -240,4 +240,23 @@ def test_running_app_serves_the_same_four_tools_once_m2_4_has_mounted_mcp(runnin
     if status == 404:
         pytest.skip("the full app does not mount /mcp yet (M2-4 wiring in assistant/app.py)")
     assert status == 200
-    assert {t.name for t in McpHttp(base, token).list_tools()} == TOOLS
+    names = {t.name for t in McpHttp(base, token).list_tools()}
+    assert TOOLS <= names, "the full app serves the four card tools"
+    assert names - TOOLS == {"search_files", "get_file_info", "read_text_preview", "list_indexed_roots"}, names
+
+
+# ---- R6-2 (M3-0): U+2028/U+2029 in a tool name cannot split an mcp.log line ---------------------------------
+
+def test_a_tool_name_with_unicode_line_separators_logs_one_physical_line_and_tails_as_one(mcp_live):
+    from assistant.server import routes_health
+    path = mcp_live.home / "logs" / "mcp.log"
+    physical = lambda: path.read_text(encoding="utf-8").split("\n")[:-1] if path.is_file() else []  # noqa: E731
+    before = len(physical())
+    result = mcp_live.mcp().call("evil\u2028name\u2029x", {})
+    assert result.is_error
+    assert wait_until(lambda: len(physical()) == before + 1, timeout=3), physical()[before:]
+    raw = path.read_text(encoding="utf-8")
+    assert "\u2028" not in raw and "\u2029" not in raw
+    assert routes_health.mcp_log_tail(500)[-1].split()[2].startswith("tool=evil")
+    body = mcp_live.api().get("/v1/mcp/log?lines=1000")[1]["lines"]
+    assert len(body) == len(physical()), "tail count must equal the number of physical lines"
