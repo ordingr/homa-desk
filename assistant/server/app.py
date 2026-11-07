@@ -16,7 +16,8 @@ from ..cards.filedrop import FileDrop
 from ..cards.store import CardStore
 from ..reminders.store import ReminderStore
 from ..scheduler import Scheduler
-from . import routes_cards, routes_health, routes_hooks, routes_reminders
+from ..search.saved import SavedSearches
+from . import routes_cards, routes_health, routes_hooks, routes_reminders, routes_search
 from .auth import AuthMiddleware
 
 log = logging.getLogger("assistant.server.app")
@@ -86,16 +87,21 @@ class BodyLimitMiddleware:
 
 def create_app(token_provider: Callable[[], str], store: Optional[CardStore] = None,
                reminders: Optional[ReminderStore] = None,
-               scheduler: Optional[Scheduler] = None, mcp_app=None) -> Starlette:
+               scheduler: Optional[Scheduler] = None, mcp_app=None, index=None,
+               settings=None, saved=None) -> Starlette:
     """Card, hook and file-drop routes need `store`; reminder routes need `reminders`.
     With `scheduler` as well, the events/ folder watcher is started on it.
-    `mcp_app` (an ASGI app) is mounted at /mcp behind the same middleware."""
+    `mcp_app` (an ASGI app) is mounted at /mcp behind the same middleware.
+    Search routes need `index` (an object with current() -> (store, delta) and status()); `settings`
+    supplies index.show_protected_by_name, `saved` is the saved-search store (default per-machine file)."""
     routes = list(routes_health.routes)
     if store is not None:
         routes.extend(routes_cards.routes)
         routes.extend(routes_hooks.routes)
     if reminders is not None:
         routes.extend(routes_reminders.routes)
+    if index is not None:
+        routes.extend(routes_search.routes)
     if mcp_app is not None:
         routes.append(Mount("/mcp", app=mcp_app))
     app = Starlette(
@@ -112,6 +118,10 @@ def create_app(token_provider: Callable[[], str], store: Optional[CardStore] = N
             app.state.filedrop.start(scheduler)
     if reminders is not None:
         app.state.reminders = reminders
+    if index is not None:
+        app.state.index = index
+        app.state.settings = settings
+        app.state.saved = saved if saved is not None else SavedSearches()
     return app
 
 

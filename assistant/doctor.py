@@ -1,12 +1,14 @@
 import importlib
 import importlib.metadata
 import json
+import logging
 import os
 import re
 import shutil
 import socket
 import subprocess
 import sys
+import time
 from typing import List, Tuple
 
 from . import __version__, hooks_installer, netinfo, paths, settings
@@ -15,8 +17,6 @@ from .security import token
 _DEPS = ("mcp", "starlette", "uvicorn", "pydantic", "pywin32")
 _WHEELS = ("pydantic_core", "cryptography", "rpds", "win32gui")
 _NOT_YET = (
-    "hotkey",
-    "index size and age",
     "plugins",
 )
 
@@ -105,6 +105,90 @@ def _calendars_configured() -> str:
     return f"{count} ICS feed(s), Outlook {'on' if outlook else 'off'}"
 
 
+def _settings_raw() -> dict:
+    try:
+        raw = json.loads(paths.settings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _age(stamp: float) -> str:
+    seconds = max(0, int(time.time() - stamp))
+    if seconds < 90:
+        return f"{seconds} s"
+    if seconds < 5400:
+        return f"{seconds // 60} min"
+    if seconds < 172800:
+        return f"{seconds // 3600} h"
+    return f"{seconds // 86400} days"
+
+
+def _hotkey_state() -> str:
+    combo = _settings_raw().get("hotkey", "ctrl+alt+space")
+    if not isinstance(combo, str) or not combo.strip():
+        return "disabled (hotkey setting is empty)"
+    try:
+        from .overlay import hotkey
+        probe = hotkey.Hotkey(combo.strip(), lambda: None)
+        quiet = logging.getLogger(hotkey.log.name)
+        previous, quiet.level = quiet.level, logging.CRITICAL
+        try:
+            status = probe.start()
+        finally:
+            quiet.level = previous
+        probe.stop()
+    except Exception as exc:
+        return f"{combo} unavailable ({type(exc).__name__})"
+    if status == hotkey.TAKEN and netinfo.listener_pid(settings.peek_port()) is not None:
+        status += " (the running Assistant may be the holder)"
+    return f"{combo}: {status}"
+
+
+def _index_roots() -> str:
+    index = _settings_raw().get("index")
+    roots = index.get("roots") if isinstance(index, dict) else None
+    roots = [r for r in roots if isinstance(r, str)] if isinstance(roots, list) else []
+    return f"{len(roots)}: " + "; ".join(roots) if roots else "0 configured"
+
+
+def _index_state() -> str:
+    try:
+        from .app import index_store_path
+        from .index.store import IndexStore
+        path = index_store_path()
+        if not path.is_file():
+            return "no index file yet"
+        store = IndexStore.load(path)
+        return (f"{store.entry_count:,} entries, built {_age(store.built_at)} ago, "
+                f"file {path.stat().st_size / 1_048_576:.1f} MB")
+    except Exception as exc:
+        return f"index file unreadable ({type(exc).__name__})"
+
+
+def _notes_state() -> str:
+    try:
+        from .search import notes_bm25
+        folder = os.environ.get(notes_bm25.ENV_NOTES_DIR, "").strip()
+        source = "ASSISTANT_NOTES_DIR"
+        if not folder:
+            notes = _settings_raw().get("notes")
+            folder = notes.get("dir", "") if isinstance(notes, dict) else ""
+            folder = folder.strip() if isinstance(folder, str) else ""
+            source = "settings"
+        if not folder:
+            return "no notes folder set"
+        state = f"{folder} ({source}), " + ("folder present" if os.path.isdir(folder) else "folder missing")
+        saved = notes_bm25.default_index_path()
+        if saved.is_file():
+            state += f", index file {_age(saved.stat().st_mtime)} old"
+        else:
+            state += ", no index file yet"
+        return state
+    except Exception as exc:
+        return f"unavailable ({type(exc).__name__})"
+
+
 def report() -> List[Tuple[str, str]]:
     version = sys.version_info
     lines = [
@@ -121,6 +205,10 @@ def report() -> List[Tuple[str, str]]:
         ("Outlook COM", _outlook_com()),
         ("MCP", _mcp_mount()),
         ("calendars configured", _calendars_configured()),
+        ("hotkey", _hotkey_state()),
+        ("index size and age", _index_state()),
+        ("index roots", _index_roots()),
+        ("notes index", _notes_state()),
     ]
     lines.extend((name, "n/a") for name in _NOT_YET)
     return lines

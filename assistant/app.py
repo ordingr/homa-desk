@@ -17,13 +17,19 @@ from . import __version__, netinfo, paths, uibus
 from .calendar.ics import IcsSource
 from .calendar.meetings import MeetingScheduler
 from .calendar.outlook import OutlookSource
-from .cards.model import Card
+from .cards.model import Card, strip_control
 from .cards.store import CardStore
+from .index.manager import IndexManager
 from .reminders.store import Reminder, ReminderStore
 from .scheduler import Handle, Scheduler
+from .search import modes as search_modes
+from .search.notes_bm25 import AskNotesMode
+from .search.saved import SavedSearches
 from .security import token as token_store
 from .server.app import ServerThread, create_app
 from .server.mcp import build_mcp
+from .server.routes_search import KNOWN_EXTS
+from .overlay import sounds
 from .settings import Settings
 
 log = logging.getLogger("assistant.app")
@@ -42,7 +48,7 @@ class _ProactorResetFilter(logging.Filter):
         if not isinstance(exc, ConnectionResetError):
             return True
         context = getattr(record, "message", None) or record.getMessage()
-        return "_call_connection_lost" not in context
+        return "_call_connection_lost" not in context and "_loop_reading" not in context
 
 
 def _setup_logging() -> None:
@@ -74,6 +80,10 @@ def pid_file():
     return paths.home() / "assistant.pid"
 
 
+def index_store_path():
+    return paths.home() / "index" / "files.idx"
+
+
 class App:
     def __init__(self) -> None:
         self.stop = threading.Event()
@@ -86,6 +96,12 @@ class App:
         self.icon = None
         self.cards_ui = None
         self.meetings: Optional[MeetingScheduler] = None
+        self.index: Optional[IndexManager] = None
+        self.notes_mode: Optional[AskNotesMode] = None
+        self.saved: Optional[SavedSearches] = None
+        self.search_modes = None
+        self.popup = None
+        self.hotkey = None
         self.settings_window = None
         self._started_at = time.monotonic()
         self._token = ""
@@ -117,10 +133,19 @@ class App:
         self.meetings = MeetingScheduler(self._calendar_sources(), self.store, self.scheduler, self.settings)
         self.settings.on_change("calendars", self._on_calendars_changed)
         self.settings.on_change("mute_sources", self._on_mute_sources_changed)
+        sounds.set_enabled(self.settings.get("sound_on", True) is not False)
+        self.settings.on_change("sound_on", lambda _key, value: sounds.set_enabled(value is not False))
         self.meetings.start()
 
-        _, mcp_asgi = build_mcp(self.store, self.reminders)
-        web_app = create_app(self._current_token, self.store, self.reminders, self.scheduler, mcp_app=mcp_asgi)
+        self.index = IndexManager(self.settings, self.scheduler, index_store_path())
+        self.saved = SavedSearches()
+        self.notes_mode = AskNotesMode(self.settings, self.scheduler)
+        self.search_modes = search_modes.default_registry(self._files_source, self.notes_mode, self.settings)
+        self.settings.on_change("notes", lambda _key, _value: self._start_notes_index())
+
+        _, mcp_asgi = build_mcp(self.store, self.reminders, index=self.index)
+        web_app = create_app(self._current_token, self.store, self.reminders, self.scheduler, mcp_app=mcp_asgi,
+                             index=self.index, settings=self.settings, saved=self.saved)
         web_app.router.routes.insert(0, Route("/v1/health", self._health_route, methods=["GET"]))
         web_app.router.routes.append(Route(MCP_PATH, _ExactMount(mcp_asgi, MCP_PATH)))
         web_app.router.routes.append(Route("/v1/shutdown", self._shutdown_route, methods=["POST"]))
@@ -131,6 +156,7 @@ class App:
         if not self.server.start():
             log.error("could not start the HTTP server on port %d", self.settings.port)
             self.meetings.stop()
+            self.notes_mode.close()
             self.scheduler.stop()
             self._report_bind_failure()
             return 1
@@ -142,6 +168,7 @@ class App:
             log.exception("could not build the overlay")
             self.shutdown()
             return 1
+        threading.Thread(target=self._start_index, name="index-start", daemon=True).start()
         print(f"assistant {__version__} listening on http://127.0.0.1:{self.settings.port}", flush=True)
         try:
             self.root.mainloop()
@@ -201,11 +228,12 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.shutdown)
         uibus.start(self.root)
         actions = icon_mod.IconActions(
-            search=lambda: log.info("search not yet available"),
+            search=self._open_search,
             remind_submit=self._remind_submit,
             mute=self._mute,
             unmute=lambda: self.store.set_mute(None),
             settings=self._open_settings,
+            set_sound=self._set_sound,
             quit=self.shutdown,
         )
         self.icon = icon_mod.Icon(self.root, actions)
@@ -215,6 +243,64 @@ class App:
         self._sync_indicators()
         self._sync_visible()
         self._arm_tick()
+        self._build_search()
+        log.info("overlay ready")
+
+    def _files_source(self):
+        store, delta = self.index.current()
+        if store is None:
+            return None
+        return store, delta, KNOWN_EXTS
+
+    def _start_index(self) -> None:
+        started = time.monotonic()
+        try:
+            self.index.start()
+            log.info("file index loaded: %d entries in %.2fs", self.index.status()["entries"],
+                     time.monotonic() - started)
+        except Exception:
+            log.exception("could not start the file index")
+        self._start_notes_index()
+
+    def _start_notes_index(self) -> None:
+        if self.stop.is_set():
+            return
+        try:
+            self.notes_mode.index()
+        except Exception:
+            log.exception("could not start the notes index")
+
+    def _build_search(self) -> None:
+        try:
+            from .overlay import hotkey as hotkey_mod, search_ui
+            self.popup = search_ui.SearchPopup(self.root, self.icon, self.search_modes, self.settings,
+                                               saved=self.saved)
+            self.hotkey = hotkey_mod.Hotkey(
+                str(self.settings.get("hotkey", "") or ""),
+                lambda: uibus.post(self.popup.toggle, self.hotkey.last_press),
+                skip_when=lambda: (self.settings.get("hotkey_skip_fullscreen", False) is True
+                                   and hotkey_mod.foreground_is_fullscreen()))
+            self.settings.on_change("hotkey", self._on_hotkey_changed)
+            status = self.hotkey.start()
+        except Exception:
+            log.exception("could not build the search popup or hotkey")
+            return
+        if status != "registered":
+            log.warning("hotkey %r: %s; the icon still opens search", self.hotkey.combo, status)
+        else:
+            log.info("hotkey %r registered", self.hotkey.combo)
+
+    def _on_hotkey_changed(self, key: str, value) -> None:
+        if self.hotkey is None or self.stop.is_set():
+            return
+        status = self.hotkey.set_combo(str(value or ""))
+        log.info("hotkey remapped to %r: %s", self.hotkey.combo, status)
+
+    def _open_search(self) -> None:
+        if self.popup is None:
+            log.info("search is not available")
+            return
+        self.popup.toggle(time.perf_counter())
 
     def _current_token(self) -> str:
         try:
@@ -230,23 +316,35 @@ class App:
     async def _health_route(self, request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "version": __version__,
                              "uptime_s": int(time.monotonic() - self._started_at),
-                             "index": None, "plugins": [],
+                             "index": self._index_health(), "plugins": [],
                              "calendars": self.meetings.status()["calendars"] if self.meetings else []})
+
+    def _index_health(self) -> Optional[dict]:
+        if self.index is None:
+            return None
+        status = self.index.status()
+        status["rescanning"] = bool(status.get("walking"))
+        return status
 
     def _calendar_sources(self) -> list:
         cal = self.settings.get("calendars") or {}
         sources: list = []
+        labels = cal.get("labels", {})
         for url in cal.get("ics_urls", []):
             try:
-                sources.append(IcsSource.from_url(url))
+                sources.append(IcsSource.from_url(url, strip_control(labels.get(url, "")).strip() or None))
             except ValueError:
                 log.warning("ignoring a calendar address that is not an http(s) URL")
         if cal.get("outlook", False):
             outlook = OutlookSource()
             if outlook.available():
                 sources.append(outlook)
-        self._sources_key = (tuple(cal.get("ics_urls", [])), bool(cal.get("outlook", False)))
+        self._sources_key = (tuple((u, labels.get(u, "")) for u in cal.get("ics_urls", [])),
+                             bool(cal.get("outlook", False)))
         return sources
+
+    def _calendar_status(self) -> list:
+        return self.meetings.status()["calendars"] if self.meetings else []
 
     def _on_calendars_changed(self, key: str, value) -> None:
         old = self._sources_key
@@ -276,10 +374,33 @@ class App:
                 self.settings_window = None
         try:
             self.settings_window = settings_ui.SettingsWindow(
-                self.root, self.settings, self._current_token, self.server.port, scale=self.icon.scale)
+                self.root, self.settings, self._current_token, self.server.port, scale=self.icon.scale,
+                calendar_status=self._calendar_status)
+            from .overlay import settings_pages_search
+            settings_pages_search.install(
+                self.settings_window, index_status=self.index.status, request_rescan=self.index.request_rescan,
+                hotkey_info=self._hotkey_info, notes_info=self._notes_info)
         except Exception:
             log.exception("could not open the settings window")
             self.settings_window = None
+
+    def _hotkey_info(self) -> dict:
+        hk = self.hotkey
+        if hk is None:
+            return {"status": "unavailable", "combo": "", "presses": 0}
+        return {"status": hk.status(), "combo": hk.combo, "presses": hk.presses}
+
+    def _notes_info(self) -> dict:
+        mode = self.notes_mode
+        idx = mode._index
+        return {"dir": mode.notes_dir(), "skipped_placeholder": mode.skipped_placeholder,
+                "status": idx.status_text if idx is not None else ""}
+
+    def _set_sound(self, enabled: bool) -> None:
+        try:
+            self.settings.set("sound_on", bool(enabled))
+        except (ValueError, OSError):
+            log.exception("could not save the sound setting")
 
     def _open_url(self, url: str) -> None:
         if not url.lower().startswith(("http://", "https://")):
@@ -365,6 +486,13 @@ class App:
         snapshot = self.icon.debug_state()
         snapshot["cards"] = self.cards_ui.debug_state()
         snapshot["strips"] = self.cards_ui.strip_state()
+        if self.popup is not None:
+            snapshot["search"] = self.popup.debug_state()
+        if self.hotkey is not None:
+            snapshot["hotkey"] = self.hotkey.status()
+            snapshot["hotkey_combo"] = self.hotkey.combo
+            snapshot["hotkey_thread_id"] = self.hotkey.thread_id
+            snapshot["hotkey_presses"] = self.hotkey.presses
         return snapshot
 
     async def _debug_route(self, request: Request) -> JSONResponse:
@@ -398,6 +526,12 @@ class App:
         uibus.stop()
         if self.meetings is not None:
             self.meetings.stop()
+        if self.hotkey is not None:
+            self.hotkey.stop()
+        if self.index is not None:
+            self.index.stop()
+        if self.notes_mode is not None:
+            self.notes_mode.close()
         self.scheduler.stop()
         if self.server is not None:
             self.server.stop()

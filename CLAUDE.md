@@ -33,7 +33,9 @@ pick one.
 - Python 3.10+, pip-only dependencies, no compiled executable of our own,
   no admin rights, no service. Must run on a locked-down corporate laptop.
 - Nothing leaves the PC except the explicit "Ask Claude" action, which
-  confirms what it will send. No telemetry, no cloud sync, no auto-update.
+  confirms what it will send, and the read-only MCP file tools, which run
+  only when the user's own Claude session calls them (added 2026-11-07,
+  per PRD AC-MC-3/4). No telemetry, no cloud sync, no auto-update.
 - Secrets deny-list (SEC-3) applies to search results, previews and MCP.
 - Recycle Bin only; never a permanent delete.
 - No employer or personal identifiers in anything committed. Paths in
