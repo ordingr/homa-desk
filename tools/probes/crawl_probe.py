@@ -39,6 +39,24 @@ AppData/Local/Docker/
 **/build/
 **/.next/
 **/.turbo/
+AppData/Local/*/Code Cache/
+AppData/Local/*/Cache/
+AppData/Local/*/Cache_Data/
+AppData/Local/*/GPUCache/
+AppData/Local/*/Service Worker/
+AppData/Local/*/Shared Dictionary/
+AppData/Local/*/OfficeFileCache/
+AppData/Roaming/*/Code Cache/
+AppData/Roaming/*/Cache/
+AppData/Roaming/*/Cache_Data/
+AppData/Roaming/*/GPUCache/
+AppData/Roaming/*/Service Worker/
+AppData/Roaming/*/Shared Dictionary/
+AppData/Roaming/*/OfficeFileCache/
+AppData/Local/npm-cache/
+AppData/Roaming/npm-cache/
+AppData/Local/NuGet/v3-cache/
+AppData/Local/NuGet/plugins-cache/
 """
 
 
@@ -58,30 +76,31 @@ class Excludes:
             dir_only = line.endswith(("/", "\\"))
             line = line.rstrip("/\\")
             if len(line) > 1 and line[1] == ":":
-                self.absolute.append(os.path.normcase(os.path.normpath(line)))
+                self.absolute.append((os.path.normcase(os.path.normpath(line)), raw.strip()))
                 continue
             line = line.replace("\\", "/")
             while line.startswith("**/"):
                 line = line[3:]
-            entry = (line.lower(), dir_only)
+            entry = (line.lower(), dir_only, raw.strip())
             (self.paths if "/" in line else self.names).append(entry)
 
-    def matches(self, full, rel, name, is_dir):
+    def matching_rule(self, full, rel, name, is_dir):
+        """Returns the pattern line that excludes the entry, or None."""
         n = name.lower()
-        for pat, dir_only in self.names:
+        for pat, dir_only, label in self.names:
             if (is_dir or not dir_only) and fnmatch.fnmatchcase(n, pat):
-                return True
+                return label
         if is_dir and self.absolute:
             f = os.path.normcase(os.path.normpath(full))
-            for a in self.absolute:
+            for a, label in self.absolute:
                 if f == a:
-                    return True
+                    return label
         if self.paths:
             r = rel.lower()
-            for pat, dir_only in self.paths:
+            for pat, dir_only, label in self.paths:
                 if (is_dir or not dir_only) and (fnmatch.fnmatchcase(r, pat) or fnmatch.fnmatchcase(r, "*/" + pat)):
-                    return True
-        return False
+                    return label
+        return None
 
 
 class PMC(ctypes.Structure):
@@ -141,8 +160,11 @@ def crawl(root, excludes, stats, top):
                     stats["errors"] += 1
                     is_dir = reparse = False
                 erel = f"{rel}/{entry.name}" if rel else entry.name
-                if excludes and excludes.matches(entry.path, erel, entry.name, is_dir):
-                    continue
+                if excludes:
+                    rule = excludes.matching_rule(entry.path, erel, entry.name, is_dir)
+                    if rule:
+                        stats["skipped"][rule] = stats["skipped"].get(rule, 0) + 1
+                        continue
                 count += 1
                 stats["entries"] += 1
                 if is_dir and not reparse:
@@ -173,7 +195,7 @@ def main():
         with open(args.excludes, encoding="utf-8") as fh:
             excludes = Excludes(fh.read())
 
-    stats = {"entries": 0, "dirs": 0, "errors": 0, "reparse_skipped": 0}
+    stats = {"entries": 0, "dirs": 0, "errors": 0, "reparse_skipped": 0, "skipped": {}}
     top = []
     t0 = time.perf_counter()
     for root in args.roots:
@@ -189,6 +211,9 @@ def main():
     print(f"peak working set MB: {peak_working_set_mb():.1f}")
     print(f"permission/OS errors: {stats['errors']}")
     print(f"reparse points not followed: {stats['reparse_skipped']}")
+    print("entries skipped per exclude rule (matched entry only, its contents are not counted):")
+    for rule, n in sorted(stats["skipped"].items(), key=lambda kv: -kv[1]):
+        print(f"  {n:>9}  {rule}")
     print("top 20 directories by entry count:")
     for count, path in sorted(top, reverse=True):
         print(f"  {count:>9}  {path}")

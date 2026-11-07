@@ -310,3 +310,70 @@ Verdict: PASS for a blank window, with the metric caveat above.
 2. P6 interactive half is still open. Case (a) with a permission prompt, case (c) plan approval, and all desktop-app cases need the user to run them. AskUserQuestion fired no hook event in the CLI, which bears on the AC-CS-9 coverage sentence. The sentence cannot be finalised until (b) and (c) are checked interactively.
 3. No scope change from P1, P2, P4, P5, P8 or P9 on this laptop.
 4. The work-laptop file, `docs/probes/2026-11-06-m0-probes-work.md`, does not exist yet. M0-4 stays open until the user runs P1 to P9 on the work laptop and pastes the output back. The planner still needs to append the Revision recording the measured section 12 values.
+5. 2026-11-06 (later): P7 trigger cleared on warm runs after the M0-5 excludes; the projected 0.3M warm figure is 6.7 to 11.8 s against the 15 s target (see "### P7 re-measure after M0-5 excludes (2026-11-06, later)"). Excludes-first decision stands. Compiled accelerator not needed on this laptop on the warm evidence. Cold run after a reboot is still outstanding and user-run.
+
+### P7 re-measure after M0-5 excludes (2026-11-06, later)
+
+Supersedes (in part): "### P7: crawl, warm run only", its Verdict line and its 0.3M warm projection. The original measurement is not changed and remains the baseline for this section. The P7 row in the Summary table above is also unchanged.
+
+- Date: 2026-11-06 (later), same personal laptop as the rest of this file.
+- Source: dev re-runs (two runs) and an independent qa run of the same command, relayed in the dispatch for M0-5. The figures below are summarised from those relayed results; no raw output file was recorded for these runs.
+- Plan: `docs/plans/2026-11-06-assistant-v1-plan.md` section 14.2 (action 2, re-measure) and task M0-5. PRD: section 12 (warm target 0.3M ≤ 15 s; 2M ≤ 2.5 min).
+- Command (warm, no reboot; same command and roots as the original run):
+
+```powershell
+python tools/probes/crawl_probe.py --roots "C:\Users\<user>" "C:\AI Projects" --excludes default
+```
+
+What changed between the original run and these runs: M0-5 added these AppData cache excludes to the probe's default list:
+
+- `AppData/Local|Roaming/*/{Code Cache,Cache,Cache_Data,GPUCache,Service Worker,Shared Dictionary,OfficeFileCache}/`
+- `AppData/Local/npm-cache/` and `AppData/Roaming/npm-cache/`
+- `AppData/Local/NuGet/{v3-cache,plugins-cache}/`
+
+Results (all warm):
+
+| Run | Entries | Dirs | Seconds | µs per entry | Peak working set MB |
+|---|---|---|---|---|---|
+| Original (earlier in this file) | 552,245 | 70,169 | 74.50 | 134.9 | 18.5 |
+| Dev run 1 | 393,459 | 38,216 | 15.47 | 39.3 | 18.7 |
+| Dev run 2 | 393,467 | 38,217 | 8.78 | 22.3 | 18.9 |
+| qa independent run | 393,477 | 38,217 | 9.75 | 24.8 | 18.8 |
+
+In all runs: permission/OS errors 1 and reparse points not followed 26. The original run also had 1 and 26.
+
+Entries removed by the new rules: 158,786 (28.8 % of 552,245, using dev run 1). Per-rule matched directory counts from dev run 1 (counts are matched directories; their contents were not walked):
+
+- Local `Cache` 40
+- Roaming `Cache` 37
+- Roaming `Code Cache` 28
+- Roaming `Shared Dictionary` 24
+- Roaming `GPUCache` 22
+- Local `GPUCache` 20
+- Local `Code Cache` 20
+- Local `Shared Dictionary` 19
+- Roaming `Service Worker` 8
+- Local `Service Worker` 4
+- `npm-cache` 1
+- NuGet `v3-cache` 1
+- `OfficeFileCache` 1
+
+New top 20 after the change is dominated by categories that plan 14.2 deliberately leaves unexcluded: Zoom `Emojis` (7,404), a torch include tree under `AppData\Roaming\Python\Python311\site-packages\torch\include\ATen\ops` (6,951), `VSApplicationInsights` (4,998), and OneDrive `odbspartan` asset folders (about 3,750 each).
+
+Timing caveat. The three post-change runs range from 8.78 s to 15.47 s on nearly identical entry sets (393,459 to 393,477 entries). Disk-cache state alone moves warm time by about 1.8x (15.47 / 8.78). The original 74.50 s was probably measured colder or under load; this was not established. Only the 28.8 % reduction in entries is attributable to the excludes with certainty.
+
+Against the warm target (0.3M ≤ 15 s), using linear scaling by µs per entry to 0.3M entries (a projection, not a 0.3M run):
+
+- Dev run 1: about 11.8 s
+- Dev run 2: about 6.7 s
+- qa run: about 7.4 s
+
+Unscaled, dev run 1 at 393,459 entries took 15.47 s, which is above 15 s. Dev run 2 and the qa run were below 15 s at that size.
+
+Verdict on the warm target: PASS on the projection, with the slowest run (projected 11.8 s) the closest to the target. The 2M warm target (2.5 min) was not re-measured. The cold run after a reboot is outstanding and user-run.
+
+qa verification of the probe change: fixture tree went from 27 to 17 entries, with the expected per-rule counts; a `proj\Cache` directory outside AppData was kept. Verdict: PASS.
+
+Note for M3a-1 (raised by qa). `fnmatch` `*` crosses `/`, so `AppData/Local/*/Cache/` matches at any depth under `AppData\Local`. This is what catches `Microsoft/Office/16.0/OfficeFileCache`. The product exclude matcher (`assistant/index/excludes.py`) must pin this behaviour deliberately, with a test.
+
+P9 label fix. The probe now reports "private bytes (PrivateUsage)" instead of private working set. A 0.2-minute re-run printed max private bytes 16.7 MB and average CPU 0.078 %. The P9 section above still uses the earlier label and is unchanged.

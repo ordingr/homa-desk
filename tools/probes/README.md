@@ -41,9 +41,9 @@ Raw output is recorded in `docs/probes/`.
 python <repo>\tools\probes\crawl_probe.py --roots "C:\Users\<you>" "C:\<other roots>" --excludes default
 ```
 
-- `--excludes default | none | <file>`: `default` is the list from the file-search brief Q6; a file holds one gitignore-style pattern per line (`#` comments; trailing `/` = directories only; a pattern containing `/` matches the tail of the root-relative path; otherwise it matches the entry name; a `C:\...` pattern matches that absolute directory).
+- `--excludes default | none | <file>`: `default` is the list from the file-search brief Q6; a file holds one gitignore-style pattern per line (`#` comments; trailing `/` = directories only; a pattern containing `/` matches the tail of the root-relative path; otherwise it matches the entry name; a `C:\...` pattern matches that absolute directory). The default list includes AppData application caches (`Code Cache`, `Cache`, `Cache_Data`, `GPUCache`, `Service Worker`, `Shared Dictionary`, `OfficeFileCache`, npm and NuGet caches) written as `AppData/Local/*/<name>/` and `AppData/Roaming/*/<name>/`, so a project folder named `Cache` elsewhere is not excluded.
 - `--cold-hint` only labels the run as cold in the output. Run once after a reboot (cold) and once again (warm).
-- Output: entries (files plus directories, excluded entries not counted), dirs, seconds, peak working set MB, OS/permission errors skipped, reparse points not followed, and the top 20 directories by direct-child count. Junctions and symlinks are counted as entries but never followed.
+- Output: entries (files plus directories, excluded entries not counted), dirs, seconds, peak working set MB, OS/permission errors skipped, reparse points not followed, entries skipped per exclude rule (the matched entry only), and the top 20 directories by direct-child count. Junctions and symlinks are counted as entries but never followed.
 
 ## P9 - idle tkinter cost
 
@@ -51,4 +51,4 @@ python <repo>\tools\probes\crawl_probe.py --roots "C:\Users\<you>" "C:\<other ro
 python <repo>\tools\probes\tk_idle_probe.py --minutes 10
 ```
 
-Opens a small topmost window with a label updated at 1 Hz, samples private bytes and process CPU time every 10 s, then prints average CPU % (of one core), max working set in MB, and exits. `--minutes 0.2` is a quick smoke run.
+Opens a small topmost window with a label updated at 1 Hz, samples private bytes and process CPU time every 10 s, then prints average CPU % (of one core), max private bytes in MB (`PrivateUsage`, committed private memory; not the private working set), and exits. `--minutes 0.2` is a quick smoke run.

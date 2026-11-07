@@ -1,4 +1,7 @@
-"""Idle cost of a blank topmost tkinter window with a 1 Hz label update (probe P9)."""
+"""Idle cost of a blank topmost tkinter window with a 1 Hz label update (probe P9).
+
+Memory column is private bytes (PROCESS_MEMORY_COUNTERS_EX.PrivateUsage, committed private
+memory), not the private working set."""
 import argparse
 import ctypes
 import time
@@ -31,7 +34,7 @@ _psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC_EX),
 _k32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
 
 
-def private_mb():
+def private_bytes_mb():
     pmc = PMC_EX()
     pmc.cb = ctypes.sizeof(pmc)
     if not _psapi.GetProcessMemoryInfo(_k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
@@ -76,14 +79,14 @@ def main():
         if dwall > 0:
             state["cpu_pct"].append(100.0 * (cpu - last["cpu"]) / dwall)
         last["wall"], last["cpu"] = now, cpu
-        state["mem"].append(private_mb())
-        print(f"t={now - start:6.1f}s  private={state['mem'][-1]:.1f} MB  cpu={state['cpu_pct'][-1]:.2f}%", flush=True)
+        state["mem"].append(private_bytes_mb())
+        print(f"t={now - start:6.1f}s  private_bytes={state['mem'][-1]:.1f} MB  cpu={state['cpu_pct'][-1]:.2f}%", flush=True)
         if now >= end:
             root.quit()
         else:
             root.after(int(min(SAMPLE_SECONDS, max(end - now, 0.05)) * 1000), sample)
 
-    state["mem"].append(private_mb())
+    state["mem"].append(private_bytes_mb())
     root.after(1000, tick)
     root.after(int(min(SAMPLE_SECONDS, args.minutes * 60) * 1000), sample)
     root.mainloop()
@@ -93,7 +96,7 @@ def main():
     avg = sum(state["cpu_pct"]) / len(state["cpu_pct"]) if state["cpu_pct"] else 0.0
     print(f"samples: {len(state['cpu_pct'])}")
     print(f"average CPU %: {avg:.3f} (of one core)")
-    print(f"max private working set MB: {max(state['mem']):.1f}")
+    print(f"max private bytes MB: {max(state['mem']):.1f}")
     print(f"total process CPU seconds: {total_cpu:.2f}")
 
 
