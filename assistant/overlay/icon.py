@@ -92,6 +92,7 @@ class Icon:
 
         self.win = tk.Toplevel(root)
         self.win.withdraw()
+        self.win.protocol("WM_DELETE_WINDOW", lambda: self.actions.quit())
         self.win.overrideredirect(True)
         self.win.configure(bg=gfx.CHROMA_KEY)
         self.win.attributes("-topmost", True)

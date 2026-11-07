@@ -107,6 +107,7 @@ class CardWindow:
 
         self.win = tk.Toplevel(ui.root)
         self.win.withdraw()
+        ui.adopt_close(self.win)
         self.win.overrideredirect(True)
         self.win.configure(bg=gfx.CHROMA_KEY)
         self.win.attributes("-topmost", True)
@@ -272,6 +273,12 @@ class CardWindow:
         self.alpha = self.talpha = 0.0
         self.apply()
 
+    def alive(self) -> bool:
+        try:
+            return bool(self.win.winfo_exists())
+        except tk.TclError:
+            return False
+
     def destroy(self) -> None:
         try:
             self.win.destroy()
@@ -290,6 +297,7 @@ class MoreStrip:
         self.h = gfx.px(STRIP_HEIGHT, self.scale)
         self.win = tk.Toplevel(ui.root)
         self.win.withdraw()
+        ui.adopt_close(self.win)
         self.win.overrideredirect(True)
         self.win.configure(bg=gfx.CHROMA_KEY)
         self.win.attributes("-topmost", True)
@@ -331,8 +339,10 @@ class MoreStrip:
 
 class CardsUI:
     def __init__(self, root: tk.Misc, icon: Any, store_callbacks: Optional[CardCallbacks] = None,
-                 settings: Any = None, clock: Callable[[], float] = time.time) -> None:
+                 settings: Any = None, clock: Callable[[], float] = time.time,
+                 on_close_request: Optional[Callable[[], None]] = None) -> None:
         self.root = root
+        self.on_close_request = on_close_request
         self.icon = icon
         self.cb = store_callbacks or CardCallbacks()
         self.settings = settings
@@ -347,9 +357,25 @@ class CardsUI:
         self._icon_sig: Optional[tuple] = None
         self._targets_sig: Optional[tuple] = None
         self._closed = False
+        self._ticking = False
         if settings is not None and hasattr(settings, "on_change"):
             settings.on_change(self._on_setting)
-        self.root.after(TICK_MS, self._tick)
+
+    def adopt_close(self, window: tk.Toplevel) -> None:
+        """A close request on any overlay window (taskkill without /F posts WM_CLOSE) means quit."""
+        if self.on_close_request is not None:
+            window.protocol("WM_DELETE_WINDOW", self.on_close_request)
+
+    def _ensure_tick(self) -> None:
+        if not self._ticking and not self._closed:
+            self._ticking = True
+            self.root.after(TICK_MS, self._tick)
+
+    def _prune_dead(self) -> None:
+        for state in self._states.values():
+            if not all(w.alive() for w in state.wins):
+                state.wins = [w for w in state.wins if w.alive()]
+        self._dying = [w for w in self._dying if w.alive()]
 
     def font(self, size: int, weight: str = "normal", underline: bool = False) -> tkfont.Font:
         key = (size, weight, underline)
@@ -421,6 +447,7 @@ class CardsUI:
             self._notify(state)
         self.relayout()
         self._kick()
+        self._ensure_tick()
 
     def update(self, card: Card) -> None:
         state = self._states.get(card.id)
@@ -465,7 +492,7 @@ class CardsUI:
         self.safe(lambda: self.cb.on_seen(card_id))
 
     def _blink_phase(self) -> bool:
-        return self._tick_n % 2 == 0
+        return (self._tick_n // 2) % 2 == 0
 
     def _notify(self, state: _State) -> None:
         state.last_sound = time.monotonic()
@@ -585,6 +612,7 @@ class CardsUI:
         if self._closed:
             return
         moving = False
+        self._prune_dead()
         for state in self._states.values():
             for w in state.wins:
                 moving |= w.step()
@@ -602,7 +630,11 @@ class CardsUI:
     def _tick(self) -> None:
         if self._closed:
             return
+        if not self._states:
+            self._ticking = False
+            return
         try:
+            self._prune_dead()
             self._tick_n += 1
             sig = tuple(m.handle for m in self.target_monitors())
             icon_sig = self._icon_rect()

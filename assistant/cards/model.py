@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -15,6 +17,13 @@ DEFAULT_STICKY = {"waiting": True, "meeting": True, "done": False, "reminder": F
 MAX_TITLE = 120
 MAX_DETAIL = 500
 MAX_ACTIONS = 3
+MAX_URL = 2048
+MAX_ICON = 256
+MAX_ACTION_ID = 64
+MAX_ACTION_LABEL = 40
+MAX_ACTION_SHORTCUT = 16
+MAX_AHEAD_SECONDS = 366 * 24 * 3600
+MAX_UNKNOWN_LOGGED = 100
 
 _INPUT_FIELDS = ("id", "kind", "priority", "sticky", "title", "detail", "url", "icon",
                  "actions", "timer_started_at", "expires_at", "renotify")
@@ -96,14 +105,21 @@ class Card:
             raise CardValidationError("", "A card must be a JSON object.", "invalid_body")
         for key in data:
             if key not in _KNOWN and key not in _logged_unknown:
+                if len(_logged_unknown) == MAX_UNKNOWN_LOGGED:
+                    _logged_unknown.add(None)
+                    log.warning("further unknown card fields are ignored without logging")
+                if len(_logged_unknown) > MAX_UNKNOWN_LOGGED:
+                    break
                 _logged_unknown.add(key)
-                log.warning("ignoring unknown card field %r", key)
+                log.warning("ignoring unknown card field %r", key[:100] if isinstance(key, str) else key)
         kw = validate_fields({k: data[k] for k in _INPUT_FIELDS if k in data}, require_title=True)
         card = cls(**kw)
         if trusted:
             card.source = _opt(data, "source", str)
             for name in ("created_at", "seen_at", "snoozed_until", "dismissed_at"):
                 setattr(card, name, _opt_number(data, name))
+            if card.snoozed_until is not None:
+                card.snoozed_until = min(card.snoozed_until, time.time() + MAX_AHEAD_SECONDS)
         return card
 
 
@@ -114,7 +130,7 @@ def _opt(data: dict, name: str, typ: type):
 
 def _opt_number(data: dict, name: str):
     v = data.get(name)
-    return float(v) if _is_number(v) else None
+    return float(v) if _is_number(v) and math.isfinite(v) else None
 
 
 def _is_number(v: Any) -> bool:
@@ -168,16 +184,20 @@ def validate_fields(data: dict, *, require_title: bool) -> dict:
             bad("detail", f"detail must be at most {MAX_DETAIL} characters.")
         out["detail"] = d
 
-    for name in ("url", "icon"):
+    for name, limit in (("url", MAX_URL), ("icon", MAX_ICON)):
         if name in data and data[name] is not None:
             if not isinstance(data[name], str):
                 bad(name, f"{name} must be a string.")
+            if len(data[name]) > limit:
+                bad(name, f"{name} must be at most {limit} characters.")
             out[name] = data[name]
 
     for name in ("timer_started_at", "expires_at"):
         if name in data and data[name] is not None:
             if not _is_number(data[name]):
                 bad(name, f"{name} must be a timestamp (seconds since the epoch).")
+            if name == "expires_at" and not data[name] <= time.time() + MAX_AHEAD_SECONDS:
+                bad(name, "expires_at is too far in the future.")
             out[name] = float(data[name])
 
     if "actions" in data and data["actions"] is not None:
@@ -203,6 +223,10 @@ def _validate_actions(actions: Any) -> list:
             raise CardValidationError("actions", f"actions[{i}].label must be a non-empty string.")
         if shortcut is not None and not isinstance(shortcut, str):
             raise CardValidationError("actions", f"actions[{i}].shortcut must be a string.")
+        for part, value, limit in (("id", aid, MAX_ACTION_ID), ("label", label, MAX_ACTION_LABEL),
+                                   ("shortcut", shortcut, MAX_ACTION_SHORTCUT)):
+            if value is not None and len(value) > limit:
+                raise CardValidationError("actions", f"actions[{i}].{part} must be at most {limit} characters.")
         if aid in seen:
             raise CardValidationError("actions", f"actions[{i}].id duplicates an earlier action.")
         seen.add(aid)

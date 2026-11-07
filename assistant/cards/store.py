@@ -18,6 +18,8 @@ log = logging.getLogger("assistant.cards.store")
 FADE_SECONDS = 20.0
 HISTORY_LIMIT = 100
 STATE_VERSION = 1
+MAX_SNOOZE_MINUTES = 7 * 24 * 60
+MAX_OPEN_CARDS = 200
 
 _CONTENT_FIELDS = ("kind", "priority", "sticky", "title", "detail", "url", "icon",
                    "actions", "timer_started_at", "expires_at")
@@ -80,6 +82,7 @@ class CardStore:
                 self._reshow(existing, existing.renotify)
                 self._emit("updated", existing)
                 return existing.copy()
+            self._make_room(now)
             new = card.copy()
             if not new.id:
                 new.id = uuid.uuid4().hex
@@ -139,8 +142,8 @@ class CardStore:
             return card.copy()
 
     def snooze(self, card_id: str, minutes: float) -> Card:
-        if isinstance(minutes, bool) or not isinstance(minutes, (int, float)) or minutes <= 0:
-            raise CardValidationError("minutes", "minutes must be a positive number.")
+        if isinstance(minutes, bool) or not isinstance(minutes, (int, float)) or not 1 <= minutes <= MAX_SNOOZE_MINUTES:
+            raise CardValidationError("minutes", f"minutes must be a number from 1 to {MAX_SNOOZE_MINUTES}.")
         with self._locked() as now:
             card = self._require(card_id)
             card.snoozed_until = now + minutes * 60.0
@@ -262,6 +265,18 @@ class CardStore:
             self._cards.pop(old.id, None)
             self._events.pop(old.id, None)
 
+    def _make_room(self, now: float) -> None:
+        """At MAX_OPEN_CARDS, dismiss the oldest non-sticky open card; if every open card is sticky, refuse."""
+        open_cards = [c for c in self._cards.values() if c.dismissed_at is None]
+        if len(open_cards) < MAX_OPEN_CARDS:
+            return
+        evictable = [c for c in open_cards if not c.effective_sticky]
+        if not evictable:
+            raise CardValidationError("", f"At most {MAX_OPEN_CARDS} cards can be open at once.", "too_many_cards")
+        oldest = min(evictable, key=lambda c: (c.created_at or 0.0, c.id))
+        log.warning("open-card limit reached; dismissing the oldest non-sticky card")
+        self._dismiss(oldest, now, "dismissed")
+
     def _emit(self, event: str, card: Optional[Card]) -> None:
         self._pending.append((event, card.copy() if card is not None else None))
 
@@ -333,8 +348,13 @@ class CardStore:
         }
         tmp = path.with_name(path.name + ".tmp")
         try:
+            text = json.dumps(data, indent=1, allow_nan=False)
+        except (ValueError, TypeError):
+            log.exception("state is not JSON-serialisable; %s was not written", path)
+            return
+        try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+            tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, path)
         except OSError:
             log.exception("could not write %s", path)

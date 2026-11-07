@@ -9,6 +9,8 @@ from . import uibus
 
 log = logging.getLogger("assistant.scheduler")
 
+MAX_WAIT_S = 3600.0
+
 
 class Handle:
     def __init__(self) -> None:
@@ -73,20 +75,21 @@ class Scheduler:
 
     def _run(self) -> None:
         while True:
-            with self._cond:
-                if self._stopped:
-                    return
-                if not self._heap:
-                    self._cond.wait()
-                    continue
-                delay = self._heap[0][0] - time.time()
-                if delay > 0:
-                    self._cond.wait(timeout=delay)
-                    continue
-                _, _, job, handle = heapq.heappop(self._heap)
-            if handle.cancelled:
-                continue
             try:
+                with self._cond:
+                    if self._stopped:
+                        return
+                    if not self._heap:
+                        self._cond.wait()
+                        continue
+                    delay = self._heap[0][0] - time.time()
+                    if delay > 0:
+                        self._cond.wait(timeout=min(delay, MAX_WAIT_S))
+                        continue
+                    _, _, job, handle = heapq.heappop(self._heap)
+                if handle.cancelled:
+                    continue
                 job()
             except Exception:
-                log.exception("scheduled job failed")
+                log.exception("scheduler loop error")
+                time.sleep(0.1)
