@@ -587,3 +587,140 @@ In parallel with these three, qa receives M1-7 (write tests and `tools/driver.py
 ## 13. Open questions
 
 None block M0. Items the plan resolves by default and flags for the tech-lead to confirm or overrule: A5 (agents do not touch the work laptop), A7 (`ui` owns `web/**` only), A8 (port 17171), A9 (`settings.json`), A10 (combined RAM target), A11 (`demo` in M1), A12 (launch nonce), A13 (DPAPI), A14 (test-mode debug route). Items decided by probes, not by anyone: P1-extended (compiled MCP deps), P2 (Edge app mode), P6 (hook coverage sentence), P7 (crawl targets), P8 (Outlook source).
+
+## 14. Revision 2026-11-06 (after M0 probes, personal laptop)
+
+- Date: 2026-11-06. Author: planner. Trigger: M0-4 (personal half) recorded in `docs/probes/2026-11-06-m0-probes-personal.md`; security verdict on M0-2 in `docs/security/2026-11-06-m0-2-token-auth-review.md` (PASS, one FIX-BEFORE-M1, eight NOTEs); one qa follow-up relayed by the tech-lead. Decisions below were taken by the tech-lead and are recorded here with the evidence lines they rest on.
+- Nothing above this section is edited. Where this section supersedes a sentence above, 14.9 says which one, by section number. The work-laptop file (`docs/probes/2026-11-06-m0-probes-work.md`) does not exist yet; M0-4 stays open for that half and every work-laptop gate in sections 7.3–7.6 stands.
+
+### 14.1 Measured values and verdicts (personal laptop, Windows 11, Python 3.13.1)
+
+| Probe | Verdict | Evidence (from the probe record) | Consequence |
+|---|---|---|---|
+| P1 | PASS | both import one-liners printed `ok`; the `--only-binary :all:` install step was not run (packages already present) | M1+ unblocked on this laptop. Binary-only install behaviour is still unexercised here; it is exercised by `install.ps1` (M1-5) and matters on the work laptop. |
+| P2 | PASS | Edge app window, no address bar, title `127.0.0.1_/`, server log `"GET / HTTP/1.1" 200`; probe used port 17198 and a one-line `index.html` instead of the plan's 17171 / `$env:TEMP` | M3b unblocked here. Work-laptop P2 still gates M3b per 7.4. |
+| P3 | N/A | work-laptop probe | M5-3 gate unchanged. |
+| P4 | PASS | `git version 2.45.2.windows.1` | M1-5 install path and M4-2 `update` take the git route here. |
+| P5 | PASS | `2.1.317 (Claude Code)` ≥ 2.1.233 | M1-4 and M4-1 enabled here. |
+| P6 | PARTIAL | CLI `-p` only; 13 POSTs over three sessions; details in 14.3 | M1-4 contract facts fixed; interactive and desktop-app cases stay unknown. |
+| P7 | PARTIAL | warm only: 552,245 entries, 70,169 dirs, 74.50 s, 18.5 MB peak working set, 1 permission error, 26 reparse points not followed | 2x trigger fired on the 0.3M warm projection; decision in 14.2. |
+| P8 | PASS | `reg query` CLSID `{0006F03A-0000-0000-C000-000000000046}`; COM `Outlook.Application` version `16.0.0.20527`; new Outlook `1.2026.713.100` is also installed | M2-1 Outlook COM is exercised on this laptop (7.2 M2-1 Done). |
+| P9 | PASS | blank topmost tkinter window, 10 min, 60 samples: average CPU 0.078 % of one core, max 16.8 MB private bytes | Overlay target stands; metric-label note in 14.4. |
+
+### 14.2 P7 decision: excludes first, re-measure, accelerator stays optional
+
+Numbers (warm, no reboot, probe default excludes, roots `C:\Users\<user>` and `C:\AI Projects`): 74.50 s / 552,245 entries = 134.9 µs per entry. Linear projections: 0.3M warm ≈ 40.5 s against a 15 s target (≈ 2.7x over — the section 6 P7 trigger "miss by > 2x" fired); 2M warm ≈ 270 s against 150 s (≈ 1.8x); 2M cold ≈ 4.5 min against 5 min (within target, but a projection — the cold run was not done and needs a reboot). The PRD's P7 fallback (PRD section 5) is keyed to "the 2M crawl"; the plan's row (section 6) says "miss by > 2x" without naming a size. The 0.3M warm projection is what fired. The tech-lead's decision resolves the ambiguity as follows.
+
+What the probe shows about the miss: 19 of the top-20 directories by entry count are under `AppData` (the twentieth is `.vscode\extensions`); the top 20 alone hold 125,386 entries, 22.7 % of the total. The largest: a Claude desktop `Code Cache\js` (30,084), two `OfficeFileCache` trees (15,355 + 15,354), Zoom `Emojis` (7,404), `VSApplicationInsights` (4,998), Outlook `EBWebView\...\Service Worker\CacheStorage` (3,876 + 3,170), OneDrive `ListSync\settings\cdn` (4 × ≈ 3,750), Notion `Service Worker\CacheStorage` and `Shared Dictionary\cache` (3,760 + 3,754 + 2,008), Cursor `Code Cache\js` (2,946), Claude `Cache\Cache_Data` (2,380). PRD AC-FI-1 already names AppData caches among the default excludes; `tools/probes/crawl_probe.py` `DEFAULT_EXCLUDES` (lines 10–42) only excludes Temp, WindowsApps, Packages, Edge, Chrome and Docker under AppData, so the run measured a narrower exclude set than the product will ship.
+
+Action, in order:
+
+1. **Product excludes (M3a-1, `assistant/index/excludes.py`, unchanged owner).** The default list gains application-cache rules scoped under `AppData/Local/` and `AppData/Roaming/` so that a project folder named `Cache` inside a root is never excluded: browser/Electron `Code Cache/`, `Cache/`, `Cache_Data/`, `GPUCache/`, `Service Worker/`, `Shared Dictionary/`; Office `Microsoft/Office/*/OfficeFileCache/`; package-manager caches (pip, npm, Yarn, uv, NuGet under AppData). These are the categories the tech-lead chose; the exact glob text is M3a-1's to write and `tests/test_excludes.py` (M3a-8) to pin, each rule with its AC-FI-7 counter so the user can see what was dropped. Deliberately not excluded by default (user-visible content, not cache): `AppData\Roaming\Python\...\site-packages` (6,951 under `torch\include`), Zoom `Emojis`, `Android\Sdk`, `.vscode\extensions`; the user can add them in Settings (AC-FI-1 user additions). The probe script's list is a probe list, not the product list — the product list is defined in `excludes.py`, not copied from `crawl_probe.py`.
+2. **Re-measure before M3a is dispatched (new task M0-5, below).** Same probe, same roots, same `--excludes default`, after the probe's list has been extended with the same categories; warm first, then cold after a reboot (user-run, section 6 order). doc-keeper appends a "P7 re-measure" section to the personal probe file; planner appends Revision 2 with the verdict against section 12 of the PRD.
+3. **`scandir-rs` stays an option, not a task.** Section 10.1's row is unchanged: compiled accelerator, personal laptop only, behind a setting, off by default. It is enabled (and the setting built, in M3a-2) only if the re-measure still misses the warm targets by more than 2x. The work laptop never gets it (PRD DEC 14).
+4. **Targets.** PRD section 12 warm targets (0.3M ≤ 15 s, 2M ≤ 2.5 min) are recorded here as "to be re-measured after excludes"; no new numbers are invented. The cold targets are untouched. The 300 MB index-RAM target was not measured by P7 (18.5 MB is the crawl alone) and is still owned by M3a-1's 2M synthetic test.
+
+| Id | Role | Goal | Files owned | AC | Done (qa observes) | Hand-off | Parallel |
+|---|---|---|---|---|---|---|---|
+| M0-5 | dev | Extend the crawl probe's exclude list with the AppData application-cache categories in 14.2 item 1, fix the P9 probe's metric label (14.4), then re-run the warm P7 command from section 6 on the personal laptop. | `tools/probes/crawl_probe.py`, `tools/probes/tk_idle_probe.py`, `tools/probes/README.md` | PRD §5 P7, §12 crawl targets | The re-run prints the same fields as the first run; its top-20 list no longer contains `Code Cache`, `Cache_Data`, `GPUCache`, `Service Worker`, `Shared Dictionary` or `OfficeFileCache` directories; entries, seconds and µs/entry are pasted next to the 2026-11-06 figures (552,245 / 74.50 s / 134.9 µs); `tk_idle_probe.py` prints the column it actually measures (14.4) and `--help` says so. The cold run is user-run after a reboot and pasted. | qa, then doc-keeper (appends to `docs/probes/2026-11-06-m0-probes-personal.md`) | any time before M3a is dispatched; shares no file with M1 |
+
+### 14.3 P6: what the CLI confirmed, what stays unknown
+
+Confirmed with Claude Code 2.1.317, `claude -p`, `--settings <scratch file>` (the user's `~/.claude/settings.json` was not modified):
+
+- Hook entries with `type: http`, `url`, `onFailure: continue` are accepted. The eight-event block from `hook_probe_settings.py` is the shape M1-5's installer writes (AC-CS-2).
+- Events that fired: `UserPromptSubmit`, `PostToolUse`, `PermissionRequest`, `Stop`, `SessionEnd`. `PermissionRequest` carries `tool_name`, `tool_input`, `permission_suggestions`; `Stop` carries `last_assistant_message`, `stop_hook_active`, `background_tasks`, `session_crons`. Every payload carries `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `permission_mode`, `effort`, `hook_event_name`.
+- Did not fire in `-p` mode: `SessionStart`, `Notification`. `StopFailure` was not logged either, but no failure occurred in the three sessions, so that is not evidence about `StopFailure`.
+- No payload carries a project-name or `session_title` field. AC-CS-4's title is therefore the basename of `cwd` on the CLI; the `session_title` branch stays in the code only as a fallback for a client that sends it.
+- A pre-permitted Bash call raised no `PermissionRequest` (case a, `permission_mode: auto`); the same tools under `--permission-mode default` raised one `PermissionRequest` each and were then denied because `-p` cannot answer (case a2). `AskUserQuestion` was not available in the `-p` session (ToolSearch found nothing), so case (b) is uninformative, not negative.
+
+Still unobserved: interactive CLI case (a) with an approval, (b) `AskUserQuestion`, (c) plan approval; every desktop-app case. Consequences:
+
+- **M1-4 state machine.** `PermissionRequest` → `waiting` card for that `session_id`; a later event from the same session (`PostToolUse`, `Stop`, `SessionEnd`) clears or converts it as the PRD says. Any hook event name the machine does not map, and any future signal for `AskUserQuestion` or plan approval, is treated as an **"unknown wait"**: one `waiting` card per session whose detail names the event, cleared by the next event from that session, never a second card and never a decision in the response. This is the AC-CS-9 position: coverage is stated per observed event, and the coverage sentence shown in Settings (M2-3) names only what P6 has observed on that laptop.
+- **M1-7 fixtures.** `tests/fixtures/hook_payloads/*.json` are built from the 13 recorded POSTs (paths outside the fixture redacted, username replaced). Interactive and desktop-app payloads are added when the user's run arrives; the state-machine test must pass with the current set.
+- **Interactive P6 is open, user-run, and not a gate for M1-0, M1-1, M1-2, M1-3a or M1-7.** It is wanted before M1-4 passes qa; if it has not arrived by then, M1-4 passes on the recorded set and the gap is written into the AC-CS-9 sentence.
+- PR4 (section 11) has partially materialised: `AskUserQuestion` is unobserved rather than observed-silent. Mitigation unchanged.
+
+### 14.4 P9: the overlay target stands
+
+Blank topmost window, 1 Hz label update, 10 minutes: average CPU 0.078 % of one core (60 samples, total process CPU 0.80 s), maximum 16.8 MB. PRD section 12's overlay target (≤ 80 MB, proposal) and A10's combined 380 MB target stand; M1-3a/M1-3b/M1-6 keep their Done cells.
+
+NOTE for dev, not a blocker: `tk_idle_probe.py` labels its column `private` and its summary `max private working set MB`, but it reads private bytes (`PrivateUsage`), not the private working set the section 6 P9 row names. The 16.8 MB is private bytes. M0-5 fixes the label (and may print both figures); M1-6's Done ("RAM recorded with the P9 method") records which metric it quotes. The PRD's idle-CPU target covers daemon plus overlay; this probe measured the overlay alone, and a one-card ticking overlay was not measured — M1-6 measures both.
+
+### 14.5 Work-laptop results are pending; every gate keeps
+
+P3 and all nine work-laptop probes are still pending the user's paste. Gates unchanged: P1 (everything in M1+ on the work laptop), P2 (7.4 M3b previews there), P3 (7.6 M5-3 URL installer there), P5 (M1-4 coverage and M4-1 there), P8 (M2-1 Outlook source there). Nothing in this Revision claims a work-laptop result.
+
+### 14.6 Security follow-through: new task M1-0 (serial, first in M1)
+
+The security verdict on M0-2 was PASS with F1 "fix before M1" and NOTEs N1–N8. The tech-lead chose to land F1 and the cheap NOTEs in one hardening task before any route consumer exists. M1-0 is added to section 7.1's table:
+
+| Id | Role | Goal | Files owned | AC | Done (qa observes) | Hand-off | Parallel |
+|---|---|---|---|---|---|---|---|
+| M1-0 | dev | Harden the M0-2 auth and token path per the 2026-11-06 security review (F1, N1–N5) and add a server-wide request-body cap, before any card or hook route exists. | `assistant/server/auth.py`, `assistant/security/token.py`, `assistant/paths.py`, `assistant/server/app.py`, `pyproject.toml` (one change: `pythonpath = ["."]` under `[tool.pytest.ini_options]`); may add `assistant/security/acl.py` if the ACL helper is cleaner shared than imported function-locally | SEC-1, SEC-2 (part), AC-MC-9 (ACL), §8 error shape (413) | `pytest tests/test_health_auth.py` from the repo root with no `PYTHONPATH` set: all 14 existing tests pass and `from tests.fixtures.tree import ...` resolves (the qa follow-up); a request for `/v1/health%0aINJECTED%20LINE` without a token adds exactly one line to `logs/app.log`, path shown repr'd and capped at 200 characters (F1); `whoami`/`icacls` are invoked by absolute `%SystemRoot%\System32\` path or replaced by pywin32 `win32security` calls (N1), and the SID is accepted only if `re.fullmatch(r"S-1-[\d-]+", sid)` (N4); a simulated ACL failure (qa patches the subprocess or pywin32 call to raise) leaves no token file, logs one ERROR line "could not secure the token file; refusing to start", and exits 1 with no traceback (N3); `icacls <ASSISTANT_HOME>` after start shows exactly one ACE `<user>:(OI)(CI)(F)` with no `(I)` flag, and `settings.json` and `logs\app.log` show only inherited entries from that single ACE (N2); a `POST` to any path with `Content-Length` above the cap, or a chunked body that exceeds it, returns `413 {"error": "payload too large"}` before any route code runs, while the existing 401/403 matrix is unchanged and the Host → Origin → bearer → body-cap order is kept (N5). | qa, then security (appends a dated section to `docs/security/2026-11-06-m0-2-token-auth-review.md`) | serial, first in M1; blocks M1-4 and M1-5; does not block M1-1, M1-2, M1-3a, M1-7 |
+
+Contract fixed for M1-4 (A16, planner default): `assistant/server/app.py` exposes `MAX_BODY_BYTES = 1_048_576` and the cap is a middleware that never reads the body itself. M1-4 may set lower per-route caps (card routes need far less than 1 MiB: `detail` is ≤ 500 characters) and may raise the hooks route's cap only with evidence from recorded payload sizes (`tool_input` of a large `Write` is the plausible outlier). Implementation notes dev must respect: `paths.py` cannot import `security.token` at module level (token imports paths) — use a function-local import or the optional `acl.py`; the home-folder ACL is applied idempotently on every start (one process call; `ASSISTANT_HOME` under `%TEMP%` in tests must still work); N3's exit path must not need `assistant/app.py`, which is M1-6's file.
+
+Recorded, no task: **N6** (token never in a URL; A12 nonce exchange in M3b-3) unchanged. **N8** (hash-pinned `requirements.txt`) deferred; revisit when the dependency table is written for the README (M4-6) or when a pin changes. **N7**: `--doctor` is read-only in the shipped code (`doctor.report()` creates nothing; the test `test_corrupt_settings_falls_back_to_defaults_and_is_left_alone` depends on it) — the plan's section 10.2 step 3 ("creates `~/.assistant/` and the token on first run") is wrong against the code and is superseded: `install.ps1` runs `python -m assistant --init` (creates the home layout and the token via `paths.ensure_layout()` + `token.ensure()`, prints the home path and "token: present", never the token, exits 0, idempotent) and then `python -m assistant --doctor`. `--init` is added to M1-5's scope (`assistant/__main__.py` is already in its file set; `install.ps1` too). Also a plan-vs-code note: `token.regenerate()` already exists from M0-2, so M2-2's "adds `regenerate()`" reduces to exposing it (MCP/Settings) — no new function.
+
+### 14.7 Ctrl+C shutdown of `python -m assistant`: PASS
+
+Tested by the tech-lead on 2026-11-06 in a real PowerShell console against the M0-2 skeleton with a scratch `ASSISTANT_HOME` (the `KeyboardInterrupt` path in `App.run()` wraps `mainloop()`, and `shutdown()` runs in `finally`). Result: **PASS**. Observed log lines, in order: `INFO assistant.app: interrupted`, `INFO assistant.app: shutting down`, `INFO uvicorn.error: Shutting down`, `INFO uvicorn.error: Finished server process [<pid>]`; the shell returned to its prompt and no `-m assistant` process remained. No traceback. No task is needed; M1-6 keeps the shutdown contract of section 4a as written.
+
+### 14.8 M1 file-set check and the first dispatch set (supersedes section 12's ordering)
+
+Overlap check against section 7.1: M1-0 owns `assistant/server/auth.py`, `assistant/security/token.py`, `assistant/paths.py`, `assistant/server/app.py`, `pyproject.toml` (and optionally a new `assistant/security/acl.py`). M1-1 owns `assistant/cards/*`; M1-2 owns `assistant/scheduler.py` and `assistant/reminders/*`; M1-3a owns `assistant/overlay/*`; M1-7 owns `tests/*`, `tools/driver.py` and the run-assistant skill. **No overlap.** `pyproject.toml` has no M1 owner besides M1-0. Rule 1 therefore does not force serialisation; the tech-lead's choice to run M1-0 first is about getting the security re-review done before any consumer of the auth path exists, and about M1-7's `pytest` runs needing the `pythonpath` fix. Practical consequence: M1-1, M1-2, M1-3a and M1-7 may be dispatched as soon as M1-0 is dispatched, but their qa runs should happen after M1-0 has merged so plain `pytest` works.
+
+Gap found while checking: `assistant/server/app.py` has no M1 owner in section 7.1, yet M1-4's `routes_cards.py`, `routes_reminders.py` and `routes_hooks.py` must be registered in `create_app()`. Resolution: `assistant/server/app.py` is added to **M1-4's** file set (route registration, per-route body caps under A16), after M1-0 has merged. M1-6 keeps `assistant/app.py` and `assistant/uibus.py` only and does not touch `assistant/server/app.py`. M1-8 (security) adds the 413 behaviour and the home-folder ACL to its checklist.
+
+First dispatch set, restated:
+
+0. **M1-0** (dev) — first, serial. Text below.
+1. **M1-1**, **M1-2**, **M1-3a** (dev, three agents) — in parallel, exactly as written in section 12 Dispatches 1–3, with one addition to each prompt: "`assistant/server/app.py`, `auth.py`, `token.py`, `paths.py` and `pyproject.toml` belong to M1-0 this milestone; do not touch them."
+2. **M1-7** (qa) — alongside, as section 12 says; its hook-payload fixtures come from the P6 JSONL (14.3).
+3. **M1-4** and **M1-5** — after M1-0 has merged (M1-4 also after M1-1 for the integration test, as 7.1 says); M1-5's prompt includes `--init` (14.6).
+
+### Dispatch 0 — M1-0 (dev)
+
+```
+Goal: close the 2026-11-06 security review's FIX-BEFORE-M1 item and the cheap NOTEs on the M0-2
+auth/token path, and add a server-wide request-body cap, so that M1-4's routes land on a hardened base.
+Scope: assistant/server/auth.py, assistant/security/token.py, assistant/paths.py, assistant/server/app.py,
+pyproject.toml (one change only: pythonpath = ["."] under [tool.pytest.ini_options]). You may add
+assistant/security/acl.py for a shared ACL helper. Nothing else — assistant/app.py is M1-6's.
+Read first: docs/security/2026-11-06-m0-2-token-auth-review.md (F1, N1–N5), then the four files.
+Changes: (F1) _reject logs the path with %r truncated to 200 chars; (N1) whoami/icacls by absolute
+%SystemRoot%\System32\ path, or pywin32 win32security instead of both (preferred: survives AppLocker and
+localised whoami); (N4) SID must re.fullmatch(r"S-1-[\d-]+"); (N3) an ACL failure logs one ERROR line
+"could not secure the token file; refusing to start", leaves no token file, exits 1, no traceback;
+(N2) ensure_layout() applies /inheritance:r /grant:r *<SID>:(OI)(CI)(F) to ASSISTANT_HOME idempotently
+(function-local import or acl.py — paths.py must not import token at module level); (N5) MAX_BODY_BYTES =
+1_048_576 in assistant/server/app.py and a middleware returning 413 {"error": "payload too large"} on
+Content-Length or streamed bytes above it, after Host → Origin → bearer, without reading the body.
+Done criteria: from the repo root with no PYTHONPATH, `pytest tests/test_health_auth.py` → 14 passed;
+GET /v1/health%0aINJECTED%20LINE with no token → exactly one new app.log line, path repr'd; icacls on
+ASSISTANT_HOME → one ACE <user>:(OI)(CI)(F), no (I); settings.json and logs\app.log show only inherited
+entries from it; a 2 MB POST with a valid token → 413 before routing; the 401/403 matrix from M0-2's
+Done cell unchanged. Paste every command and its output.
+Hand-off: qa (writes the F1, N3-simulated-failure, ACL and 413 tests), then security (appends to the
+2026-11-06 review file).
+Plan: C:\AI Projects\Assistant\docs\plans\2026-11-06-assistant-v1-plan.md (§14.6, §14.8; §4a shutdown rules).
+```
+
+### 14.9 What this Revision supersedes (by section)
+
+- **§6, P6 pass column** ("PermissionRequest for (a) in both clients"): not met and not meetable by agents; recorded as PARTIAL with the CLI facts in 14.3. The interactive/desktop half is user-run and open.
+- **§6, P7 row, "Miss by > 2x → enable `scandir-rs` on the personal laptop"**: superseded by 14.2 — excludes first (M3a-1 product list, M0-5 probe re-measure), accelerator only if the re-measure still misses by > 2x.
+- **§7.0, M0-4 Done**: the personal half is recorded; the Revision this cell asks for is this section. The work half stays open.
+- **§7.1 table**: M1-0 added (14.6); M1-4's file set gains `assistant/server/app.py` and its Done gains the 413 check (14.8); M1-5's scope gains `--init` (14.6); M1-8's checklist gains the 413 and home-ACL checks.
+- **§7.2, M2-2 "adds `regenerate()`"**: the function already exists (M0-2); M2-2 exposes it.
+- **§7.3 gate** ("the Revision that applied the fallbacks must exist before M3a-2 is dispatched"): this is that Revision for the excludes fallback; the verdict on the targets waits for the M0-5 re-measure and Revision 2.
+- **§10.2 step 3** (`--doctor` "creates `~/.assistant/` and the token"): wrong against the code; `--init` precedes `--doctor` (14.6).
+- **§11, PR4**: partially materialised (AskUserQuestion unobserved); mitigation unchanged.
+- **§12 opening paragraph and dispatch order**: superseded by 14.8 (M1-0 first; Dispatches 1–3 and M1-7 unchanged in content, each with the do-not-touch line).
+- **§13**: P6 and P7 remain "decided by probes"; P7's decision is now "after the re-measure".
+- **PRD §12 warm crawl targets**: read as "to be re-measured after excludes" (14.2 item 4). The PRD is not edited by this role; if product or doc-keeper append a note there, it should cite this section.
+
+New planner default: **A16** — `MAX_BODY_BYTES = 1_048_576` server-wide, per-route caps may only lower it, the hooks route may raise it with recorded-payload evidence (14.6).
+
+Open items created by this Revision: M0-5 (dispatch any time before M3a); interactive P6 (user-run); work-laptop P1–P9 (user-run); cold P7 (user-run after reboot); Revision 2 after the P7 re-measure.
