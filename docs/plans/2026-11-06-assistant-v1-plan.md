@@ -763,3 +763,68 @@ Peak working set 18.7–18.9 MB in all three; 1 permission error and 26 reparse 
 - **§13**: P7 is now decided (warm); only the cold run remains a probe-decided item.
 
 Open items after this Revision: cold P7 (user-run after reboot); 2M warm number (M3a-2 Done cell); interactive P6 and work-laptop P1–P9 (unchanged from 14.9).
+
+## 16. Revision 3 2026-11-06 (M1 outcome)
+
+- Date: 2026-11-06 (evening). Author: planner. Trigger: M1 executed through M1-10; `CHANGELOG.md` M1 entry and `docs/api.md` ("Differences from PRD section 8") written by doc-keeper; `docs/security/2026-11-06-m1-review.md` Review 3 (BLOCK on B1) and its re-check (BLOCK LIFTED, R4-1..R4-5 as NOTEs). Nothing above is edited; 16.5 names what this section supersedes. Task letters below are the tech-lead's in-session labels; the commit subjects are quoted where they differ.
+
+### 16.1 M1 as executed (commits on `main`, no remote; verdicts as recorded in the review file and commit messages)
+
+| Task | Commit | Verdict | Notes |
+|---|---|---|---|
+| M1-0 | `9f7334c` | qa PASS (118); security Review 2 PASS, R2-1..R2-12 | F1, N1–N5 of Review 1 closed. |
+| M1-0b (unplanned) | in `5053bb7` / `dffeaad` | closed in Review 3 | Review 2 follow-ups R2-1/R2-2/R2-3 (plus R2-4/5/7/8), landed with M1-4/M1-5 and M1-6 rather than as a separate commit. |
+| M1-1, M1-2 | `1d3efe4` | qa PASS (104 tests) | Interfaces of 7.1 kept. |
+| M1-3a, M1-3b | `02e328e` | qa PASS via `/v1/_debug/ui` and synthesized events | One commit for both; on-screen appearance and real-mouse checks pending (desktop locked). |
+| M1-7 | `12f01f3`, then `e07693c` | 120 passed / 65 skipped, then 257 passed + 6 e2e needing an unlocked desktop | `e12e797` (.gitattributes) is a chore between them. |
+| M1-4, M1-5 | `5053bb7` | qa PASS (installer 10/10, api+hooks 64/64); security Review 3 **BLOCK** (B1 proxy leak in `send.py`), FIX-BEFORE-M2 F1–F4 | `--init` shipped (14.6). |
+| M1-6, M1-6b, M1-6c (6b/6c unplanned) | `dffeaad` | qa PASS | Wiring; 6b = idle-CPU pass (1.3 % → 0.19 %); 6c = close handling (WM_CLOSE = Quit) and monitor-aware cards. |
+| "M1-9" security fixes (unplanned; commit subject `m1-9`) | `dffeaad` | re-check: **BLOCK LIFTED**; B1, F1–F4, N1, N2, N4 closed by observation | Label collides with the plan's M1-9 (doc-keeper); this row is the security follow-up, the next row is the doc task. |
+| M1-8 | `docs/security/2026-11-06-m1-review.md` | Review 3 + re-check | File name differs from 7.1's `2026-11-xx`. |
+| M1-9 (doc-keeper) | uncommitted: `README.md`, `CHANGELOG.md`, `docs/api.md` | awaiting git-keeper | `CHANGELOG.md` line "Merged by git-keeper (pending)" refers to these and to M1-10. |
+| M1-10 (unplanned) | uncommitted: `assistant/{app,doctor,send,uibus}.py`, `assistant/server/app.py`, `tests/test_m1_hardening.py` (+203 lines), `tests/test_health_auth.py` | **pending qa**, then git-keeper | Fixes R4-1 (no-pid-file rule in `send`), R4-2 (stale pid file removed when the pid is not listening on the recorded port; message names the file), R4-3 (asyncio reset filter), R4-4 (`InvalidStateError` guard), R4-5 (`--doctor` names the port owner; errno-specific bind log line). |
+
+Measured (dev/qa reports relayed by the tech-lead; in-repo trail is `dffeaad` and the review file): hook event → card ≤ 0.4 s (PRD ≤ 2 s); file drop → card ≤ 1.3 s (≤ 2 s); idle CPU 0.19 % icon-only and ≈ 1.5 % with one blinking card on three monitors (PRD "≈ 0 %" — the blinking card is not an idle state; recorded, not a fail; M4-3 multi-monitor work should re-measure); ≈ 36 MB private bytes (PRD proposal ≤ 80 MB). Reminder fired at +60 s; kill + relaunch restored open cards.
+
+### 16.2 Still open from M1, with the owner
+
+- **qa, first unlocked desktop:** on-screen visual pass of M1-3a/3b (colours, stacking, blink, strip) and the six `tests/e2e/test_overlay.py` tests (`SendInput` needs an interactive desktop). Not a gate for M2 dispatch; a gate for calling M1 "observed" in the sense of section 8.1.
+- **user:** `install.ps1` / `uninstall.ps1` on a clean Windows profile (AC-IN-8); interactive P6 (approval, `AskUserQuestion`, plan approval — payloads into `tests/fixtures/hook_payloads/`, coverage sentence for M2-3); work-laptop P1–P9 (14.5) plus the probe "does Claude Code honour `HTTP_PROXY` for `http` hooks" with the local-sink method of Review 3 B1, result into `docs/probes/2026-11-06-m0-probes-work.md`; cold P7 after a reboot (15.2).
+- **Housekeeping:** the M1 fix commit is labelled `m1-9`; nothing to change in git (history-destroying commands are blocked), but future commits use the task id the plan uses.
+
+### 16.3 Carried code items and where each lands
+
+New task, dispatched first in M2 after M1-10 has merged (it shares `send.py` and `server/app.py` with M1-10), in parallel with group C below; M2-2's and M2-5's integration runs wait for it:
+
+| Id | Role | Goal | Files owned | AC | Done (qa observes) | Hand-off | Parallel |
+|---|---|---|---|---|---|---|---|
+| M2-0 | dev | PRD-alignment and M1 leftovers, no new features. | `assistant/server/auth.py`, `assistant/server/app.py`, `assistant/server/routes_cards.py`, `assistant/cards/model.py`, `assistant/cards/store.py`, `assistant/cards/claude_sessions.py`, `assistant/paths.py`, `assistant/send.py`, `pyproject.toml`, `requirements.txt`, `uninstall.ps1` | §8 error shape, AC-CS-1, AC-IN-3, AC-ST-1, SEC-2 | (a) 401/403/413 bodies and router 404/405 are `{"error": {"code", "message"}}` (codes `unauthorized`, `forbidden_host`, `forbidden_origin`, `payload_too_large`, `not_found`, `method_not_allowed`), `WWW-Authenticate` and `Connection: close` kept; (b) `create_app(..., mcp_app=None)` mounts it at `/mcp` when given, behind the same middleware; (c) `Cc`/`Cf` characters stripped from `title`/`detail` in `validate_fields` and from `claude_sessions._text()` (N3), and `_tool_summary()` masks `Bearer <x>`/`-H Authorization` fragments (N11); (d) fade and `expires_at` record event type `expired`, user/source dismiss stays `dismissed`; (e) `send --id` maps to `id`; (f) `_KNOWN_FILES` accepts `state_ui.json.tmp`; (g) `pyproject.toml` declares `starlette==1.10.0` and `uvicorn==0.54.0` next to `mcp`/`pywin32` (they are imported directly); (h) `uninstall.ps1` prompt reads "Delete <home> (settings, token, card state, reminders, hooks-backup, logs; index and plugins once they exist)? [y/N]", prints the `pip uninstall` line without running it (10.3 step 5), and `Stop-Process` runs only when `Get-Process -Id` reports a `python`/`pythonw` image (N7). qa re-runs `tests/test_health_auth.py`, `tests/test_security_hardening.py`, `tests/test_m1_hardening.py`, `tests/test_api_cards.py` after updating the string-shape asserts (qa's files). | qa, then security (appends to the M1 review file) | C, after M1-10 merges |
+
+Decided, no code (planner defaults; product or doc-keeper may append a PRD note citing this section — the PRD is not edited by this role): **A17** hook receiver keeps `400` for non-JSON and non-object bodies — a body that is not a hook payload gets a client error that carries no decision key, `onFailure: continue` makes it harmless, and "200 {} always" is read as "for every JSON-object payload". **A18** `source` stays `"http"` (no client identity exists on a bearer-token call; `http:<client>` would be invented) and `"reminders"` stays a source — M2-3's per-source mute list becomes `hooks, http, mcp, file, reminders`. **A19** PATCH clearing `snoozed_until` is the 7.1 M1-1 semantics ("an update during snooze re-shows"), kept. **A20** `state_ui.json` (icon position) lives under `ASSISTANT_HOME` and is covered by AC-ST-1's intent though not its list; `503 {"error": "ui thread busy"}` is test-mode only and stays. N9 (`pillow` in the dev venv only): no task; add it when a module imports it. N10: threat-model note, doc-keeper at M2-7.
+
+Assigned to existing M2 rows: `/v1/health` gains `uptime_s`, `index: null`, `plugins: []` → **M2-2** (owns `routes_health.py`). N6 token regeneration re-runs `hooks_installer.install()` and the Settings MCP page is the only trigger (an MCP tool that regenerates would cut off its own caller) → **M2-3**, wired by **M2-4**. R2-11 per-file ACL on `settings.json` once ICS URLs land → **M2-3** (`settings.save()` via `security/acl.py`), checked by **M2-6**. N5 (token's second home in `~/.claude/settings.json` and `hooks-backup/`) → README by **M2-7** (doc-keeper; the uninstall prompt half is M2-0 (h)). B1 tail (`HTTP_PROXY` and `http` hooks) → user probe (16.2), verdict in **M2-6**. R2-6 (observe only), R2-9 (user, USB stick), R2-10 (**M3b**), Review 1 N8 hash pins (**M4-6**, unchanged from 14.6): not scheduled in M2.
+
+### 16.4 M2 readiness: first dispatch set and file-set changes caused by M1 as built
+
+Dispatch order: **M1-10 → qa → git-keeper** first (its files overlap M2-0). Then **M2-0** (dev) and group C in parallel: **M2-1** meetings, **M2-2** MCP + stdio shim, **M2-3** Settings, **M2-5** qa tests; **M2-4** wiring after M2-0..M2-3 pass qa; M2-6 after M2-1/M2-2 (its checklist is 16.3's security list plus 7.2's); M2-7 after merge. Facts every M2 prompt must carry:
+
+1. `assistant/app.py` (M2-4's file) now owns the pid file (`<pid>\n<port>`), the single-instance guard, bind-failure reporting (`netinfo`, `MessageBoxW` under `pythonw`), the asyncio reset filter and the test-mode `/v1/_debug/ui` append; start order is layout → logging → `secure_home()` → settings → instance check → token → store → scheduler → reminders → server → pid file → UI. M2-4 adds meetings, the MCP app and Settings into that order; it does not reshuffle it.
+2. `create_app(token_provider, store=None, reminders=None, scheduler=None) -> Starlette` (`assistant/server/app.py`); M2-0 adds `mcp_app=None`. M2-2 builds the FastMCP Streamable-HTTP app in `server/mcp.py` and does not touch `server/app.py`; M2-4 passes it. M2-2's "adds `regenerate()`": `token.regenerate()` exists (`security/token.py:44`), only exposure is new (14.6).
+3. `overlay/icon.py` `IconActions` has `search` and `settings` callables defaulting to no-op; `app.py` passes lambdas that log "not yet available". M2-3 supplies the `settings` callable (M2-4 wires it); `search` stays a placeholder until M3b.
+4. `settings.py`: `DEFAULTS` holds only `schema` and `port`; `on_change(fn)` already exists (so M2-3's "adds change listeners" is partly there — verify live apply, do not re-add). The key `cards_every_monitor` (`overlay/cards_ui.py` `SETTING_EVERY_MONITOR`) is read from `settings.json` with no UI; M2-3's Cards page adds the toggle and a default. M2-3 adds defaults for every key it surfaces.
+5. Sources shipped: `hooks`, `http`, `file`, `reminders`; `mcp` arrives with M2-2 (A18).
+6. Error shapes change in M2-0; M2-5's new tests assert the object shape from the start, and qa owns the edits to the M1 tests that assert the string shape.
+7. The interactive-P6 coverage sentence (M2-3, AC-CS-9) names only what P6 observed on this laptop (14.3) until the user's interactive run lands.
+
+### 16.5 What this Revision supersedes (by section)
+
+- **§7.1 table**: executed as 16.1; rows M1-0b, M1-6b, M1-6c, the security follow-up (`dffeaad`) and M1-10 are the as-built additions; M1-8's file is `docs/security/2026-11-06-m1-review.md`; M1-6's Done cell "idle CPU ≈ 0 %" is read with 16.1's two measurements.
+- **§7.2**: group C gains M2-0 (16.3) and the M1-10 precondition; M2-2's Done gains the `/v1/health` fields; M2-3's mute list gains `reminders` and its scope gains `cards_every_monitor` and the N6/R2-11 duties; M2-4 passes `mcp_app` into `create_app` and keeps the app.py start order (16.4 item 1); M2-6's checklist gains N6, N5, N11, R2-11 and the B1 tail; M2-7 gains the N5 README note and the N10 threat-model note.
+- **§8.1 / §7.1 M1-3a/3b/M1-6 "qa observes"**: observed via debug state and synthesized events, not on screen; 16.2 names the remaining on-screen pass.
+- **§10.3 step 5** (print the `pip uninstall` line) and step 4's prompt text: drift closed by M2-0 (h).
+- **14.3** ("if interactive P6 has not arrived by then, M1-4 passes on the recorded set"): that is what happened; the gap goes into the coverage sentence (16.4 item 7).
+- **14.6 note on M2-2 `regenerate()`** and **14.8** (M1-8 checklist gains 413 + home ACL): done; restated in 16.4 item 2 and 16.1.
+- **14.9 / 15 open-items lists**: unchanged items (cold P7, interactive P6, work-laptop P1–P9) carried in 16.2, plus the new `HTTP_PROXY` hooks probe and the clean-profile install run.
+- **PRD §8 (hook `200 {}` always), §7 (`source` form), AC-ST-1 list**: read per A17, A18, A20; the PRD is not edited here.
+
+New planner defaults: **A17**–**A20** (16.3). Open items after this Revision: M1-10 qa verdict; M1-9 docs and M1-10 merge (git-keeper); the user-run and qa items in 16.2.
