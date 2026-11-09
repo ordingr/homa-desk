@@ -1,6 +1,6 @@
-# Assistant — project rules
+# Homa — project rules
 
-Assistant is a pure-Python Windows 11 desktop app: an always-on-top alert
+Homa (formerly Assistant, renamed 2026-11-08) is a pure-Python Windows 11 desktop app: an always-on-top alert
 overlay (cards from Claude Code hooks, MCP, HTTP, file drop, plugins), an
 Everything-like file search with previews, an MCP server, and a plugin
 system. See `README.md` and the documents below.
@@ -24,6 +24,10 @@ or edit.
 3. `docs/research/*.md` — evidence briefs behind the PRD.
 4. `docs/reference/2026-11-06-assistant-popup-readme.md` — behavioural
    spec of the app being rebuilt.
+5. `docs/plans/2026-11-08-rename-to-homa.md` — the rename plan (product
+   name, package, home folder, environment variables, MCP server name).
+   For names, item 5 overrides items 1 to 4 (its section 4.1). Dispatches
+   cite it by path.
 
 If code and these documents disagree, say so in the report; do not quietly
 pick one.
@@ -43,15 +47,18 @@ pick one.
 
 ## Layout
 
-- `assistant/` — the package (`python -m assistant`); tkinter only under
-  `assistant/overlay/`.
+- `homa/` — the package (`python -m homa`); tkinter only under
+  `homa/overlay/`. The product is named Homa (rename of 2026-11-08).
+- `assistant/` — 0.2.x shim only: `python -m assistant` and
+  `python -m assistant.mcp_stdio` print a notice and run Homa. Removed in 0.3.0.
 - `web/` — React source of the full-page UI; built output is committed
-  under `assistant/static/app/` (never ignored).
+  under `homa/static/app/` (never ignored).
 - `tools/probes/` — stdlib-only probe scripts (plan §6).
 - `tests/` — pytest; `tests/fixtures/` builds fixture trees from JSON.
 - `docs/probes/` — raw probe output per laptop, dated.
-- Runtime state lives in `ASSISTANT_HOME` (default `~/.assistant/`), never
-  next to the code.
+- Runtime state lives in `HOMA_HOME` (default `~/.homa/`), never
+  next to the code. A pre-rename `~/.assistant/` is moved to `~/.homa/` by the
+  first start (`homa/migrate.py`; README, "Upgrading (2026-11-08)").
 
 ## Verification
 

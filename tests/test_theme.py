@@ -1,21 +1,21 @@
 """Light / dark / system themes (plan 7.5 M4-2; AC-PS-1).
 
 Registry reads are patched (never the real Windows setting). `settings` validation uses a real Settings object
-against a scratch ASSISTANT_HOME; recolouring uses real tkinter widgets.
+against a scratch HOMA_HOME; recolouring uses real tkinter widgets.
 """
 import json
 import tkinter as tk
 
 import pytest
 
-from assistant import paths
-from assistant.overlay import gfx, panel, theme
-from assistant.settings import DEFAULTS, Settings
+from homa import paths
+from homa.overlay import gfx, panel, theme
+from homa.settings import DEFAULTS, Settings
 
 
 @pytest.fixture(autouse=True)
 def scratch_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path))
 
 
 @pytest.fixture(autouse=True)
@@ -185,7 +185,7 @@ def test_install_with_a_saved_system_mode_arms_immediately(monkeypatch):
 
 
 def test_poll_posts_a_refresh_only_when_windows_changed(monkeypatch):
-    from assistant import uibus
+    from homa import uibus
     posted = []
     monkeypatch.setattr(uibus, "post", lambda fn, *a: posted.append(fn))
     registry(monkeypatch, AppsUseLightTheme=0)

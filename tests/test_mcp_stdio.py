@@ -1,7 +1,7 @@
 """The stdio shim for Claude Desktop (plan 7.2 M2-2; AC-MC-2).
 
-``python -m assistant.mcp_stdio`` is started as a real subprocess exactly as Claude Desktop would, pointed at an
-in-process server (conftest ``mcp_live``) through ASSISTANT_HOME. Besides raw JSON-RPC lines, the ``mcp``
+``python -m homa.mcp_stdio`` is started as a real subprocess exactly as Claude Desktop would, pointed at an
+in-process server (conftest ``mcp_live``) through HOMA_HOME. Besides raw JSON-RPC lines, the ``mcp``
 package's own stdio client is used, since that is the closest stand-in for Claude Desktop's behaviour.
 """
 import asyncio
@@ -12,7 +12,7 @@ import pytest
 
 from conftest import REPO_ROOT, run_stdio_shim, wait_until
 
-pytest.importorskip("assistant.mcp_stdio", reason="assistant/mcp_stdio.py (M2-2) not present")
+pytest.importorskip("homa.mcp_stdio", reason="homa/mcp_stdio.py (M2-2) not present")
 
 TOOLS = {"send_card", "update_card", "dismiss_card", "add_reminder"}
 
@@ -40,7 +40,7 @@ def test_initialize_is_answered_with_the_assistant_server_info(mcp_live):
     lines, err = run_stdio_shim(mcp_live.home, [INIT])
     (reply,) = parse(lines)
     assert reply["id"] == 1 and "result" in reply, (reply, err)
-    assert reply["result"]["serverInfo"]["name"] == "assistant"
+    assert reply["result"]["serverInfo"]["name"] == "homa"
 
 
 def test_notification_produces_no_output_and_tools_list_returns_the_four_tools(mcp_live):
@@ -98,8 +98,8 @@ def test_the_mcp_stdio_client_can_list_and_call_through_the_shim(mcp_live):
     from mcp.client.stdio import StdioServerParameters
 
     async def go():
-        params = StdioServerParameters(command=sys.executable, args=["-m", "assistant.mcp_stdio"],
-                                       env={"ASSISTANT_HOME": str(mcp_live.home)}, cwd=str(REPO_ROOT))
+        params = StdioServerParameters(command=sys.executable, args=["-m", "homa.mcp_stdio"],
+                                       env={"HOMA_HOME": str(mcp_live.home)}, cwd=str(REPO_ROOT))
         async with Client(params) as client:
             tools = {t.name for t in (await client.list_tools()).tools}
             result = await client.call_tool("send_card", {"title": "via stdio client", "id": "stdio-client-card"})

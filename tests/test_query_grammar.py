@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-query = pytest.importorskip("assistant.index.query", reason="assistant/index/query.py (M3a-3) not present")
+query = pytest.importorskip("homa.index.query", reason="homa/index/query.py (M3a-3) not present")
 
 # "doc" is deliberately absent: with it, "design doc" would become "ext: doc" (coordinator note, M3a-3).
 KNOWN = {"md", "py", "html", "txt", "yml", "pdf", "docx", "xlsx", "csv", "png", "json", "js", "ts"}

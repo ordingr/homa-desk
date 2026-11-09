@@ -18,14 +18,14 @@ import pytest
 
 from conftest import NOTES_FIXTURE, wait_until, walk_store
 
-search_ui = pytest.importorskip("assistant.overlay.search_ui", reason="assistant/overlay/search_ui.py (M3a-4) not present")
-hotkey_mod = pytest.importorskip("assistant.overlay.hotkey", reason="assistant/overlay/hotkey.py (M3a-4) not present")
-modes_mod = pytest.importorskip("assistant.search.modes", reason="assistant/search/modes.py (M3a-4) not present")
-pytest.importorskip("assistant.index.search", reason="assistant/index/search.py (M3a-3) not present")
-notes_bm25 = pytest.importorskip("assistant.search.notes_bm25", reason="assistant/search/notes_bm25.py (M3a-6) not present")
+search_ui = pytest.importorskip("homa.overlay.search_ui", reason="homa/overlay/search_ui.py (M3a-4) not present")
+hotkey_mod = pytest.importorskip("homa.overlay.hotkey", reason="homa/overlay/hotkey.py (M3a-4) not present")
+modes_mod = pytest.importorskip("homa.search.modes", reason="homa/search/modes.py (M3a-4) not present")
+pytest.importorskip("homa.index.search", reason="homa/index/search.py (M3a-3) not present")
+notes_bm25 = pytest.importorskip("homa.search.notes_bm25", reason="homa/search/notes_bm25.py (M3a-6) not present")
 
-from assistant import uibus  # noqa: E402
-from assistant.search.saved import SavedSearches  # noqa: E402
+from homa import uibus  # noqa: E402
+from homa.search.saved import SavedSearches  # noqa: E402
 
 KNOWN = {"md", "py", "html", "txt", "yml", "pdf", "docx", "xlsx", "csv", "png", "json", "js", "ts"}
 FREE_COMBO = "ctrl+alt+f10"
@@ -79,7 +79,7 @@ def settle(root, popup, timeout=10.0):
 def popup(root, search_tree, tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     shutil.copytree(NOTES_FIXTURE, vault)
-    monkeypatch.delenv("ASSISTANT_NOTES_DIR", raising=False)
+    monkeypatch.delenv("HOMA_NOTES_DIR", raising=False)
     store = walk_store(search_tree)
     notes = notes_bm25.AskNotesMode(settings=Settings(notes={"dir": str(vault)}), index_path=tmp_path / "notes.json.gz")
     notes.index().wait_ready(30)
@@ -317,7 +317,7 @@ def test_every_placement_option_opens_on_screen(root, search_tree, tmp_path, pla
         assert st["placement"] == placement and st["open"]
         left, top, right, bottom = st["rect"]
         assert right > left and bottom > top
-        from assistant.overlay import monitors
+        from homa.overlay import monitors
         assert monitors.is_visible(left + 5, top + 5, 5, 5), f"{placement}: box must be on a monitor, got {st['rect']}"
     finally:
         pop.close()
@@ -325,7 +325,7 @@ def test_every_placement_option_opens_on_screen(root, search_tree, tmp_path, pla
 
 
 def test_primary_placement_is_centred_on_the_primary_monitor(root, tmp_path):
-    from assistant.overlay import monitors
+    from homa.overlay import monitors
     registry = modes_mod.default_registry(lambda: None, None)
     pop = search_ui.SearchPopup(root, IconStub(), registry, Settings(search_placement="primary"),
                                 saved=SavedSearches(tmp_path / "s.json"))

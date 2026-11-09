@@ -11,7 +11,7 @@ import pytest
 
 from conftest import BULK_COUNT
 
-pytest.importorskip("assistant.server.mcp", reason="assistant/server/mcp.py not present")
+pytest.importorskip("homa.server.mcp", reason="homa/server/mcp.py not present")
 
 FILE_TOOLS = {"search_files", "get_file_info", "read_text_preview", "list_indexed_roots"}
 CARD_TOOLS = {"send_card", "update_card", "dismiss_card", "add_reminder"}

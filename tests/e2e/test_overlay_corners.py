@@ -1,6 +1,6 @@
 """DWM rounded corners on the live overlay, and the pythonw (no stderr) start (dev change M4 overlay polish).
 
-A private test-mode app on its own port and ASSISTANT_HOME (never the user's instance). ``/v1/_debug/ui`` reports
+A private test-mode app on its own port and HOMA_HOME (never the user's instance). ``/v1/_debug/ui`` reports
 ``rounded`` and ``corner_preference`` for the icon and every card window; the "+N more" strip is not in that payload, so
 its window is found by rectangle and the DWM attribute is read straight from it. DWM_WINDOW_CORNER_PREFERENCE: 2 = ROUND
 (icon, cards), 3 = ROUNDSMALL (strip). Needs Windows 11 and a desktop session; skips otherwise.
@@ -22,7 +22,7 @@ from conftest import REPO_ROOT, STARTUP_TIMEOUT, Api, _free_port, _health_ok, _s
 if sys.getwindowsversion().build < 22000:
     pytest.skip("DWM rounded corners need Windows 11", allow_module_level=True)
 
-from assistant.overlay import win  # noqa: E402
+from homa.overlay import win  # noqa: E402
 
 win32gui = pytest.importorskip("win32gui")
 
@@ -132,8 +132,8 @@ def test_the_app_starts_serves_and_stops_cleanly_under_pythonw(tmp_path):
     home, port = tmp_path / "home", _free_port()
     home.mkdir()
     (home / "settings.json").write_text(json.dumps({"schema": 1, "port": port}), encoding="utf-8")
-    env = dict(os.environ, ASSISTANT_HOME=str(home), ASSISTANT_TEST_MODE="1")
-    proc = subprocess.Popen([str(pythonw), "-m", "assistant"], cwd=REPO_ROOT, env=env, stdin=subprocess.DEVNULL,
+    env = dict(os.environ, HOMA_HOME=str(home), HOMA_TEST_MODE="1")
+    proc = subprocess.Popen([str(pythonw), "-m", "homa"], cwd=REPO_ROOT, env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     token = ""
     try:

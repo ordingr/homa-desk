@@ -1,7 +1,7 @@
 """token.regenerate() rewrites the Claude Code hook entries only when they carry THIS instance's old token.
 
 Real subprocesses with a throw-away USERPROFILE/HOME (the user's ~/.claude/settings.json is never touched) and two
-separate ASSISTANT_HOMEs ("A" owns the installed hooks, "B" is a second instance, such as a test run).
+separate HOMA_HOMEs ("A" owns the installed hooks, "B" is a second instance, such as a test run).
 """
 import json
 import os
@@ -12,8 +12,8 @@ import pytest
 
 from conftest import REPO_ROOT
 
-REGEN = "from assistant.security import token; r = token.regenerate(); print(r.hooks); print(r.token)"
-ENSURE = "from assistant.security import token; print(token.ensure())"
+REGEN = "from homa.security import token; r = token.regenerate(); print(r.hooks); print(r.token)"
+ENSURE = "from homa.security import token; print(token.ensure())"
 
 
 class World:
@@ -31,7 +31,7 @@ class World:
     def env(self, who):
         drive, rest = os.path.splitdrive(str(self.user))
         return dict(os.environ, USERPROFILE=str(self.user), HOME=str(self.user), HOMEDRIVE=drive, HOMEPATH=rest,
-                    ASSISTANT_HOME=str(self.homes[who]))
+                    HOMA_HOME=str(self.homes[who]))
 
     def py(self, who, code):
         done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=self.env(who), capture_output=True,
@@ -40,7 +40,7 @@ class World:
         return done.stdout.strip().splitlines()
 
     def cli(self, who, *args):
-        done = subprocess.run([sys.executable, "-m", "assistant", *args], cwd=REPO_ROOT, env=self.env(who),
+        done = subprocess.run([sys.executable, "-m", "homa", *args], cwd=REPO_ROOT, env=self.env(who),
                               capture_output=True, text=True, timeout=60)
         assert done.returncode == 0, done.stdout + done.stderr
         return done.stdout
@@ -134,7 +134,7 @@ def test_user_entries_next_to_ours_survive_the_owners_rewrite(world):
 def test_carries_bearer_is_exact_and_false_for_unreadable_settings(world):
     world.cli("A", "hooks", "install")
     token = world.token("A")
-    probe = ("from assistant import hooks_installer as h; import sys; "
+    probe = ("from homa import hooks_installer as h; import sys; "
              "print(h.carries_bearer(sys.argv[1]), h.carries_bearer(sys.argv[1] + 'x'), h.carries_bearer(''))")
 
     def ask(code_token):

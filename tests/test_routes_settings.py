@@ -11,7 +11,7 @@ import pytest
 from conftest import Api, wait_until
 
 FEED = "https://example.test/private/feed-123/basic.ics"
-UPDATE_SRC = "https://example.test/releases/secret-release-path/assistant.zip"
+UPDATE_SRC = "https://example.test/releases/secret-release-path/homa.zip"
 NOTES = "C:\\Users\\someone\\notes-folder-zz"
 ROOT = "C:\\Data\\roots-marker-zz"
 EXPECTED_KEYS = {"theme", "shortcuts", "search_placement", "hotkey", "md_vault", "index"}

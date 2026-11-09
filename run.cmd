@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-python -m assistant %*
+python -m homa %*

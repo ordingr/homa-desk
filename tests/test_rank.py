@@ -5,8 +5,8 @@ import pytest
 
 from conftest import ROOT_PARENT, store_api
 
-query = pytest.importorskip("assistant.index.query", reason="assistant/index/query.py (M3a-3) not present")
-search = pytest.importorskip("assistant.index.search", reason="assistant/index/search.py (M3a-3) not present")
+query = pytest.importorskip("homa.index.query", reason="homa/index/query.py (M3a-3) not present")
+search = pytest.importorskip("homa.index.search", reason="homa/index/search.py (M3a-3) not present")
 KNOWN = {"md", "py", "html", "txt", "yml", "pdf"}
 
 

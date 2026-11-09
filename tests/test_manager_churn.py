@@ -19,10 +19,10 @@ import pytest
 
 from conftest import wait_until
 
-manager_mod = pytest.importorskip("assistant.index.manager")
-store_mod = pytest.importorskip("assistant.index.store")
-watcher_mod = pytest.importorskip("assistant.index.watcher")
-from assistant.scheduler import Scheduler  # noqa: E402
+manager_mod = pytest.importorskip("homa.index.manager")
+store_mod = pytest.importorskip("homa.index.store")
+watcher_mod = pytest.importorskip("homa.index.watcher")
+from homa.scheduler import Scheduler  # noqa: E402
 
 ADDED, REMOVED, MODIFIED = watcher_mod.ACTION_ADDED, watcher_mod.ACTION_REMOVED, watcher_mod.ACTION_MODIFIED
 RENAMED_NEW = watcher_mod.ACTION_RENAMED_NEW

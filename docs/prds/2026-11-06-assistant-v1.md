@@ -582,3 +582,27 @@ M3 is the largest; the planner may split it into index + popup (M3a) and full pa
 ## 17. Traceability check
 
 Every AC above carries at least one of `[REF]`, `[OV]`, `[FS]`, `[PL]`, `[DEC]` or `[PM]`. ACs tagged only `[PM]` are the fourteen decisions in section 16 and nothing else. No requirement specifies a framework, schema or endpoint implementation beyond what `[DEC 1-14]` already pin (Python, pip, Edge app mode, `plugin.toml`, `/v1/cards`, the four MCP file tools). No organisation is named anywhere in this document.
+
+## 18. Amendment 2026-11-08: product name Homa
+
+Supersedes: nothing. Sections 0 to 17 are kept as written. Where they say `assistant`, `Assistant`, `~/.assistant/` or
+`ASSISTANT_*`, read the amendment below.
+
+- Decision: the product is called Homa. The decision, its alternatives and the migration are in
+  `docs/plans/2026-11-08-rename-to-homa.md` (sections 3, 4.1 and 4.5). This amendment records the effect on the requirements.
+  It changes no requirement, acceptance criterion or decision in sections 3 to 16.
+- DEC 7: the MCP server is named `homa` (was `assistant`). The Settings snippets register `homa`, and the server reports
+  `serverInfo.name` as `homa`. The transport, the one port, the one bearer token and the stdio shim are unchanged. The shim
+  module is `homa.mcp_stdio`. `python -m assistant.mcp_stdio` remains as a 0.2.x alias and is removed in 0.3.0. The user-only
+  folder named in DEC 7 is `~/.homa/` (was `~/.assistant/`).
+- DEC 11: the notes-folder setting is `HOMA_NOTES_DIR` (was `ASSISTANT_NOTES_DIR`). `ASSISTANT_NOTES_DIR` is still read, with a
+  deprecation warning, until 0.3.0. The rule that no default path is assumed and no organisation is named is unchanged.
+- AC-MC-1 and AC-MC-2: the server is `homa`, and the stdio shim is `python -m homa.mcp_stdio`.
+- AC-AN-1 and AC-ST-5 (notes folder): the variable is `HOMA_NOTES_DIR`, as in DEC 11.
+- AC-FI-16, AC-MC-9 and the other `~/.assistant/` mentions (including the token and saved searches): the folder is `~/.homa/`,
+  or the folder named by `HOMA_HOME`. An existing `~/.assistant/` is moved there by the first start of Homa. Rules are in the
+  README section "Upgrading (2026-11-08)".
+- Unchanged: the card kinds and their defaults, the routes, the token rule, the file tools and their limits, the index format
+  (its format tag is still `assistant-index`, so an existing index is read as it was), and every privacy rule.
+- Verification: pending. qa (R5a and R5b, `tests/test_rename_complete.py`) and security (R6) have not reported as of this
+  amendment.

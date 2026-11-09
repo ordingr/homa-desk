@@ -16,14 +16,14 @@ import zipfile
 
 import pytest
 
-from assistant import settings as settings_mod
-from assistant.actions import shell
-from assistant.index import manager as manager_mod
-from assistant.overlay import fullpage, search_ui
-from assistant.preview import extract
-from assistant.security import denylist
-from assistant.server import routes_files
-from assistant.settings import DEFAULTS, Settings
+from homa import settings as settings_mod
+from homa.actions import shell
+from homa.index import manager as manager_mod
+from homa.overlay import fullpage, search_ui
+from homa.preview import extract
+from homa.security import denylist
+from homa.server import routes_files
+from homa.settings import DEFAULTS, Settings
 
 USER = os.environ.get("USERNAME", "someone")
 
@@ -225,7 +225,7 @@ def test_open_returns_false_with_a_reason_when_edge_starts_but_no_window_appears
 
 def test_open_does_not_adopt_a_window_with_the_wrong_title_or_class(edge):
     edge.windows.update({77: ("Chrome_WidgetWin_1", "Some other site - Microsoft Edge"),
-                         78: ("Chrome_WidgetWin_0", "Assistant - file search")})
+                         78: ("Chrome_WidgetWin_0", "Homa - file search")})
     edge.listed[0] = {77: 1, 78: 2}
     assert _open(edge) is False
     assert fullpage.last_failure()
@@ -233,7 +233,7 @@ def test_open_does_not_adopt_a_window_with_the_wrong_title_or_class(edge):
 
 
 def test_open_does_not_adopt_a_matching_window_that_was_already_open_before_the_launch(edge):
-    edge.windows[90] = ("Chrome_WidgetWin_1", "Assistant - file search")
+    edge.windows[90] = ("Chrome_WidgetWin_1", "Homa - file search")
     edge.listed[0] = {90: 5}
     assert _open(edge) is False
 
@@ -243,7 +243,7 @@ def test_open_returns_true_for_the_new_window_with_the_right_class_and_title_and
 
     def appear():
         time.sleep(0.2)
-        edge.windows[91] = ("Chrome_WidgetWin_1", "Assistant - file search - Microsoft Edge")
+        edge.windows[91] = ("Chrome_WidgetWin_1", "Homa - file search - Microsoft Edge")
         edge.listed[0] = {91: 4321}
 
     threading.Thread(target=appear, daemon=True).start()
@@ -255,8 +255,8 @@ def test_open_returns_true_for_the_new_window_with_the_right_class_and_title_and
 def test_open_prefers_the_window_of_the_process_it_launched(edge):
     def appear():
         time.sleep(0.1)
-        edge.windows[11] = ("Chrome_WidgetWin_1", "Assistant - file search")
-        edge.windows[12] = ("Chrome_WidgetWin_1", "Assistant - file search")
+        edge.windows[11] = ("Chrome_WidgetWin_1", "Homa - file search")
+        edge.windows[12] = ("Chrome_WidgetWin_1", "Homa - file search")
         edge.listed[0] = {11: 999, 12: 4321}
 
     threading.Thread(target=appear, daemon=True).start()
@@ -290,7 +290,7 @@ def test_open_returns_false_naming_edge_when_msedge_is_missing_or_will_not_start
 
 
 def _app_stub(monkeypatch, opened, reason, popup=True):
-    from assistant import app as app_mod
+    from homa import app as app_mod
     posted = []
     monkeypatch.setattr(app_mod.uibus, "post", lambda fn, *a: posted.append((fn, a)))
     monkeypatch.setattr(app_mod.fullpage, "open", lambda *a, **k: opened)
@@ -350,7 +350,7 @@ def test_md_vault_rejects_everything_else(value):
 
 
 def test_a_bad_md_vault_url_on_disk_is_repaired_and_the_rest_of_the_file_survives(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path))
     (tmp_path / "settings.json").write_text(json.dumps(
         {"schema": 1, "port": 40111, "md_vault": {"url": "javascript:1"}}), encoding="utf-8")
     s = Settings()
@@ -360,7 +360,7 @@ def test_a_bad_md_vault_url_on_disk_is_repaired_and_the_rest_of_the_file_survive
 
 
 def test_a_good_md_vault_url_round_trips_through_settings(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path))
     s = Settings()
     s.load()
     s.set("md_vault", {"url": "https://vault.example.test/"})
@@ -413,7 +413,7 @@ class _Index:
 
 @pytest.fixture
 def linked(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path / "ahome"))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path / "ahome"))
     root = tmp_path / "root"
     outside = tmp_path / "outside"
     (root / "inner").mkdir(parents=True)
@@ -472,7 +472,7 @@ def test_a_deny_listed_link_name_is_not_taken_as_a_link(linked, tmp_path):
 def test_a_link_inside_the_assistants_own_home_is_not_taken_as_a_link(tmp_path, monkeypatch):
     home = tmp_path / "ahome"
     home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(home))
+    monkeypatch.setenv("HOMA_HOME", str(home))
     target = tmp_path / "t"
     target.mkdir()
     _junction(home / "j", target)
@@ -558,8 +558,9 @@ def test_recycle_refuses_with_the_policy_reason_before_asking_for_confirmation(m
     assert "policy" in shell._bin_problem(os.getcwd())
 
 
-def test_appdata_local_assistant_is_on_the_deny_list():
-    base = rf"C:\Users\{USER}\AppData\Local\Assistant"
+@pytest.mark.parametrize("product", ["Homa", "Assistant"])
+def test_appdata_local_homa_and_legacy_assistant_are_on_the_deny_list(product):
+    base = rf"C:\Users\{USER}\AppData\Local\{product}"
     assert denylist.matches(base + r"\edge-profile\Default\Cookies")
     assert denylist.matches(base + "\\logs\\app.log")
 
@@ -686,7 +687,7 @@ def test_a_docx_far_over_the_default_cap_is_bounded_in_time_and_memory():
 # ---- (8) --doctor ----------------------------------------------------------------------------------------------------
 
 def _doctor_lines():
-    from assistant import doctor
+    from homa import doctor
     return dict(doctor.report())
 
 
@@ -701,8 +702,8 @@ def test_doctor_reports_edge_static_folder_and_recycle_bin():
 
 
 def test_doctor_lines_follow_the_underlying_state(monkeypatch, tmp_path):
-    from assistant import doctor
-    from assistant.server import static
+    from homa import doctor
+    from homa.server import static
     monkeypatch.setattr(fullpage, "edge_path", lambda: None)
     assert "not found" in doctor._edge_state()
     monkeypatch.setattr(fullpage, "edge_path", lambda: r"C:\fake\msedge.exe")
@@ -730,7 +731,7 @@ def test_doctor_lines_follow_the_underlying_state(monkeypatch, tmp_path):
 
 
 def test_doctor_cli_prints_the_new_lines():
-    done = subprocess.run([os.sys.executable, "-m", "assistant", "--doctor"], capture_output=True, text=True, timeout=60,
+    done = subprocess.run([os.sys.executable, "-m", "homa", "--doctor"], capture_output=True, text=True, timeout=60,
                           cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     assert "Edge (full page)" in done.stdout and "static folder" in done.stdout and "Recycle Bin" in done.stdout, \
         (done.stdout, done.stderr)

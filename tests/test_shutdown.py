@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from assistant import app as app_mod
+from homa import app as app_mod
 from conftest import Api, _free_port, launch_app, wait_index
 
 FILES = 24_000
@@ -25,7 +25,7 @@ def test_a_stuck_step_is_left_behind_after_the_shared_deadline_and_logged(caplog
     ran = []
     steps = [("stuck", lambda: release.wait(60)), ("quick", lambda: ran.append("quick")),
              ("also stuck", lambda: release.wait(60))]
-    caplog.set_level("INFO", logger="assistant.app")
+    caplog.set_level("INFO", logger="homa.app")
     started = time.monotonic()
     try:
         bare_app()._run_steps(steps)
@@ -52,7 +52,7 @@ def test_a_step_that_raises_is_logged_and_does_not_stop_the_others(caplog):
 
     def boom():
         raise RuntimeError("step blew up")
-    caplog.set_level("INFO", logger="assistant.app")
+    caplog.set_level("INFO", logger="homa.app")
     bare_app()._run_steps([("bad", boom), ("good", lambda: ran.append(1))])
     assert ran == [1] and "shutdown step bad failed" in caplog.text
 
@@ -97,7 +97,7 @@ def test_a_busy_app_shuts_down_within_5_seconds_frees_its_pid_file_and_relaunche
         lingering = http.client.HTTPConnection("127.0.0.1", port, timeout=10)  # an open keep-alive connection
         lingering.request("GET", "/v1/health", headers={"Authorization": f"Bearer {token}"})
         lingering.getresponse().read()
-        pid_file = home / "assistant.pid"
+        pid_file = home / "homa.pid"
         assert pid_file.is_file()
         begun = time.monotonic()
         status, _ = Api(base, token).post("/v1/shutdown", {})
@@ -123,21 +123,21 @@ def test_a_busy_app_shuts_down_within_5_seconds_frees_its_pid_file_and_relaunche
     # the same home and the same port start again immediately
     with launch_app(home, port, settings, test_mode=True) as (base2, token2):
         assert Api(base2, token2).get("/v1/health")[0] == 200
-        assert (home / "assistant.pid").is_file()
-    assert not (home / "assistant.pid").exists()
+        assert (home / "homa.pid").is_file()
+    assert not (home / "homa.pid").exists()
 
 
 def test_a_second_instance_on_a_live_pid_file_still_refuses_to_bind(tmp_path):
     home, port = tmp_path / "home", _free_port()
     with launch_app(home, port, test_mode=True) as (base, token):
-        pid_before = (home / "assistant.pid").read_text(encoding="ascii")
+        pid_before = (home / "homa.pid").read_text(encoding="ascii")
         import subprocess
         import sys
         from conftest import REPO_ROOT
-        env = dict(os.environ, ASSISTANT_HOME=str(home))
-        env.pop("ASSISTANT_TEST_MODE", None)
-        done = subprocess.run([sys.executable, "-m", "assistant"], cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+        env = dict(os.environ, HOMA_HOME=str(home))
+        env.pop("HOMA_TEST_MODE", None)
+        done = subprocess.run([sys.executable, "-m", "homa"], cwd=REPO_ROOT, env=env, capture_output=True, text=True,
                               timeout=60)
         assert done.returncode == 1, (done.stdout, done.stderr)
-        assert (home / "assistant.pid").read_text(encoding="ascii") == pid_before, "the live instance keeps its pid file"
+        assert (home / "homa.pid").read_text(encoding="ascii") == pid_before, "the live instance keeps its pid file"
         assert Api(base, token).get("/v1/health")[0] == 200

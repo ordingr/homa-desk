@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-scheduler = pytest.importorskip("assistant.scheduler", reason="assistant/scheduler.py not present")
+scheduler = pytest.importorskip("homa.scheduler", reason="homa/scheduler.py not present")
 
 
 @pytest.fixture

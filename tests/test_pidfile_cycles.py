@@ -1,4 +1,4 @@
-"""assistant.pid is written before the HTTP server starts, so it exists whenever /v1/health answers (plan 19.3 M4-0 item 2).
+"""homa.pid is written before the HTTP server starts, so it exists whenever /v1/health answers (plan 19.3 M4-0 item 2).
 
 Before M4-0 ``_write_pid()`` ran after ``server.start()``; a client that saw a healthy server could read a missing pid
 file (the old flake). Each cycle starts a private app (``conftest.launch_app``: own home, own port), checks the file the
@@ -12,12 +12,12 @@ import pytest
 
 from conftest import _free_port, launch_app
 
-from assistant import netinfo
+from homa import netinfo
 
 
 def _one_cycle(home, port):
     with launch_app(home, port, test_mode=True) as (base_url, token):
-        pid_file = home / "assistant.pid"
+        pid_file = home / "homa.pid"
         assert pid_file.is_file(), "the pid file must exist as soon as /v1/health answers"
         pid_text, port_text = pid_file.read_text(encoding="ascii").split()
         assert int(port_text) == port
@@ -43,8 +43,8 @@ def test_pid_file_is_there_every_time_over_20_start_stop_cycles(tmp_path):
 ORDER_PROBE = r"""
 import os, sys
 from pathlib import Path
-from assistant import app as app_mod
-pid_file = Path(os.environ["ASSISTANT_HOME"]) / "assistant.pid"
+from homa import app as app_mod
+pid_file = Path(os.environ["HOMA_HOME"]) / "homa.pid"
 seen = {}
 def fake_start(self):
     seen["at_start"] = pid_file.is_file()
@@ -64,13 +64,13 @@ def test_pid_file_is_written_before_the_server_starts_and_removed_when_the_bind_
     from conftest import REPO_ROOT
     port = _free_port()
     (tmp_path / "settings.json").write_text('{"schema": 1, "port": %d}' % port, encoding="utf-8")
-    env = dict(os.environ, ASSISTANT_HOME=str(tmp_path))
-    env.pop("ASSISTANT_TEST_MODE", None)
+    env = dict(os.environ, HOMA_HOME=str(tmp_path))
+    env.pop("HOMA_TEST_MODE", None)
     done = subprocess.run([sys.executable, "-c", ORDER_PROBE], cwd=REPO_ROOT, env=env, capture_output=True, text=True,
                           timeout=60)
     line = next((l for l in done.stdout.splitlines() if l.startswith("RESULT ")), None)
     assert line, (done.stdout[-500:], done.stderr[-800:])
     _, code, at_start, ours, left_behind = line.split()
     assert code == "1"
-    assert at_start == "True" and ours == "True", "assistant.pid must exist, with this pid, when server.start() is called"
-    assert left_behind == "False", "a bind failure must not leave assistant.pid behind"
+    assert at_start == "True" and ours == "True", "homa.pid must exist, with this pid, when server.start() is called"
+    assert left_behind == "False", "a bind failure must not leave homa.pid behind"

@@ -1,7 +1,7 @@
 """POST /v1/settings/theme end to end on a private test-mode app: the contract, auth, and that the live windows recolour.
 
-A private ``python -m assistant`` (own port, own ASSISTANT_HOME, a throw-away USERPROFILE) is launched with
-ASSISTANT_TEST_MODE=1. The recolour checks read the app's own ``/v1/_debug/ui`` (``theme.panel_bg``) and then the real
+A private ``python -m homa`` (own port, own HOMA_HOME, a throw-away USERPROFILE) is launched with
+HOMA_TEST_MODE=1. The recolour checks read the app's own ``/v1/_debug/ui`` (``theme.panel_bg``) and then the real
 screen pixels of a card window and of the search popup (opened by a posted WM_HOTKEY), because the popup and the
 cards draw with the active palette. Needs a desktop session. Nothing here touches the user's instance.
 """

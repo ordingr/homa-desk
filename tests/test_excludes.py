@@ -1,6 +1,6 @@
 """Exclude rules (plan 7.3 M3a-1; AC-FI-1, AC-FI-7; 15.3 items 3 and 4).
 
-Contract used by the crawler and the manager (assistant/index/crawler.py docstring):
+Contract used by the crawler and the manager (homa/index/crawler.py docstring):
 ``Excludes(patterns)`` and ``matching_rule(full, rel, name, is_dir) -> rule label | None``, called once per path
 segment while descending, ``rel`` being the forward-slash path below the root. ``excluded()`` below replays that
 descent, so the tests exercise the rules the way the consumers do.
@@ -10,14 +10,14 @@ import re
 
 import pytest
 
-excludes_mod = pytest.importorskip("assistant.index.excludes", reason="assistant/index/excludes.py (M3a-1) not present")
+excludes_mod = pytest.importorskip("homa.index.excludes", reason="homa/index/excludes.py (M3a-1) not present")
 Excludes = excludes_mod.Excludes
 ROOT = "C:\\root"
 
 
 def default_patterns():
     try:
-        from assistant.settings import DEFAULTS
+        from homa.settings import DEFAULTS
         found = DEFAULTS["index"]["excludes"]
     except (ImportError, KeyError, TypeError):
         found = getattr(excludes_mod, "DEFAULT_EXCLUDES", None) or getattr(excludes_mod, "DEFAULTS", None)

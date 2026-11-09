@@ -1,4 +1,4 @@
-# Assistant
+# Homa
 
 A small always-on-top alert overlay for Windows. It shows a round icon on your screen and stacks cards beside it, one per
 thing that needs you: a Claude Code session waiting for permission, a finished task, a reminder you set, and anything else
@@ -20,6 +20,8 @@ executables. Nothing leaves your PC.
 
 > **Correction, 2026-11-07 (commit 3d7bc25):** the features listed under "What 3d7bc25 adds" in [Features](#features) are in the code at 3d7bc25 (commit subject: `feat: M4 full page, path search, live search, theme, rounded UI, hooks safety, bounded shutdown`). Several earlier sections now carry correction notes for them. The text above is kept as written.
 
+> **Correction, 2026-11-08 (rename):** the app is now called Homa. It runs as `python -m homa`, keeps its data in `%USERPROFILE%\.homa`, and the first start moves the older data folder there. Text below is current usage unless it sits under a dated heading or a dated correction note. See [Upgrading (2026-11-08)](#upgrading-from-assistant-2026-11-08).
+
 ## Contents
 
 - [What it is](#what-it-is)
@@ -40,6 +42,7 @@ executables. Nothing leaves your PC.
 - [Claude and your files](#claude-and-your-files)
 - [Settings](#settings)
 - [Settings and files](#settings-and-files)
+- [Upgrading (2026-11-08)](#upgrading-from-assistant-2026-11-08)
 - [Troubleshooting](#troubleshooting)
 - [Uninstall](#uninstall)
 - [Features](#features)
@@ -87,10 +90,10 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 1. Finds Python (`py -3`, then `python`) and checks that it is 3.10 or newer.
 2. Runs `pip install --user --only-binary :all: -r requirements.txt`. Binary wheels only, so no build step runs.
-3. Runs `python -m assistant --init`, which creates `~/.assistant` and the access token.
-4. Runs `python -m assistant --doctor` and prints the report.
+3. Runs `python -m homa --init`, which creates `~/.homa` and the access token. If an older data folder from before the rename exists, the first start moves it (see [Upgrading (2026-11-08)](#upgrading-from-assistant-2026-11-08)).
+4. Runs `python -m homa --doctor` and prints the report.
 5. If `claude` is on your `PATH`, asks whether to show the Claude Code hook entries. Nothing is written until you confirm.
-6. Creates a Startup-folder shortcut, `Assistant.lnk`, that runs `pythonw -m assistant` at logon.
+6. Creates a Startup-folder shortcut, `Homa.lnk`, that runs `pythonw -m homa` at logon.
 7. Starts the app. Look for the round icon at the bottom-right.
 
 Options: `-Hooks` asks about the hook entries even when `claude` is not found. `-NoStart` installs without starting. `-NoShortcut` skips the Desktop shortcut.
@@ -102,17 +105,17 @@ Options: `-Hooks` asks about the hook entries even when `claude` is not found. `
 The hooks are what make Claude Code cards appear. The installer shows the entries first, then asks before writing:
 
 ```
-python -m assistant hooks install --dry-run   # shows the eight entries, token redacted
-python -m assistant hooks install             # writes them to ~/.claude/settings.json
+python -m homa hooks install --dry-run   # shows the eight entries, token redacted
+python -m homa hooks install             # writes them to ~/.claude/settings.json
 ```
 
-- A backup of your Claude Code settings is written to `~/.assistant/hooks-backup/` before the first change.
+- A backup of your Claude Code settings is written to `~/.homa/hooks-backup/` before the first change.
 - Your existing hooks and every other setting are kept with their values. The file is rewritten as indented JSON, so
   whitespace and key order may change.
-- `python -m assistant hooks remove` takes the entries out again. If the file has not changed since install, it restores
+- `python -m homa hooks remove` takes the entries out again. If the file has not changed since install, it restores
   the backup exactly.
 - Installed events: `PermissionRequest`, `Notification`, `Stop`, `StopFailure`, `UserPromptSubmit`, `PostToolUse`,
-  `SessionStart`, `SessionEnd`. Each handler continues Claude Code's work if Assistant is not running.
+  `SessionStart`, `SessionEnd`. Each handler continues Claude Code's work if Homa is not running.
 - The access token is written into `~/.claude/settings.json` as plain text. See [Security & privacy](#security--privacy).
 
 ### Try it without installing anything permanent
@@ -196,18 +199,18 @@ Reminders are also available through the HTTP API (`POST /v1/reminders`) with th
 
 ## Command line
 
-Run from `<repo>` (or use `run.cmd` in place of `python -m assistant`).
+Run from `<repo>` (or use `run.cmd` in place of `python -m homa`).
 
 ```
-python -m assistant                              start the app (overlay and local API on 127.0.0.1)
-python -m assistant send --title "..." [--detail "..."] [--kind custom|waiting|done|meeting|reminder]
-                         [--priority 1-5] [--sticky] [--url <url>]
-python -m assistant shutdown                     ask the running app to quit
-python -m assistant demo                         sample cards in a temporary folder
-python -m assistant hooks install [--dry-run]    add the Claude Code hook entries
-python -m assistant hooks remove                 remove them (restores the backup if untouched)
-python -m assistant --init                       create ~/.assistant and the token if missing
-python -m assistant --doctor                     environment report; exits 1 if a dependency is missing or a wheel fails
+python -m homa                              start the app (overlay and local API on 127.0.0.1)
+python -m homa send --title "..." [--detail "..."] [--kind custom|waiting|done|meeting|reminder]
+                    [--priority 1-5] [--sticky] [--url <url>]
+python -m homa shutdown                     ask the running app to quit
+python -m homa demo                         sample cards in a temporary folder
+python -m homa hooks install [--dry-run]    add the Claude Code hook entries
+python -m homa hooks remove                 remove them (restores the backup if untouched)
+python -m homa --init                       create ~/.homa and the token if missing (moves the older data folder first, if present)
+python -m homa --doctor                     environment report; exits 1 if a dependency is missing or a wheel fails
 ```
 
 - `send` prints the new card's id and exits 0. If the app is not running it says so and exits 1.
@@ -216,12 +219,12 @@ python -m assistant --doctor                     environment report; exits 1 if 
 Example:
 
 ```
-python -m assistant send --title "Nightly backup" --detail "Finished in 14 minutes" --kind done
+python -m homa send --title "Nightly backup" --detail "Finished in 14 minutes" --kind done
 ```
 
 ## File drop
 
-Any program can make a card by writing a JSON file. Put a file ending in `.json` into `~/.assistant/events/`:
+Any program can make a card by writing a JSON file. Put a file ending in `.json` into `~/.homa/events/`:
 
 ```json
 {"id": "backup-2026-11-06", "title": "Nightly backup", "kind": "done", "detail": "Finished in 14 minutes"}
@@ -235,14 +238,14 @@ Any program can make a card by writing a JSON file. Put a file ending in `.json`
 ## HTTP API
 
 The app serves a local JSON API on `http://127.0.0.1:17171` (the port is in `settings.json`). Every request needs
-`Authorization: Bearer <token>`, where the token is the contents of `~/.assistant/token`. Routes cover cards (create,
+`Authorization: Bearer <token>`, where the token is the contents of `~/.homa/token`. Routes cover cards (create,
 update, list, snooze, dismiss, events), reminders, the Claude Code hook receiver, health and shutdown.
 
 The full route list, request fields, error shapes, limits and the hook contract are in **[docs/api.md](docs/api.md)**.
 
 ## Meetings
 
-Assistant can show a blue meeting card a few minutes before a calendar event starts. Two kinds of calendar source are
+Homa can show a blue meeting card a few minutes before a calendar event starts. Two kinds of calendar source are
 read in this version: calendar addresses (ICS) and classic Outlook on this PC. Both are set up on the **Calendars** page
 of [Settings](#settings).
 
@@ -254,7 +257,7 @@ written to a log. Use the `https://` form of the address. `webcal://` is convert
 **Outlook on the web: published calendar.** Publish the calendar in Outlook on the web and copy its ICS link. Add it the
 same way as a Google address.
 
-**Classic Outlook on this PC.** Tick **Read meetings from classic Outlook**. Assistant reads the default calendar of the
+**Classic Outlook on this PC.** Tick **Read meetings from classic Outlook**. Homa reads the default calendar of the
 Outlook installed on this PC through Outlook's COM interface, and needs no sign-in. This needs classic Outlook. The new
 Outlook has no COM interface, and the Calendars page then shows `classic Outlook detected: no`. The source is on by
 default in this version; see [Security & privacy](#security--privacy), item R5-F5.
@@ -264,7 +267,7 @@ default in this version; see [Security & privacy](#security--privacy), item R5-F
 > `calendars.outlook: true`). The sentence above that says the source is on by default describes the M2 code and is kept
 > as written. Source: `assistant/settings.py` (default `false`), `tests/test_m2_9.py` (`test_f5_default_outlook_is_off_with_no_settings_file`), review item R5-F5.
 
-**Timing.** Each source is read when Assistant starts and then every **Check every** minutes (default 5, range 1 to 60).
+**Timing.** Each source is read when Homa starts and then every **Check every** minutes (default 5, range 1 to 60).
 Each read covers the next 24 hours. A meeting card appears at the start time minus **Lead time** (default 5 minutes,
 range 0 to 120). If a read happens after that moment but before the start, the card appears at once. Events that have
 already started, all-day events, declined events and cancelled events get no card. Changing either number applies at once.
@@ -300,7 +303,7 @@ call, plus a small stdio shim for Claude Desktop. Nothing in this version listen
 
 ## Connect Claude over MCP
 
-Assistant runs an MCP server named `assistant` on its own HTTP port, at `/mcp`. It offers four tools: `send_card`,
+Homa runs an MCP server named `homa` on its own HTTP port, at `/mcp`. It offers four tools: `send_card`,
 `update_card`, `dismiss_card` and `add_reminder`. Every request needs the token. The exact arguments and errors are in
 [docs/api.md](docs/api.md), section 9.
 
@@ -308,23 +311,23 @@ Assistant runs an MCP server named `assistant` on its own HTTP port, at `/mcp`. 
 in both values:
 
 ```
-claude mcp add --transport http assistant http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http homa http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
 ```
 
 `<port>` is the `port` value in `settings.json` (17171 by default). Both `POST /mcp` and `POST /mcp/` (with the trailing
 slash) work.
 
 **Claude Desktop.** Claude Desktop starts a local program, so it uses the stdio shim. The shim reads the token and the port
-from your Assistant home folder. Add this to `claude_desktop_config.json`, with the path to your `python.exe`:
+from your Homa home folder. Add this to `claude_desktop_config.json`, with the path to your `python.exe`:
 
 ```json
-{"mcpServers": {"assistant": {"command": "<path to python.exe>", "args": ["-m", "assistant.mcp_stdio"]}}}
+{"mcpServers": {"homa": {"command": "<path to python.exe>", "args": ["-m", "homa.mcp_stdio"]}}}
 ```
 
-Add `"env": {"ASSISTANT_HOME": "<your home folder>"}` next to `command` and `args` only when you use a home folder other
-than `~/.assistant`. Two notes. First, `-m assistant.mcp_stdio` needs Python to import the `assistant` package from the
+Add `"env": {"HOMA_HOME": "<your home folder>"}` next to `command` and `args` only when you use a home folder other
+than `~/.homa`. Two notes. First, `-m homa.mcp_stdio` needs Python to import the `homa` package from the
 folder Claude Desktop starts the program in. That is not yet checked on both laptops (review item R5-N11 (c)). Second, the
-MCP page in Settings writes `"command": "python"` instead of the full path. If that `python` is not the one with Assistant
+MCP page in Settings writes `"command": "python"` instead of the full path. If that `python` is not the one with Homa
 installed, use the full path.
 
 > **Correction, 2026-11-06 (M2-9):** the Settings MCP page now writes `"command"` as the full path of the Python that runs
@@ -335,12 +338,12 @@ installed, use the full path.
 
 **Finding the token.** Either open Settings, MCP, and use **Copy command** or **Copy JSON** (Copy command puts the real
 token on the clipboard, and the window shows `<token hidden>`), or read the file `token` in your home folder
-(`~/.assistant/token` by default). The file is readable by your Windows user only. Do not paste the token into chats,
+(`~/.homa/token` by default). The file is readable by your Windows user only. Do not paste the token into chats,
 tickets or docs. [Security & privacy](#security--privacy) lists everywhere else it is kept.
 
 **Regenerating the token.** Settings, MCP, **Regenerate token**. Click it twice within 4 seconds. The old token stops
 working at once. If the Claude Code hooks are installed, they are rewritten with the new token, and the MCP page says so.
-The Claude Code HTTP entry keeps the old token, so remove it (`claude mcp remove assistant`) and add it again with the new
+The Claude Code HTTP entry keeps the old token, so remove it (`claude mcp remove homa`) and add it again with the new
 command. The Claude Desktop shim reads the token file on each call, so it needs no change.
 
 **What the tools do.**
@@ -353,7 +356,7 @@ command. The Claude Desktop shim reads the token file on each call, so it needs 
   the text was read.
 
 The tools cannot open, delete or run anything, and they do not list cards or return card content. Each call is written to
-`~/.assistant/logs/mcp.log` as a shape only: the tool name, the argument names with their lengths or types, and the result
+`~/.homa/logs/mcp.log` as a shape only: the tool name, the argument names with their lengths or types, and the result
 size. Argument values are never written.
 
 ## Search files
@@ -410,7 +413,7 @@ names first among equals.
 
 > **Correction, 2026-11-07 (M3b):** the popup now has a **Sort** control in its results header (Best, Name, Ext, Date; Ctrl+S cycles it), and a saved search's sort is applied when you recall it. The popup's date control still offers presets only; a custom date range can be entered on the full page. The text above is kept as written.
 
-**Saved searches** are stored in `~/.assistant/saved_searches.json`, per machine. When the box is open and empty they are
+**Saved searches** are stored in `~/.homa/saved_searches.json`, per machine. When the box is open and empty they are
 listed; click one or press Enter on the highlighted one to run it. Press **Delete** on a highlighted saved search to remove
 it. Saving the same name replaces the old one. There is a limit of 200. Saved searches keep the query, the chips and the
 date filter. They also keep a sort value, but the popup does not apply it yet.
@@ -448,10 +451,10 @@ Ask notes searches the `.md` files in a notes folder you choose, and shows the b
 highlighted. Press **Tab** in the box to switch to it, or start the query with `?`.
 
 - **Set the folder** in Settings, Search, **Notes folder** (use **Browse…** or type a full path such as
-  `C:\Users\<user>\Notes`). An environment variable `ASSISTANT_NOTES_DIR`, if set, overrides the setting. With no folder set,
+  `C:\Users\<user>\Notes`). An environment variable `HOMA_NOTES_DIR`, if set, overrides the setting (the pre-rename variable is still read, with a deprecation warning, until 0.3.0). With no folder set,
   the box says **Set your notes folder in Settings**. No default folder is assumed.
 - **First build.** The box shows `building index…` while the notes are read. The index is stored in
-  `~/.assistant/index/notes.json.gz`. The folder is checked again every 60 seconds, so a changed note appears within about a
+  `~/.homa/index/notes.json.gz`. The folder is checked again every 60 seconds, so a changed note appears within about a
   minute.
 - **What is read.** Only `.md` files, in the folder and its sub-folders. Folders starting with a dot, `node_modules`,
   `$RECYCLE.BIN`, `System Volume Information`, and links and junctions are skipped. Files over 2 MB are skipped.
@@ -461,19 +464,19 @@ highlighted. Press **Tab** in the box to switch to it, or start the query with `
   tables rendered. Each result shows the file name. The footer reads **search over your notes; nothing left this PC**.
 - **Protected names.** Notes whose names match the secrets list are not returned (see
   [Roots, excludes and protected files](#roots-excludes-and-protected-files)). Their text is still stored in the notes index
-  file in your Assistant folder. That file is user-only, but the note text is in it. This is an open item (R7-N5).
+  file in your Homa folder. That file is user-only, but the note text is in it. This is an open item (R7-N5).
 
 ## Full page and previews
 
 The full page is the larger search window. It opens the query from the popup in Microsoft Edge in app mode, a window with no
 address bar or tabs. Files are previewed only there. The popup never shows a preview (PRD AC-PV-7).
 
-**How to open it.** Press **F11** in the search box, or choose **Full page (F11)** under the results. Assistant starts Edge with
-its own profile folder, `%LOCALAPPDATA%\Assistant\edge-profile`, so your own browser profile is not used. Opening the full page
+**How to open it.** Press **F11** in the search box, or choose **Full page (F11)** under the results. Homa starts Edge with
+its own profile folder, `%LOCALAPPDATA%\Homa\edge-profile`, so your own browser profile is not used. Opening the full page
 again closes the window it opened before and opens a new one.
 
 **How to close it.** Press **F11** or **Esc** in the page. Esc first clears the selection, then the query and the results, and
-closes the window when the page is empty. Assistant closes only the window it opened.
+closes the window when the page is empty. Homa closes only the window it opened.
 
 **What it needs.** Microsoft Edge in the standard Program Files folder. If Edge is not found, nothing opens; see
 [Troubleshooting](#troubleshooting). The work-laptop check of Edge app mode (probe P2) is still to run, so previews there are not
@@ -484,7 +487,7 @@ and the query's interpretation. A query bar with the chips, a modified-date filt
 range from two dates), a sort control (Best, Name, Ext, Date) and saved searches. Result rows as in the popup. A preview pane beside
 the list when a row is selected. A narrow layout applies below 800 pixels of width; it has not been checked on a phone. Light and
 dark themes; the page remembers the choice. The Settings and About links in the header say that those settings are in the
-Assistant app.
+Homa app.
 
 **Mouse.** Click a row to select it and show its preview. Double-click opens the file. Ctrl+double-click reveals it in Explorer.
 Ctrl+click adds or removes a row from the selection, and Shift+click selects a range. Right-click opens the action menu;
@@ -518,12 +521,12 @@ Recycle Bin, Rename and Properties. The folder listing is in the popup only.
 - **Protected files**, the names and folders listed under [Roots, excludes and protected files](#roots-excludes-and-protected-files).
   The pane says `Protected file - not previewed`. Their content is not sent to the page (SEC-3).
 - **A file whose content has a private-key header** in the part being shown. The same message.
-- **Cloud placeholders that are not downloaded.** Assistant never opens them. See **Download and preview** below.
+- **Cloud placeholders that are not downloaded.** Homa never opens them. See **Download and preview** below.
 - **Executables and scripts** (`.exe`, `.dll`, `.sys`, `.msi`, `.msp`, `.bat`, `.cmd`, `.ps1`, `.scr`, `.com`). The card gives the
   reason `executable file: not previewed`. They are not run and not rendered.
 - **Other binary files**, and files whose content looks binary: a card. **HEIC and HEIF** give the reason `HEIC images are not
   supported`.
-- **Folders**, and files inside Assistant's own folder.
+- **Folders**, and files inside Homa's own folder.
 - **Files over the cap** (below).
 
 The rule behind this list is that a preview shows what a file contains and never runs it. Scripts in SVG, HTML and Markdown do not
@@ -536,12 +539,12 @@ memory and stop at 50 MiB unpacked.
 
 **Download and preview.** A cloud placeholder is a file that a sync service keeps online only (for example with OneDrive Files
 On-Demand). The pane shows `Cloud placeholder - not downloaded` with a **Download and preview** button. In this build the button
-does not download anything. Assistant never fetches a placeholder, so the card then says that a download was requested and that
-Assistant did not download the file. Download the file with your sync app, then search again.
+does not download anything. Homa never fetches a placeholder, so the card then says that a download was requested and that
+Homa did not download the file. Download the file with your sync app, then search again.
 
 ## Actions on a file
 
-Actions run on the selected result, in the popup or in the full page. They run on this PC only. Assistant has no action that deletes
+Actions run on the selected result, in the popup or in the full page. They run on this PC only. Homa has no action that deletes
 a file for good (see **Recycle Bin only** below).
 
 | Action | Popup | Full page | Notes |
@@ -559,7 +562,7 @@ a file for good (see **Recycle Bin only** below).
 | Ask Claude about this file | menu | menu | Marked "sends to Claude". A stub in this build: nothing is sent. |
 
 **Results.** The page shows each action's result as a short message. The popup does not show results in this build. An action's
-outcome goes to `~/.assistant/logs/app.log`, and only failures are written there. The folder listing from Ctrl+F does not appear
+outcome goes to `~/.homa/logs/app.log`, and only failures are written there. The folder listing from Ctrl+F does not appear
 in the popup yet, for the same reason. Both are recorded in `docs/api.md` section 12.9.
 
 **Confirmations.** These ask first and name the file:
@@ -571,7 +574,7 @@ in the popup yet, for the same reason. Both are recorded in `docs/api.md` sectio
 - Ask Claude. It shows how many bytes would be sent.
 
 **Recycle Bin only.** Move to Recycle Bin uses the Windows shell, so the item stays in the Recycle Bin and can be restored there.
-Assistant has no permanent delete and no code path that deletes a file for good. The move is refused, with the reason shown, on:
+Homa has no permanent delete and no code path that deletes a file for good. The move is refused, with the reason shown, on:
 
 - network paths (a UNC path, or a mapped network drive), and removable, optical, RAM disk and unknown drive types;
 - any drive whose file system is not NTFS or ReFS (FAT32 and exFAT, for example).
@@ -585,7 +588,7 @@ file of that name already exists in the folder.
 
 **Protected files.** The code treats these files as your own, so Open, Open with, Reveal, Copy path, Rename, Properties, Move to
 Recycle Bin, MD Vault and the folder listing work on them. Two things stop: Ask Claude refuses them, and folder listings leave them
-out. Opening a protected file hands it to its default app, which is outside Assistant's previews. Whether actions should work on
+out. Opening a protected file hands it to its default app, which is outside Homa's previews. Whether actions should work on
 protected files is a decision still to confirm.
 
 **MD Vault.** Ctrl+M, and the menu item, use the MD Vault address in `settings.json`, if you set one:
@@ -596,7 +599,7 @@ protected files is a decision still to confirm.
 
 With an `http://` or `https://` address, the action opens that address in your default browser. MD Vault has no open-file link in
 this build, so you pick the note inside MD Vault. Without an address, the note opens with its default app. There is no Settings
-field for this key, and Assistant checks only that the address starts with `http://` or `https://`.
+field for this key, and Homa checks only that the address starts with `http://` or `https://`.
 
 > **Correction, 2026-11-07 (commit 3d7bc25):** Ask Claude is no longer a stub. From the code at 3d7bc25 (`assistant/actions/shell.py`, `ask_claude`; `assistant/actions/claude.py`, `send`), Ask Claude first asks for confirmation and states the byte count and what it would send: the first 32 KB of the file's text, or the whole text when you choose that. It sends only after you confirm. It runs `claude -p` with no tools and no session saved, through your Claude Code sign-in. Office files send their extracted text, not the file. Binary, protected, cloud-placeholder and too-large files are refused. The HTTP route is in [docs/api.md](docs/api.md) section 13.4. The next paragraph describes the M3b stub and is kept as written.
 
@@ -611,7 +614,7 @@ Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists 
   **Rescan now** starts a scan at once. Changes apply without a restart.
 - **A folder on a network share** (a UNC path, or a mapped network drive) is read over the network. If it does not answer
   within 60 seconds (`index.root_timeout_s`), it is skipped and its state reads `timeout`. The rest of the app keeps working.
-- **Persisted index.** The index is kept in `~/.assistant/index/files.idx`. After a restart, search works at once from the
+- **Persisted index.** The index is kept in `~/.homa/index/files.idx`. After a restart, search works at once from the
   stored index while a background scan runs at low priority. Scans run at start, once a day (`index.rescan_hours`, default
   24), when you press **Rescan now**, and after a burst of changes. The daily scan waits while the PC is on battery
   (`index.pause_on_battery`, default on) and retries every 15 minutes. The start scan does not wait for battery.
@@ -636,15 +639,15 @@ Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists 
 > **Correction, 2026-11-07 (M3b), excludes:** a list you save on the Roots & excludes page **replaces** the default list; it does not add to it. **Restore defaults** on that page puts the built-in list back. The Windows entries in the built-in list are written for any drive (for example `*:\Windows\`), so they match on every drive letter. The "Default excludes" paragraph above describes the built-in list.
 
 > **Correction, 2026-11-07 (commit 3d7bc25), default excludes:** the built-in list now also excludes `Program Files`, `Program Files (x86)`, `ProgramData` and every `AppData` folder, plus the Windows search data under `ProgramData`. The index is for your own documents and files, so these are left out. The exclude rules match a pattern with a `/` against the root-relative path or its tail (`assistant/index/excludes.py`, lines 8 to 9 and 36), so `AppData` is excluded at any depth under a root, not only the cache folders listed above. A whole drive such as `C:\` can be added as a root; the Windows, Program Files and ProgramData entries then apply to that drive. A new file under a root is picked up by the file watcher in about 1 second. That figure is the target, not a measurement by doc-keeper: the watcher batches events for 0.25 s (`assistant/index/manager.py`, `HINT_BATCH_S`).
-- **Your Assistant folder is never indexed.** The folder `~/.assistant` (or the folder named by `ASSISTANT_HOME`) and any
-  `.assistant` folder are left out, even when a root contains your whole user profile. Claude cannot read them either.
+- **Your Homa folder is never indexed.** The folder `~/.homa` (or the folder named by `HOMA_HOME`), and any `.homa` or
+  pre-rename folder, are left out, even when a root contains your whole user profile. Claude cannot read them either.
 - **Protected files.** Files whose names or folders match the secrets list are flagged when the index is built. They are
   never previewed, never returned to Claude, and never sent to Ask Claude. The list:
   - names: `.env*`, `*.pem`, `*.key`, `*.pfx`, `*.p12`, `*.ppk`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`,
     `*.asc`, `*.p8`, `*.jks`, `.pgpass`, `.htpasswd`, `.git-credentials`, `.netrc`, `.npmrc`, `.pypirc`, `kubeconfig`,
     `*.kubeconfig`, `.claude.json`
   - path endings: `.aws\credentials`, `.docker\config.json`, `.kube\config`, `.claude\settings.json`
-  - folders: `.assistant`, `.ssh`, `.gnupg`, `.azure`, `.config\gh`, browser profile folders for Chrome, Edge, Brave, Vivaldi,
+  - folders: `.homa`, `.assistant`, `.ssh`, `.gnupg`, `.azure`, `.config\gh`, browser profile folders for Chrome, Edge, Brave, Vivaldi,
     Opera and Firefox, and password-manager data folders for KeePass, KeePassXC, Bitwarden, 1Password, LastPass, Dashlane,
     Enpass, NordPass and Keeper
   - content: a file that contains a PEM private-key header is refused when Claude asks to read it, even under a harmless name.
@@ -654,7 +657,7 @@ Nothing is indexed until you add a folder. Settings, **Roots & excludes** lists 
 
 ## Claude and your files
 
-Claude can find and read your indexed files through the `assistant` MCP server, with four read-only tools:
+Claude can find and read your indexed files through the `homa` MCP server, with four read-only tools:
 
 | Tool | What it does |
 |---|---|
@@ -667,7 +670,7 @@ Claude **can**: search the indexed roots by name, path, extension, chip and date
 is inside a root, not excluded, not protected and not a cloud placeholder that has not been downloaded.
 
 Claude **cannot**: open, reveal, rename, move, delete or run anything; see files outside the roots; read files in the
-Assistant folder; see protected files or their names in search; read binary files (Office documents, PDFs, images, archives,
+Homa folder; see protected files or their names in search; read binary files (Office documents, PDFs, images, archives,
 executables); read a cloud placeholder that is not downloaded; or read a file whose first megabyte contains a private key.
 
 **Text returned to Claude is wrapped.** Each `read_text_preview` result is placed between a header and a footer:
@@ -682,13 +685,13 @@ The tool description tells Claude to treat that text as data and not to follow i
 the boundary. It does not filter the text, so a file can still contain text that tries to steer Claude. Read untrusted files
 with that in mind.
 
-**What leaves the PC.** Assistant itself sends nothing. But when Claude calls `read_text_preview`, the text it reads becomes
+**What leaves the PC.** Homa itself sends nothing. But when Claude calls `read_text_preview`, the text it reads becomes
 part of the Claude conversation, and that conversation is sent to Anthropic's service as Claude Code or Claude Desktop
 normally does. So file text can leave your PC through a Claude session, when Claude is asked to read it. This is the one
 exception to "nothing leaves your PC" in this version. The PRD asked for read-only file tools (AC-MC-3 and AC-MC-4), so the
 exception is intended. Do not point Claude at folders you would not want it to read.
 
-**What is logged.** Each MCP call is logged to `~/.assistant/logs/mcp.log` as a shape only: the tool name, the argument
+**What is logged.** Each MCP call is logged to `~/.homa/logs/mcp.log` as a shape only: the tool name, the argument
 names with their lengths, and the result size. Paths, queries and file text are never written.
 
 ## Settings
@@ -703,8 +706,8 @@ seconds after you stop typing. A value that is not allowed is shown in red and i
 - **Calendars.** The list of calendar addresses (host only), with Add and Remove. Read meetings from classic Outlook.
   Lead time and Check every.
 - **Claude Code.** Whether the hooks are installed, with **Install hooks** and **Remove hooks** (these run
-  `python -m assistant hooks install` and `python -m assistant hooks remove`). The page also states what Assistant can
-  and cannot see yet: "Assistant sees permission prompts and task completion; it cannot yet see AskUserQuestion or
+  `python -m homa hooks install` and `python -m homa hooks remove`). The page also states what Homa can
+  and cannot see yet: "Homa sees permission prompts and task completion; it cannot yet see AskUserQuestion or
   plan-approval waits (hook coverage probe pending)."
 - **MCP.** The Claude Code command and the Claude Desktop JSON, with **Copy command**, **Copy JSON** and **Regenerate
   token**. See [Connect Claude over MCP](#connect-claude-over-mcp).
@@ -767,7 +770,7 @@ Notes on the table:
 > `root_timeout_s`, default 60, 0.1 to 3600; `pause_on_battery`, default `true`) and `notes` (`dir`, empty or an absolute folder
 > path). A bad `index` or `notes` value falls back for that key only, with a warning in the log.
 
-**Keys added in M3b (2026-11-07).** These are in `settings.json`. The defaults and limits are read from `assistant/settings.py`, and a bad
+**Keys added in M3b (2026-11-07).** These are in `settings.json`. The defaults and limits are read from `homa/settings.py`, and a bad
 value falls back for that key only, with a warning in the log.
 
 | Key | Default | Allowed | Notes |
@@ -784,9 +787,9 @@ built-in list back.
 
 ## Settings and files
 
-Everything lives in `~/.assistant` (set the `ASSISTANT_HOME` environment variable to use another folder). Copying that folder
+Everything lives in `~/.homa` (set the `HOMA_HOME` environment variable to use another folder). Copying that folder
 to another machine carries your settings, cards, reminders and token. The hook entries live in `~/.claude/settings.json`,
-which is not in the folder, so run `python -m assistant hooks install` on the other machine too.
+which is not in the folder, so run `python -m homa hooks install` on the other machine too.
 
 | Path | What it holds |
 |---|---|
@@ -795,7 +798,7 @@ which is not in the folder, so run `python -m assistant hooks install` on the ot
 | `state.json` | Open and recently dismissed cards, their seen and snooze state, and mute state. |
 | `state_ui.json` | Icon position and sound on/off. |
 | `reminders.json` | Pending reminders. |
-| `assistant.pid` | pid and port of the running instance. Removed on a clean exit. |
+| `homa.pid` | pid and port of the running instance. Removed on a clean exit. |
 | `hooks-install.json` | What the hook installer last changed, for `hooks remove`. |
 | `hooks-backup/` | Copies of `~/.claude/settings.json` made before the hook install. Kept until you delete this folder. |
 | `events/`, `events/rejected/` | The file drop folder, and files it refused. |
@@ -808,30 +811,128 @@ Settings in the menu (**Settings**) and search (**Search**) are placeholders in 
 
 > **Correction, 2026-11-07 (M3a):** **Search** is live from M3a. The index and the notes folder are stored under the same folder: `index/files.idx` (the file index), `index/notes.json.gz` (the Ask notes index) and `saved_searches.json` (saved searches). The `settings.json` keys added in M3a are listed under [Settings](#settings).
 
+## Upgrading from Assistant (2026-11-08)
+
+The app was called Assistant before 2026-11-08. This section says what changed, what the first start of Homa moves, and how
+to go back. Source: `homa/migrate.py`, `homa/paths.py`, `homa/__main__.py`, `assistant/` (the shim) and
+`docs/plans/2026-11-08-rename-to-homa.md`, sections 4.5 and 7. Status of this section: written from the code on 2026-11-08;
+it has not yet been run on a real install (the cutover on the personal laptop is R9 in that plan, and qa is still running
+the suite). Results will be recorded in `CHANGELOG.md`.
+
+**What is different.**
+
+| Before (Assistant) | Now (Homa) |
+|---|---|
+| `python -m assistant` | `python -m homa` (the old form still works in 0.2.x, see below) |
+| `%USERPROFILE%\.assistant` | `%USERPROFILE%\.homa` |
+| `ASSISTANT_HOME`, `ASSISTANT_NOTES_DIR`, `ASSISTANT_TEST_MODE`, `ASSISTANT_STATIC_DIR` | `HOMA_HOME`, `HOMA_NOTES_DIR`, `HOMA_TEST_MODE`, `HOMA_STATIC_DIR` |
+| `%LOCALAPPDATA%\Assistant\edge-profile` | `%LOCALAPPDATA%\Homa\edge-profile` |
+| `assistant.pid` | `homa.pid` |
+| `Assistant.lnk` (Desktop, Startup) | `Homa.lnk` |
+| MCP server `assistant` (`-m assistant.mcp_stdio`) | MCP server `homa` (`-m homa.mcp_stdio`) |
+| Window title `Assistant - file search` | `Homa - file search` |
+| Browser storage keys `assistant.theme`, `assistant.split`, `assistant.previewZoom` | `homa.theme`, `homa.split`, `homa.previewZoom` (the page still reads the `assistant.*` keys when the new ones are missing) |
+
+The package is `homa` and the install name is `homa-desk`, version 0.2.0. The index file format tag is unchanged, so an
+existing index (`index/files.idx`) should load as it was, with no rebuild. That is read from the code, not yet observed. The icon is a new gold bird on navy.
+
+**What the first start does.** Homa runs a one-time move when it starts, and also when you run `python -m homa --init`. It
+does nothing when `HOMA_HOME` or `ASSISTANT_HOME` is set, because an explicit folder is never moved. The steps, in order:
+
+1. If an Assistant instance is running from `%USERPROFILE%\.assistant`, Homa asks it to shut down through its own
+   `/v1/shutdown` route, with the token from that folder, and waits up to 15 seconds. If it does not stop, nothing is moved
+   and the message says to close it from its icon menu and start Homa again.
+2. It renames `%USERPROFILE%\.assistant` to `%USERPROFILE%\.homa`. The token, `settings.json`, the file index, reminders,
+   card state, `events\`, `hooks-backup\` and `logs\` move as they are. The move is a rename on the same drive, which keeps the
+   folder's permissions. Confirming that with `icacls` is part of the security review, still pending.
+   If Windows refuses the rename (for example, an Explorer window or an editor has a file open in that folder), nothing is
+   moved and the message names the folder. Close whatever has it open and start Homa again.
+3. It deletes the old `assistant.pid`, which is stale after step 1.
+4. It moves `%LOCALAPPDATA%\Assistant` to `%LOCALAPPDATA%\Homa` (the Edge profile for the full page). This is best effort.
+   If the move is skipped, for example because Edge holds a lock, the full page creates a fresh profile the next time it
+   opens, and the old folder is left in place for you to delete.
+5. It rewrites `Assistant.lnk` as `Homa.lnk` on the Desktop and in the Startup folder, but only a shortcut whose arguments are
+   `-m assistant` and whose working folder is this install. A shortcut that points at another copy is left alone. The
+   Desktop and Startup folders are looked up through Windows, which should follow a OneDrive-redirected Desktop (not yet
+   observed on a machine that uses it).
+6. It writes `migrated-from.json` in `%USERPROFILE%\.homa`, with the old folder, the time, the Homa version, the Edge
+   profile outcome and the shortcuts it rewrote.
+7. It shows one card, "Assistant is now Homa", with the new folder, the number of shortcuts updated and the Edge profile
+   outcome.
+
+Nothing is deleted except the stale pid file and the one `Assistant.lnk` that pointed at this install. A second start finds
+nothing to move and does nothing.
+
+**If both folders exist.** Suppose `%USERPROFILE%\.homa` already exists when Homa starts, for example because you ran
+Homa once before the move. Homa then moves nothing and uses `.homa`. It shows a card and a `--doctor` line that say both
+folders exist and were not merged. If your settings or index are missing, stop Homa, rename `.homa` to something else, and
+start Homa again. If `migrated-from.json` is already in `.homa`, `--doctor` reports the old folder as still present, with
+its size. Homa does not read it, and you can delete it when you are sure.
+
+**Hooks and Claude Code.** The migration does not touch `%USERPROFILE%\.claude\settings.json`. Hook entries contain no
+product name: they hold the route `/v1/hooks/claude-code`, the loopback address with a port, and the bearer token, and none of
+those change in the rename. The entries still work if the port matches `port` in `settings.json`. If they point at a
+different port, Homa shows a sticky card, "Claude Code hooks point at port P; Homa listens on Q", and `--doctor` adds
+`at port P; settings port is Q` to the `hooks installed` line. If the entries carry a token that is not Homa's, the card
+says so instead. Fix it on the Claude Code page of Settings with the
+re-install button, or run `python -m homa hooks install`.
+
+An existing Claude Code HTTP entry named `assistant` keeps working, because its URL, route and token are unchanged. Use
+`claude mcp remove assistant` and then add `homa` with the command in [Connect Claude over MCP](#connect-claude-over-mcp)
+if you want the new name. Claude Desktop needs its config changed to `homa` and `homa.mcp_stdio`, or it keeps the old name.
+
+**The compatibility shim (0.2.x only).** `python -m assistant` and `python -m assistant.mcp_stdio` still start Homa. Each
+prints one line to stderr, "python -m assistant is now python -m homa (this alias is removed in 0.3.0)", and nothing else
+changes. Only these two entry points are kept. `from assistant...` imports are not supported. The `ASSISTANT_*` environment
+variables are still read as a fallback when the `HOMA_*` variable is not set, with one deprecation warning in the log for each.
+When neither `HOMA_HOME` nor `ASSISTANT_HOME` is set, Homa uses `~/.homa` if it exists, and otherwise `~/.assistant` if that
+exists (a folder that has not been moved yet), and otherwise creates `~/.homa`.
+
+**Removal in 0.3.0.** The shim, the `ASSISTANT_*` fallbacks, and the `.assistant` fallback are removed in 0.3.0. The
+migration may stay, for `--doctor` reporting. Scripts that still write to `~/.assistant/events/` must switch to
+`~/.homa/events/` before then. After the first start the old folder no longer exists, so such a write fails with an error
+instead of being lost.
+
+**Rolling back.** Tag `pre-homa-rename` marks the last Assistant commit (`bcebd08` on `main`).
+
+1. Stop Homa: `python -m homa shutdown`.
+2. In the checkout, go back to the tag: `git checkout pre-homa-rename`. Only the user runs `git reset --hard pre-homa-rename`
+   on `main`; agents do not.
+3. Rename the data folder back and remove the marker: `ren "%USERPROFILE%\.homa" .assistant`, then delete
+   `%USERPROFILE%\.assistant\migrated-from.json` (and `migration-notice.json`, if it is there).
+4. Rename the Edge profile back, if it was moved: `ren "%LOCALAPPDATA%\Homa" Assistant`.
+5. Reinstall the editable package: `.venv\Scripts\python -m pip install -e .`
+6. Recreate the shortcut with `powershell -ExecutionPolicy Bypass -File scripts\install-shortcut.ps1` (at the tag this creates
+   `Assistant.lnk`), and delete `Homa.lnk` by hand from the Desktop and the Startup folder.
+7. Start the old app: `python -m assistant`.
+
+The Claude Code hook entries need nothing: the rename did not change them. If you re-installed them for another port in
+the meantime, they still fit the old app, because the route and the token are the same.
+
 ## Troubleshooting
 
-**"Assistant could not start: 127.0.0.1:17171 is not available… It is held by process N (name)."**
-Another program is using the port. Close it, or change `port` in `~/.assistant/settings.json` to a free port between 1024
-and 65535, then restart Assistant and run `python -m assistant hooks install` again. The hook URLs contain the port, so
-they must be rewritten. When Assistant starts at logon with no console, this message appears as a message box.
+**"Homa could not start: 127.0.0.1:17171 is not available… It is held by process N (name)."**
+Another program is using the port. Close it, or change `port` in `~/.homa/settings.json` to a free port between 1024
+and 65535, then restart Homa and run `python -m homa hooks install` again. The hook URLs contain the port, so
+they must be rewritten. When Homa starts at logon with no console, this message appears as a message box.
 
-**"Assistant is already running (pid N). This second copy will exit."**
+**"Homa is already running (pid N; pid file PATH). This second copy will exit."**
 A copy is already running, so the new one stops. If you cannot see the icon and the port is free, the pid file is stale:
 it was left behind by a crash, and its pid now belongs to some other Python process. Quit the other Python program, or
-delete `~/.assistant/assistant.pid` while Assistant is not running, then start again. The app does not clear a stale pid
+delete `~/.homa/homa.pid` while Homa is not running, then start again. The app does not clear a stale pid
 file by itself yet.
 
 > **Correction, 2026-11-06:** a stale pid file is cleared at start since M1-10. If the file names a pid that is not the Assistant listening on the recorded port, Assistant removes the file and logs a warning. Observed in the M2 security review, item R4-2. The advice above still applies when another program holds the port.
 
 **Icon is not visible.** Look at the bottom-right of your primary monitor. Right-click the icon and choose **Reset
-position**. If that does not work, close Assistant, delete `~/.assistant/state_ui.json` (this also resets the sound
+position**. If that does not work, close Homa, delete `~/.homa/state_ui.json` (this also resets the sound
 on/off setting), and start it again.
 
 **Claude Code cards do not appear.**
-- Run `python -m assistant --doctor`. The `port` line should say the port is in use by a Python process (Assistant running).
+- Run `python -m homa --doctor`. The `port` line should say the port is in use by a Python process (Homa running).
   The `hooks installed` line should say `yes (all 8 events)`. The `Claude Code` line should say the version meets the minimum.
 - Confirm the port in the hook URL in `~/.claude/settings.json` matches `port` in `settings.json`.
-- Hooks fail silently by design. If Assistant is not running, Claude Code carries on and shows nothing.
+- Hooks fail silently by design. If Homa is not running, Claude Code carries on and shows nothing.
 - Some waits may not send a hook event. Questions asked through `AskUserQuestion`, and plan approval, are not yet confirmed
   to do so. Probe P6 covers this and is still to run.
 - A waiting card clears on the next event from that session. If Claude asks nothing else, dismiss it yourself.
@@ -839,12 +940,12 @@ on/off setting), and start it again.
 **`install.ps1` says pip failed.** The install uses binary wheels only. Use a 64-bit Python 3.10 or newer, and read the pip
 output above the message. A package without a wheel for your Python version will stop the install.
 
-**`send` says "Assistant is not running on 127.0.0.1:…".** Start Assistant. The `send` command refuses to send if another
+**`send` says "Homa is not running on 127.0.0.1:…".** Start Homa. The `send` command refuses to send if another
 process holds the port, and says so.
 
 **A reminder was refused.** The message gives two examples of accepted text. The grammar above lists every accepted shape.
 
-**Logs.** `~/.assistant/logs/app.log`. Before you paste a log anywhere, check it: it contains the folder path of your
+**Logs.** `~/.homa/logs/app.log`. Before you paste a log anywhere, check it: it contains the folder path of your
 Windows profile.
 
 **Calendar not updating.** Check the calendar's state first. With your token in the header,
@@ -879,12 +980,12 @@ the Claude Code entry still has the old token. See [Connect Claude over MCP](#co
 > (`tests/test_m2_9.py`, `test_n2_*`). The `401` note above is unchanged.
 
 **Hotkey: "already registered by another app".** Another program holds the combination. Settings, Search, choose another
-combination in the Hotkey field. The icon still opens the search box. To find the holder, run `python -m assistant --doctor`:
-its `hotkey` line gives the status. If it says the running Assistant may be the holder, the combination is already in use by
+combination in the Hotkey field. The icon still opens the search box. To find the holder, run `python -m homa --doctor`:
+its `hotkey` line gives the status. If it says the running Homa may be the holder, the combination is already in use by
 the copy that is running. The log has a warning line that names the combination.
 
 **Index not building, or search returns nothing.** Check that at least one folder is listed under Settings, Roots & excludes.
-With no roots, nothing is indexed and the header says so. Then run `python -m assistant --doctor`: `index size and age` says
+With no roots, nothing is indexed and the header says so. Then run `python -m homa --doctor`: `index size and age` says
 `no index file yet` until the first scan completes, and `index roots` lists the folders. In Settings, Roots & excludes, a
 folder that reads `missing` does not exist or is not reachable, and one that reads `timeout` is a network folder that did not
 answer within 60 seconds. A search that finds nothing in a folder can also mean the folder is excluded: each rule shows its
@@ -898,12 +999,12 @@ second word for the path, an extension (`md`, or `-e md`), a chip, or a modified
 10,000 entries. If you have a very large folder under a root, consider leaving it out with an exclude rule, for example
 `C:\Users\<user>\Archive\` as a drive-letter rule.
 
-**Full page shows "Open this page from Assistant".** The page opened without a launch code. This happens when the page is reloaded
+**Full page shows "Open this page from Homa".** The page opened without a launch code. This happens when the page is reloaded
 (a reload loses the session), when the `/app/` address was opened by hand, or when the code was used already. If the code is older
 than 30 seconds, or was used, the page says `Could not start the session` with `The launch code is missing, used or expired.`
 Press **F11** in the search box to open a new window.
 
-**Full page does nothing, and the log says "msedge.exe not found".** Assistant looks for `msedge.exe` in the standard Program Files
+**Full page does nothing, and the log says "msedge.exe not found".** Homa looks for `msedge.exe` in the standard Program Files
 folders (`Program Files (x86)\Microsoft\Edge` and `Program Files\Microsoft\Edge`). If neither exists, F11 and the button do nothing
 visible, and `logs/app.log` says `msedge.exe not found; the full page cannot open`. Install or repair Microsoft Edge. The popup
 shows no message for this. If Edge starts but its window is not found within 15 seconds, the log says so and Esc in the page does
@@ -922,13 +1023,14 @@ download (see [Full page and previews](#full-page-and-previews)).
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
-This stops the app, removes Assistant's hook entries from `~/.claude/settings.json` (restoring the backup if the file is
-unchanged), removes the Startup shortcut, and asks before deleting `~/.assistant`. Deleting that folder also deletes
+This stops the app, removes Homa's hook entries from `~/.claude/settings.json` (restoring the backup if the file is
+unchanged), removes the Startup shortcut (and the shortcut from before the rename, if one is still there), and asks before
+deleting `~/.homa` (it also mentions the older data folder if one is present). Deleting that folder also deletes
 `hooks-backup/`, which holds full copies of your Claude Code settings from before the install.
 
 The uninstall does not remove the pip packages it installed, and it does not delete the `<repo>` folder. Delete the
 folder yourself when you are done. If `python` is not on `PATH`, the uninstall cannot stop the app or remove the hook
-entries. It still removes the shortcut and offers to delete `~/.assistant`. Run `python -m assistant hooks remove` later,
+entries. It still removes the shortcut and offers to delete `~/.homa`. Run `python -m homa hooks remove` later,
 with Python on `PATH`, to clear the hook entries.
 
 ## Features
@@ -964,7 +1066,7 @@ What M2 adds:
 - **Meetings:** blue meeting cards from calendar addresses (a Google secret address, a published Outlook calendar) and
   from classic Outlook on this PC. Lead time, polling, de-duplication, and auto-dismiss at the end of the event. A purple
   "Calendar not updating" card appears after an hour without a successful read.
-- **MCP:** an `assistant` MCP server at `/mcp` with four card and reminder tools, a stdio shim for Claude Desktop, and a
+- **MCP:** a `homa` MCP server at `/mcp` with four card and reminder tools, a stdio shim for Claude Desktop, and a
   call log at `logs/mcp.log` that holds shapes only.
 - **Settings window:** six pages (General, Cards, Calendars, Claude Code, MCP, About). Changes are saved as you make
   them. Lead time, polling, source mute and the every-monitor setting apply without a restart.
@@ -982,7 +1084,7 @@ What M3a adds:
 - **Files search:** a hotkey (default Ctrl+Alt+Space) and the icon open a search box beside the icon. Names and paths under your
   roots, with the grammar in [Search files](#search-files), chips, a modified-date filter, saved searches and a visible
   interpretation. Results rank by how well the name matches.
-- **Index:** persisted under `~/.assistant/index/`, rescanned at start and daily, with a file watcher between scans. Excludes
+- **Index:** persisted under `~/.homa/index/`, rescanned at start and daily, with a file watcher between scans. Excludes
   with per-rule counts, and network roots that time out without blocking the app.
 - **Ask notes:** BM25 search over `.md` files in a notes folder, with rendered passages and a local footer.
 - **Claude over MCP:** `search_files`, `get_file_info`, `read_text_preview` and `list_indexed_roots`, all read-only, with wrapped
@@ -1005,16 +1107,16 @@ What M3b adds (2026-11-07):
 
 What 3d7bc25 adds (2026-11-07). These are read from the code at 3d7bc25. The commit diff was not read, and none of these has been observed on a live desktop:
 
-- **Rounded cards and icon:** on Windows 11 the card and icon windows ask Windows for rounded corners. Where Windows does not offer that, the window keeps a square shape with a rounded outline (`assistant/overlay/win.py`).
-- **Desktop shortcut:** `install.ps1` creates `Assistant.lnk` on the Desktop as well as in the Startup folder. Pass `-NoShortcut` to skip it. See [Install](#install-windows-no-admin).
-- **Claude Code hooks:** `python -m assistant hooks install` adds the eight hook entries and `hooks remove` takes them out. When Claude is waiting for you, an amber card appears; when a task is done, a green card appears. See [Connect Claude Code (hooks)](#connect-claude-code-hooks).
+- **Rounded cards and icon:** on Windows 11 the card and icon windows ask Windows for rounded corners. Where Windows does not offer that, the window keeps a square shape with a rounded outline (`homa/overlay/win.py`).
+- **Desktop shortcut:** `install.ps1` creates `Homa.lnk` on the Desktop as well as in the Startup folder. Pass `-NoShortcut` to skip it. See [Install](#install-windows-no-admin).
+- **Claude Code hooks:** `python -m homa hooks install` adds the eight hook entries and `hooks remove` takes them out. When Claude is waiting for you, an amber card appears; when a task is done, a green card appears. See [Connect Claude Code (hooks)](#connect-claude-code-hooks).
 - **Full page:** opens with the query from the popup, and the popup closes. It has live search (150 ms), Tab completion, the search URL (`q=`), a light and dark theme saved in `settings.json` and shared with the popup, and zoomable previews from 80 to 200 percent. See [Full page and previews](#full-page-and-previews).
 - **Search words:** every word may match the name or the path, and name matches come first. A very common word gives a result marked truncated. See [Search files](#search-files).
 - **Live search in the popup:** results update while you type (120 ms). Enter opens the selected result.
 - **Whole-drive indexing:** a root can be a whole drive. The default excludes now also leave out Windows, Program Files, Program Files (x86), ProgramData and AppData. A new file reaches the results in about 1 second through the file watcher, which is a target and not a measurement (see [Roots, excludes and protected files](#roots-excludes-and-protected-files)).
 - **Ask Claude:** sends a file's text only after your confirmation (see [Actions on a file](#actions-on-a-file)).
-- **Shutdown:** the teardown steps share a 3-second deadline (`assistant/app.py`, `SHUTDOWN_STEPS_S`). The full bound, including the server stop, is in [docs/api.md](docs/api.md) section 13.6.
-- **`update --yes`:** on a git clone, `update` runs `git pull --ff-only` and then pip on the requirements, with no flag needed. On a release zip (with `update.source` set), it downloads and unpacks the zip; pip runs only with `--yes`, and otherwise the command is printed (`assistant/update.py`).
+- **Shutdown:** the teardown steps share a 3-second deadline (`homa/app.py`, `SHUTDOWN_STEPS_S`). The full bound, including the server stop, is in [docs/api.md](docs/api.md) section 13.6.
+- **`update --yes`:** on a git clone, `update` runs `git pull --ff-only` and then pip on the requirements, with no flag needed. On a release zip (with `update.source` set), it downloads and unpacks the zip; pip runs only with `--yes`, and otherwise the command is printed (`homa/update.py`).
 
 ## Security & privacy
 
@@ -1028,12 +1130,12 @@ Facts about this version, with the source for each. The security review is in
   is not yet checked. The check is on the list for the first run on a managed laptop.
 - **Loopback only, checked on every request.** The `Host` and `Origin` headers must name `127.0.0.1` or `localhost`.
   Every route, including the hook receiver and shutdown, requires the bearer token.
-- **The token** is in `~/.assistant/token`, readable by your user only. It is created on first run and never printed. The
+- **The token** is in `~/.homa/token`, readable by your user only. It is created on first run and never printed. The
   app, the command line and `--doctor` do not show its value.
 - **The token is also in `~/.claude/settings.json`,** as plain text in the hook headers. The settings file keeps the
   permissions it inherits from your profile, not the stricter permissions of the token file. Anyone who can read that
-  file can call the local API while Assistant runs on this PC. `hooks remove` deletes the entries.
-- **The hook backup is in `~/.assistant/hooks-backup/`.** It is a full copy of your Claude Code settings from before the
+  file can call the local API while Homa runs on this PC. `hooks remove` deletes the entries.
+- **The hook backup is in `~/.homa/hooks-backup/`.** It is a full copy of your Claude Code settings from before the
   install, and it may contain values you keep in that file. It is never pruned. Delete it when you no longer need it.
 - **The hook receiver is passive.** It answers `{}`, never returns a permission decision, and never changes what Claude does.
 - **Card text is shown on screen and saved.** Permission cards show a summary of the tool input, such as a command or a
@@ -1042,14 +1144,14 @@ Facts about this version, with the source for each. The security review is in
 - **Cards are plain text.** Card links open only on click, and only for `http://` and `https://`.
 - **Strict input handling.** JSON is strict: `NaN` and infinite numbers are refused. Body size is capped. Fields are
   validated, with length limits.
-- **No admin, no service.** Install and run are per user. The Startup shortcut runs `pythonw -m assistant` from the
+- **No admin, no service.** Install and run are per user. The Startup shortcut runs `pythonw -m homa` from the
   `<repo>` folder. Keep that folder out of shared or world-writable locations.
 - **Secrets deny-list** (PRD SEC-3) does not apply yet, because this version has no file search or preview.
 - **Security review:** the review found one blocking issue: the command-line `send` and `shutdown` commands could send the
   token and card text to an environment proxy. It was fixed and re-checked. The re-check reports no blocking findings.
   Open hardening items are listed in the review file.
 
-**For IT:** Assistant is a Python script run by the approved Python interpreter. It listens on `127.0.0.1` only and makes
+**For IT:** Homa is a Python script run by the approved Python interpreter. It listens on `127.0.0.1` only and makes
 no outbound network connections in this version. It downloads packages only when you run `install.ps1`, which runs pip
 for the packages pinned in `requirements.txt`, as binary wheels, into your user profile, without elevation. It does not
 download or run other code. The plugin folder that later versions add is not part of this version.
@@ -1060,7 +1162,7 @@ download or run other code. The plugin folder that later versions add is not par
 
 Source: the M2 security review, `docs/security/2026-11-06-m2-review.md` (Review 5), unless a point says otherwise.
 
-- **The calendar addresses are the one background network path.** Each address is fetched when Assistant starts, when the
+- **The calendar addresses are the one background network path.** Each address is fetched when Homa starts, when the
   address list changes, and then once per poll (**Check every**, 1 to 60 minutes). There is no other fetch. The fetch uses your system proxy settings, so a corporate proxy applies to
   it. It also follows redirects, and the redirect target is not limited to the calendar's own host (R5-N3, to be fixed
   before M3). The command-line sender never uses a proxy and never follows redirects (Review 3 B1, closed).
@@ -1072,9 +1174,9 @@ Source: the M2 security review, `docs/security/2026-11-06-m2-review.md` (Review 
 - **Calendar addresses are credentials.** They are stored only in `settings.json`. They do not appear in `app.log`,
   `mcp.log`, `state.json`, `/v1/health` or `--doctor`. Settings shows the host with `(path hidden)`. Observed in the review
   with planted paths and query strings (AC-MT-7, SEC-12).
-- **Where the token is kept.** Besides `~/.assistant/token` (readable by your user only), the token is in:
+- **Where the token is kept.** Besides `~/.homa/token` (readable by your user only), the token is in:
   - `~/.claude/settings.json`, as plain text in each hook header. The file keeps the permissions of your profile.
-  - `~/.assistant/hooks-backup/`. A backup taken during a reinstall can hold Assistant's hook entries, and so an older
+  - `~/.homa/hooks-backup/`. A backup taken during a reinstall can hold Homa's hook entries, and so an older
     token (R5-F4).
   - the clipboard, after **Copy command**. Windows Clipboard History and cloud clipboard sync can keep it.
   - the PowerShell command history, if you paste the `claude mcp add` line.
@@ -1091,7 +1193,7 @@ Source: the M2 security review, `docs/security/2026-11-06-m2-review.md` (Review 
     it is fixed, do not click a join link from an invitation you do not recognise.
   - R5-F2: one malformed event in a calendar stops every meeting from that calendar.
   - R5-F3: Regenerate fails if another program has the token file open, and then the old token stays valid.
-  - R5-F4: after a reinstall, `hooks remove` can restore a backup that still holds Assistant's own entries.
+  - R5-F4: after a reinstall, `hooks remove` can restore a backup that still holds Homa's own entries.
   - R5-F5: classic Outlook is on by default, and one invalid `calendars` value resets the whole section.
   - Also open: R5-N1 (a token holder can write a forged line into `mcp.log` through a crafted tool name), R5-N2 (`GET /mcp`
     can open streams that never end), R5-N5 (the token is masked only in tool input, not in other hook text), and R5-N7
@@ -1265,6 +1367,11 @@ recorded in `docs/security/`, the points below describe the design and the code,
   - Not yet observed: the live desktop pass for the page, the popup's live search and the theme; the test run for this commit (not run by doc-keeper).
   - Security review: `docs/security/2026-11-07-m4-review.md` (Review 11 BLOCK on R11-F1; Review 12 PASS for commit, with low NOTEs R12-N2 and R12-N3 open).
   - Known issues: a 401 on the theme route reverts the page's theme (fixed after 3d7bc25, pending commit: the 401 now restores `<html data-theme>`); a caret in the home folder path breaks Continue (fixed after 3d7bc25, pending commit: Continue now works with `^ & ! ( )` in the home path); the performance and churn tests are flaky under load; the remind-me end-to-end test is flaky on a busy desktop.
+
+- **Rename to Homa, 2026-11-08 (in progress):** the app is called Homa, with `python -m homa`, `~/.homa` and the `homa` MCP
+  server. The first start moves an existing older data folder (see [Upgrading (2026-11-08)](#upgrading-from-assistant-2026-11-08)).
+  Pending at the time of writing: the qa run of the suite, the security review of the migration, the work-laptop cutover and
+  the icon sign-off on the rendered artwork. Plan: `docs/plans/2026-11-08-rename-to-homa.md`. Design: `docs/design/2026-11-08-homa-icon-spec.md`.
 
 ## Documentation
 

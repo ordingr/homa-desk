@@ -11,8 +11,8 @@ import uuid
 
 import pytest
 
-cards = pytest.importorskip("assistant.cards", reason="assistant/cards (M1-1) not present")
-store_mod = pytest.importorskip("assistant.cards.store", reason="assistant/cards/store.py (M1-1) not present")
+cards = pytest.importorskip("homa.cards", reason="homa/cards (M1-1) not present")
+store_mod = pytest.importorskip("homa.cards.store", reason="homa/cards/store.py (M1-1) not present")
 
 Card = cards.Card
 CardStore = store_mod.CardStore
@@ -399,7 +399,7 @@ def test_patch_validates_fields(store):
 
 def test_unknown_fields_are_ignored_and_logged_once(caplog):
     name = "zz_" + uuid.uuid4().hex[:8]
-    with caplog.at_level(logging.DEBUG, logger="assistant.cards"):
+    with caplog.at_level(logging.DEBUG, logger="homa.cards"):
         a = Card.from_dict({"title": "t", name: 1})
         b = Card.from_dict({"title": "t", name: 2})
     assert a.title == b.title == "t"

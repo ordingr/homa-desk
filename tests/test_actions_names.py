@@ -1,7 +1,7 @@
 """Windows file-name rules for Rename (plan 7.4 M3b-4; AC-AC-4). Pure function, no mocks."""
 import pytest
 
-names = pytest.importorskip("assistant.actions.names", reason="assistant/actions/names.py (M3b-4) not present")
+names = pytest.importorskip("homa.actions.names", reason="homa/actions/names.py (M3b-4) not present")
 
 
 def reason(name):

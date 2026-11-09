@@ -254,7 +254,7 @@ def test_a_folder_and_a_missing_file_do_not_crash_the_route(pv):
     assert status in (400, 403, 404, 422) and "Traceback" not in dump(body)
 
 
-# ---- static mount (ASSISTANT_STATIC_DIR) ----------------------------------------------------------------------------
+# ---- static mount (HOMA_STATIC_DIR) ----------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def static_app(tmp_path_factory):
@@ -264,8 +264,8 @@ def static_app(tmp_path_factory):
     (static / "index.html").write_text("<!doctype html><title>qa-static-index</title>", encoding="utf-8")
     (static / "assets" / "a.js").write_text("console.log('qa-asset')", encoding="utf-8")
     (base / "outside-secret.txt").write_text("STATIC-TRAVERSAL-SECRET\n", encoding="utf-8")
-    previous = os.environ.get("ASSISTANT_STATIC_DIR")
-    os.environ["ASSISTANT_STATIC_DIR"] = str(static)
+    previous = os.environ.get("HOMA_STATIC_DIR")
+    os.environ["HOMA_STATIC_DIR"] = str(static)
     try:
         with launch_app(base / "home", _free_port(), {}) as (base_url, token):
             api = Api(base_url, token)
@@ -279,9 +279,9 @@ def static_app(tmp_path_factory):
             yield api
     finally:
         if previous is None:
-            os.environ.pop("ASSISTANT_STATIC_DIR", None)
+            os.environ.pop("HOMA_STATIC_DIR", None)
         else:
-            os.environ["ASSISTANT_STATIC_DIR"] = previous
+            os.environ["HOMA_STATIC_DIR"] = previous
 
 
 def _get(api, path, token=True):
@@ -344,12 +344,12 @@ def test_fullpage_close_requires_the_token_and_is_harmless_with_no_window(static
 # ---- nonce lifecycle (in-process; the minting call is not named in the plan) -------------------------------------------
 
 def _nonce_api():
-    auth = pytest.importorskip("assistant.server.auth", reason="assistant/server/auth.py not present")
+    auth = pytest.importorskip("homa.server.auth", reason="homa/server/auth.py not present")
     for name in dir(auth):
         low = name.lower()
         if "nonce" in low and any(w in low for w in ("mint", "issue", "new", "create", "make")) and callable(getattr(auth, name)):
             return getattr(auth, name)
-    pytest.skip("no nonce-minting function found in assistant.server.auth (names tried: *mint*/*issue*/*new*/*create*/"
+    pytest.skip("no nonce-minting function found in homa.server.auth (names tried: *mint*/*issue*/*new*/*create*/"
                 "*make* + nonce); the plan fixes the exchange route but not the mint call - tech-lead to name it")
 
 
@@ -380,7 +380,7 @@ def _asgi_post(app, path, body: dict):
 
 def test_nonce_exchanges_once_then_is_forbidden():
     mint = _nonce_api()
-    from assistant.server import app as server_app
+    from homa.server import app as server_app
     token = "T" * 43
     app = server_app.create_app(lambda: token)
     nonce = mint()
@@ -393,8 +393,8 @@ def test_nonce_exchanges_once_then_is_forbidden():
 
 def test_nonce_expires_after_30_seconds(monkeypatch):
     mint = _nonce_api()
-    from assistant.server import app as server_app
-    from assistant.server import auth
+    from homa.server import app as server_app
+    from homa.server import auth
     token = "T" * 43
     app = server_app.create_app(lambda: token)
     nonce = mint()
@@ -470,8 +470,8 @@ def _asgi_get(app, path_with_query: str, token: str):
 
 
 def test_offline_and_deny_listed_files_are_never_opened_by_the_server(tmp_path):
-    pytest.importorskip("assistant.server.routes_files", reason="assistant/server/routes_files.py (M3b-3) not present")
-    from assistant.server import app as server_app
+    pytest.importorskip("homa.server.routes_files", reason="homa/server/routes_files.py (M3b-3) not present")
+    from homa.server import app as server_app
     from conftest import walk_store
     from tests.fixtures.preview import build_preview_tree
     files = build_preview_tree(tmp_path / "root")
@@ -480,7 +480,7 @@ def test_offline_and_deny_listed_files_are_never_opened_by_the_server(tmp_path):
     fake = _FakeIndex(store, tmp_path / "root")
     app = server_app.create_app(lambda: token, index=fake, settings=None)
     if not any(getattr(r, "path", "") == "/v1/files/preview" for r in app.router.routes):
-        from assistant.server import routes_files
+        from homa.server import routes_files
         routes_files.register_files_routes(app, fake, None)
     for key in ("offline", "pem", "big"):
         _WATCH.clear()
@@ -534,7 +534,7 @@ def test_a_5000_digit_range_is_refused_with_416_or_422_not_an_error_page(pv):
 
 
 def test_a_1mb_malformed_shared_strings_part_extracts_in_under_half_a_second(tmp_path):
-    from assistant.preview import extract
+    from homa.preview import extract
     from tests.fixtures.preview import xlsx_malformed_shared_bytes
     path = tmp_path / "malformed.xlsx"
     path.write_bytes(xlsx_malformed_shared_bytes(1_000_000))

@@ -1,4 +1,4 @@
-"""`python -m assistant update` (plan 7.5 M4-2; AC-IN-4, DEC 13).
+"""`python -m homa update` (plan 7.5 M4-2; AC-IN-4, DEC 13).
 
 Git route: a scratch bare repo plus two clones (the "install" and an author) in tmp_path, with `_pip_argv` pointed at a
 shim script, so neither git pull nor pip ever touches the repository under test. Zip route: archives built in memory;
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from assistant import __version__, paths, update
+from homa import __version__, paths, update
 from conftest import REPO_ROOT, Api, wait_until
 
 GIT = ["git", "-c", "user.name=qa", "-c", "user.email=qa@example.test", "-c", "commit.gpgsign=false"]
@@ -28,7 +28,7 @@ GIT = ["git", "-c", "user.name=qa", "-c", "user.email=qa@example.test", "-c", "c
 def scratch_home(tmp_path, monkeypatch):
     home = tmp_path / "ahome"
     home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(home))
+    monkeypatch.setenv("HOMA_HOME", str(home))
     return home
 
 
@@ -52,8 +52,8 @@ def clones(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], check=True, capture_output=True)
     author = tmp_path / "author"
     subprocess.run(["git", "clone", str(bare), str(author)], check=True, capture_output=True)
-    (author / "assistant").mkdir()
-    (author / "assistant" / "__init__.py").write_text("v = 1\n", encoding="utf-8")
+    (author / "homa").mkdir()
+    (author / "homa" / "__init__.py").write_text("v = 1\n", encoding="utf-8")
     (author / "requirements.txt").write_text("# none\n", encoding="utf-8")
     git(author, "add", "-A")
     git(author, "commit", "-m", "one")
@@ -72,7 +72,7 @@ def clones(tmp_path, monkeypatch):
 
 
 def push_commit(author, text):
-    (author / "assistant" / "__init__.py").write_text(text, encoding="utf-8")
+    (author / "homa" / "__init__.py").write_text(text, encoding="utf-8")
     git(author, "commit", "-am", text.strip())
     git(author, "push", "origin", "HEAD:main")
 
@@ -87,7 +87,7 @@ def test_git_pull_with_new_commit_installs_requirements_and_writes_the_marker(cl
     assert run_update() == 0
     out = capsys.readouterr().out
     assert "git pull --ff-only" in out and "Updated." in out
-    assert (install / "assistant" / "__init__.py").read_text(encoding="utf-8") == "v = 2\n"
+    assert (install / "homa" / "__init__.py").read_text(encoding="utf-8") == "v = 2\n"
     assert pip_log.read_text(encoding="utf-8").count("install -r") == 1 and "requirements.txt" in pip_log.read_text()
     assert marker() == {"pending": True, "from": __version__}
 
@@ -112,7 +112,7 @@ def test_dry_run_changes_nothing(clones, capsys):
 
 def test_diverged_branch_fails_with_exit_1_and_no_marker(clones, capsys):
     install, author, pip_log = clones
-    (install / "assistant" / "local.txt").write_text("x", encoding="utf-8")
+    (install / "homa" / "local.txt").write_text("x", encoding="utf-8")
     git(install, "add", "-A")
     git(install, "commit", "-m", "local")
     push_commit(author, "v = 4\n")
@@ -200,16 +200,16 @@ def test_live_app_shows_one_updated_card_and_clears_the_marker(app_factory, tmp_
 # ---- no scheduled check (DEC 13) -------------------------------------------------------------------------------------------------
 
 def test_nothing_schedules_an_update_check():
-    sched = (REPO_ROOT / "assistant" / "scheduler.py").read_text(encoding="utf-8")
+    sched = (REPO_ROOT / "homa" / "scheduler.py").read_text(encoding="utf-8")
     assert not re.search(r"\bupdate\b", sched, re.IGNORECASE), "scheduler.py must not know about updates"
-    app_src = (REPO_ROOT / "assistant" / "app.py").read_text(encoding="utf-8")
+    app_src = (REPO_ROOT / "homa" / "app.py").read_text(encoding="utf-8")
     uses = re.findall(r"\bupdate\.(\w+)", app_src)
     assert set(uses) == {"consume_notice"}, uses
-    for path in (REPO_ROOT / "assistant").rglob("*.py"):
+    for path in (REPO_ROOT / "homa").rglob("*.py"):
         if path.name in ("update.py", "__main__.py"):
             continue
         text = path.read_text(encoding="utf-8")
-        assert not re.search(r"update\.(run|_update_zip|_download)|assistant\.update|from \.+ import .*update",
+        assert not re.search(r"update\.(run|_update_zip|_download)|homa\.update|from \.+ import .*update",
                              text), path
 
 
@@ -226,12 +226,12 @@ def make_zip(entries, compression=zipfile.ZIP_STORED):
     return buf.getvalue()
 
 
-GOOD = [("assistant/__init__.py", "v = 9\n"), ("requirements.txt", "# none\n"), ("run.cmd", "echo\n")]
+GOOD = [("homa/__init__.py", "v = 9\n"), ("requirements.txt", "# none\n"), ("run.cmd", "echo\n")]
 
 
 @pytest.fixture
 def install_dir(tmp_path, monkeypatch):
-    root = tmp_path / "inst" / "Assistant"
+    root = tmp_path / "inst" / "Homa"
     root.mkdir(parents=True)
     (root / "marker.txt").write_text("old", encoding="utf-8")
     monkeypatch.setattr(update, "install_root", lambda: root)
@@ -250,7 +250,7 @@ def test_zip_route_without_a_source_prints_the_dry_text_and_exits_2(install_dir,
     assert update.run(Namespace(dry_run=False)) == 2
     out = capsys.readouterr().out
     assert "No update source is configured" in out and "nothing was downloaded" in out
-    assert siblings(install_dir) == ["Assistant"] and marker() is None
+    assert siblings(install_dir) == ["Homa"] and marker() is None
 
 
 def test_zip_route_without_a_source_in_dry_run_is_exit_0(install_dir, capsys):
@@ -273,7 +273,7 @@ def test_dry_run_with_a_source_names_it_and_downloads_nothing(install_dir, capsy
     assert update.run(Namespace(dry_run=True)) == 0
     out = capsys.readouterr().out
     assert "download: https://example.test/rel.zip" in out and "dry run: nothing was changed" in out
-    assert siblings(install_dir) == ["Assistant"]
+    assert siblings(install_dir) == ["Homa"]
 
 
 def test_full_zip_update_unpacks_beside_the_install_and_leaves_the_old_one(install_dir, capsys, monkeypatch, tmp_path):
@@ -283,14 +283,14 @@ def test_full_zip_update_unpacks_beside_the_install_and_leaves_the_old_one(insta
     seen = []
     monkeypatch.setattr(update, "_pip_install", lambda req, dry: seen.append((req, dry)))
     assert update.run(Namespace(dry_run=False)) == 0
-    new = [n for n in siblings(install_dir) if n.startswith("Assistant-update-")]
+    new = [n for n in siblings(install_dir) if n.startswith("Homa-update-")]
     assert len(new) == 1
     target = install_dir.parent / new[0]
-    assert (target / "assistant" / "__init__.py").read_text(encoding="utf-8") == "v = 9\n"
+    assert (target / "homa" / "__init__.py").read_text(encoding="utf-8") == "v = 9\n"
     assert (install_dir / "marker.txt").read_text(encoding="utf-8") == "old"
     assert seen == [], "pip is only run with --yes"
     assert marker() == {"pending": True, "from": __version__}
-    assert not [n for n in siblings(install_dir) if n.startswith("assistant-update-")], "staging dir left behind"
+    assert not [n for n in siblings(install_dir) if n.startswith("homa-update-")], "staging dir left behind"
     out = capsys.readouterr().out
     assert "Start the new copy from" in out and str(target / "requirements.txt") in out
 
@@ -315,7 +315,7 @@ def test_zip_update_with_yes_runs_pip_once_on_the_new_copy(install_dir, capsys, 
     seen = []
     monkeypatch.setattr(update, "_pip_install", lambda req, dry: seen.append((req, dry)))
     assert update.run(Namespace(dry_run=False, yes=True)) == 0
-    (target,) = [install_dir.parent / n for n in siblings(install_dir) if n.startswith("Assistant-update-")]
+    (target,) = [install_dir.parent / n for n in siblings(install_dir) if n.startswith("Homa-update-")]
     assert seen == [(target / "requirements.txt", False)]
     assert "install its requirements yourself" not in capsys.readouterr().out
 
@@ -328,7 +328,7 @@ def test_zip_update_dry_run_never_runs_pip_even_with_yes(install_dir, capsys, mo
     assert update.run(Namespace(dry_run=True, yes=True)) == 0
     out = capsys.readouterr().out
     assert ran == [] and "pip: " in out and "dry run: nothing was changed" in out
-    assert siblings(install_dir) == ["Assistant"]
+    assert siblings(install_dir) == ["Homa"]
     assert update.run(Namespace(dry_run=True)) == 0
     assert "pass --yes to allow it" in capsys.readouterr().out
     assert ran == []
@@ -344,7 +344,7 @@ def test_a_corrupt_member_is_a_clean_failure_with_no_leftovers(install_dir, caps
     assert update.run(Namespace(dry_run=False, yes=True)) == 1
     err = capsys.readouterr().err
     assert err.strip() == "update failed: the download is not a valid zip file", err
-    assert siblings(install_dir) == ["Assistant"], "neither a target nor a staging folder is left"
+    assert siblings(install_dir) == ["Homa"], "neither a target nor a staging folder is left"
     assert marker() is None
 
 
@@ -352,7 +352,7 @@ def test_a_truncated_download_is_a_clean_failure(install_dir, capsys, monkeypatc
     set_source("https://example.test/rel.zip")
     monkeypatch.setattr(update, "_download", lambda url: make_zip(GOOD)[:40])
     assert update.run(Namespace(dry_run=False)) == 1
-    assert "update failed:" in capsys.readouterr().err and siblings(install_dir) == ["Assistant"]
+    assert "update failed:" in capsys.readouterr().err and siblings(install_dir) == ["Homa"]
 
 
 def test_the_git_route_runs_the_resolved_git_path_not_the_bare_name(clones, monkeypatch):
@@ -376,7 +376,7 @@ def test_the_git_route_runs_the_resolved_git_path_not_the_bare_name(clones, monk
 
 
 def test_cli_accepts_yes_and_help_describes_it():
-    done = subprocess.run([sys.executable, "-m", "assistant", "update", "--help"], cwd=REPO_ROOT, capture_output=True,
+    done = subprocess.run([sys.executable, "-m", "homa", "update", "--help"], cwd=REPO_ROOT, capture_output=True,
                           text=True, timeout=60)
     assert "--yes" in done.stdout and "pip" in done.stdout
 
@@ -384,9 +384,9 @@ def test_cli_accepts_yes_and_help_describes_it():
 def test_cli_dry_run_with_yes_through_the_real_entry_point_changes_nothing(tmp_path):
     home = tmp_path / "cli_home2"
     home.mkdir()
-    env = dict(os.environ, ASSISTANT_HOME=str(home))
+    env = dict(os.environ, HOMA_HOME=str(home))
     before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True).stdout
-    done = subprocess.run([sys.executable, "-m", "assistant", "update", "--dry-run", "--yes"], cwd=REPO_ROOT, env=env,
+    done = subprocess.run([sys.executable, "-m", "homa", "update", "--dry-run", "--yes"], cwd=REPO_ROOT, env=env,
                           capture_output=True, text=True, timeout=60)
     after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True).stdout
     assert done.returncode == 0, (done.stdout, done.stderr)
@@ -394,98 +394,99 @@ def test_cli_dry_run_with_yes_through_the_real_entry_point_changes_nothing(tmp_p
 
 
 def extract(tmp_path, entries, **kw):
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
     return root, update._extract(make_zip(entries, **kw), root)
 
 
 def test_wrapper_folder_is_stripped_on_extract(tmp_path):
     root, target = extract(tmp_path, [("rel-1.2/" + n, b) for n, b in GOOD])
-    assert (target / "assistant" / "__init__.py").is_file() and (target / "run.cmd").is_file()
+    assert (target / "homa" / "__init__.py").is_file() and (target / "run.cmd").is_file()
     assert not (target / "rel-1.2").exists()
 
 
 def test_flat_archive_is_not_stripped(tmp_path):
     root, target = extract(tmp_path, GOOD)
-    assert (target / "assistant" / "__init__.py").is_file() and (target / "requirements.txt").is_file()
+    assert (target / "homa" / "__init__.py").is_file() and (target / "requirements.txt").is_file()
 
 
 def test_dot_assistant_folder_is_skipped_at_any_wrapper_depth(tmp_path, capsys):
-    entries = GOOD + [(".assistant/token", "SECRET"), (".ASSISTANT/settings.json", "{}")]
+    entries = GOOD + [(".homa/token", "SECRET"), (".HOMA/settings.json", "{}"), (".assistant/token", "SECRET"),
+                      (".ASSISTANT/settings.json", "{}")]
     root, target = extract(tmp_path, entries)
-    assert not (target / ".assistant").exists()
-    assert "left out 2 entries" in capsys.readouterr().out
-    root2 = tmp_path / "y" / "Assistant"
+    assert not (target / ".homa").exists() and not (target / ".assistant").exists()
+    assert "left out 4 entries" in capsys.readouterr().out
+    root2 = tmp_path / "y" / "Homa"
     root2.mkdir(parents=True)
     t2 = update._extract(make_zip([("rel/" + n, b) for n, b in entries]), root2)
-    assert not (t2 / ".assistant").exists() and (t2 / "assistant" / "__init__.py").is_file()
+    assert not (t2 / ".homa").exists() and not (t2 / ".assistant").exists() and (t2 / "homa" / "__init__.py").is_file()
 
 
-@pytest.mark.parametrize("name", ["../evil.txt", "assistant/../../evil.txt", "..\\evil.txt", "/abs/evil.txt",
+@pytest.mark.parametrize("name", ["../evil.txt", "homa/../../evil.txt", "..\\evil.txt", "/abs/evil.txt",
                                   "\\abs\\evil.txt", "C:/evil.txt", "C:\\Windows\\evil.txt", "D:evil.txt"])
 def test_zip_slip_absolute_and_drive_paths_are_refused(tmp_path, name):
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
     with pytest.raises(update.UpdateError, match="leaves the target folder"):
         update._extract(make_zip(GOOD + [(name, "boom")]), root)
-    assert siblings(root) == ["Assistant"]
+    assert siblings(root) == ["Homa"]
     assert not (tmp_path / "evil.txt").exists() and not (tmp_path / "x" / "evil.txt").exists()
 
 
 def test_symlink_entries_are_refused(tmp_path):
-    info = zipfile.ZipInfo("assistant/link")
+    info = zipfile.ZipInfo("homa/link")
     info.external_attr = (0o120777 << 16)
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
     with pytest.raises(update.UpdateError, match="symbolic link"):
-        update._extract(make_zip(GOOD + [("assistant/link", info)]), root)
-    assert siblings(root) == ["Assistant"]
+        update._extract(make_zip(GOOD + [("homa/link", info)]), root)
+    assert siblings(root) == ["Homa"]
 
 
 def test_more_than_5000_entries_is_refused(tmp_path):
-    entries = GOOD + [(f"assistant/f{i}.txt", "") for i in range(update.MAX_MEMBERS)]
-    root = tmp_path / "x" / "Assistant"
+    entries = GOOD + [(f"homa/f{i}.txt", "") for i in range(update.MAX_MEMBERS)]
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
     with pytest.raises(update.UpdateError, match="more than 5000 entries"):
         update._extract(make_zip(entries), root)
-    assert siblings(root) == ["Assistant"]
+    assert siblings(root) == ["Homa"]
 
 
 def test_exactly_5000_entries_is_accepted(tmp_path):
-    entries = GOOD + [(f"assistant/f{i}.txt", "") for i in range(update.MAX_MEMBERS - len(GOOD))]
+    entries = GOOD + [(f"homa/f{i}.txt", "") for i in range(update.MAX_MEMBERS - len(GOOD))]
     assert len(entries) == update.MAX_MEMBERS
     root, target = extract(tmp_path, entries)
-    assert (target / "assistant" / "f0.txt").is_file()
+    assert (target / "homa" / "f0.txt").is_file()
 
 
 def test_unpacked_size_over_200_mb_is_refused(tmp_path):
-    big = [("assistant/blob.bin", b"\0" * (101 * 1024 * 1024)), ("assistant/blob2.bin", b"\0" * (101 * 1024 * 1024))]
+    big = [("homa/blob.bin", b"\0" * (101 * 1024 * 1024)), ("homa/blob2.bin", b"\0" * (101 * 1024 * 1024))]
     data = make_zip(GOOD + big, compression=zipfile.ZIP_DEFLATED)
     assert len(data) < update.MAX_ZIP_BYTES
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
     with pytest.raises(update.UpdateError, match="200 MB"):
         update._extract(data, root)
-    assert siblings(root) == ["Assistant"]
+    assert siblings(root) == ["Homa"]
 
 
 def test_archive_without_the_package_is_refused_and_cleaned_up(tmp_path):
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
-    with pytest.raises(update.UpdateError, match="does not contain the assistant package"):
+    with pytest.raises(update.UpdateError, match="does not contain the homa package"):
         update._extract(make_zip([("readme.txt", "hi"), ("other/__init__.py", "")]), root)
-    assert siblings(root) == ["Assistant"], "staging folder must be removed"
+    assert siblings(root) == ["Homa"], "staging folder must be removed"
 
 
 def test_not_a_zip_is_refused(tmp_path):
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
     with pytest.raises(update.UpdateError, match="not a zip"):
         update._extract(b"<html>login</html>", root)
 
 
 def test_existing_target_is_never_overwritten(tmp_path, monkeypatch):
-    root = tmp_path / "x" / "Assistant"
+    root = tmp_path / "x" / "Homa"
     root.mkdir(parents=True)
 
     class Frozen(update.datetime.datetime):
@@ -494,12 +495,12 @@ def test_existing_target_is_never_overwritten(tmp_path, monkeypatch):
             return cls(2030, 1, 2, 3, 4, 5)
 
     monkeypatch.setattr(update.datetime, "datetime", Frozen)
-    keep = tmp_path / "x" / "Assistant-update-20300102-030405"
+    keep = tmp_path / "x" / "Homa-update-20300102-030405"
     keep.mkdir()
     (keep / "mine.txt").write_text("mine", encoding="utf-8")
     with pytest.raises(update.UpdateError, match="already exists"):
         update._extract(make_zip(GOOD), root)
-    assert (keep / "mine.txt").read_text(encoding="utf-8") == "mine" and siblings(root) == ["Assistant", keep.name]
+    assert (keep / "mine.txt").read_text(encoding="utf-8") == "mine" and siblings(root) == ["Homa", keep.name]
 
 
 # ---- network guards -----------------------------------------------------------------------------------------------------------------
@@ -602,9 +603,9 @@ def test_redirect_to_http_is_refused_and_to_https_is_followed():
 def test_cli_dry_run_through_the_real_entry_point(tmp_path):
     home = tmp_path / "cli_home"
     home.mkdir()
-    env = dict(os.environ, ASSISTANT_HOME=str(home))
+    env = dict(os.environ, HOMA_HOME=str(home))
     before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True).stdout
-    done = subprocess.run([sys.executable, "-m", "assistant", "update", "--dry-run"], cwd=REPO_ROOT, env=env,
+    done = subprocess.run([sys.executable, "-m", "homa", "update", "--dry-run"], cwd=REPO_ROOT, env=env,
                           capture_output=True, text=True, timeout=60)
     after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True).stdout
     assert done.returncode == 0, (done.stdout, done.stderr)
@@ -614,6 +615,6 @@ def test_cli_dry_run_through_the_real_entry_point(tmp_path):
 
 
 def test_cli_help_lists_update():
-    done = subprocess.run([sys.executable, "-m", "assistant", "update", "--help"], cwd=REPO_ROOT, capture_output=True,
+    done = subprocess.run([sys.executable, "-m", "homa", "update", "--help"], cwd=REPO_ROOT, capture_output=True,
                           text=True, timeout=60)
     assert done.returncode == 0 and "--dry-run" in done.stdout

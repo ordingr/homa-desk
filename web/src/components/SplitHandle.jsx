@@ -2,12 +2,13 @@ import { useRef } from "react";
 
 export const SPLIT_DEFAULT = 0.5;
 export const SPLIT_MIN_PX = 320;
-const SPLIT_KEY = "assistant.split";
+const SPLIT_KEY = "homa.split";
+const LEGACY_SPLIT_KEY = "assistant.split";
 const KEY_STEP = 0.02;
 
 export function loadSplit() {
   try {
-    const value = Number(localStorage.getItem(SPLIT_KEY));
+    const value = Number(localStorage.getItem(SPLIT_KEY) ?? localStorage.getItem(LEGACY_SPLIT_KEY));
     return value >= 0.15 && value <= 0.85 ? value : SPLIT_DEFAULT;
   } catch {
     return SPLIT_DEFAULT;

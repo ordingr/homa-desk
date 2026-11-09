@@ -13,12 +13,12 @@ import pytest
 
 from conftest import BULK_COUNT, build_search_tree, default_exclude_patterns, wait_until
 
-manager_mod = pytest.importorskip("assistant.index.manager", reason="assistant/index/manager.py (M3a-2) not present")
-store_mod = pytest.importorskip("assistant.index.store", reason="assistant/index/store.py (M3a-1) not present")
-pytest.importorskip("assistant.index.excludes", reason="assistant/index/excludes.py (M3a-1) not present")
-query = pytest.importorskip("assistant.index.query", reason="assistant/index/query.py (M3a-3) not present")
-search = pytest.importorskip("assistant.index.search", reason="assistant/index/search.py (M3a-3) not present")
-from assistant.scheduler import Scheduler  # noqa: E402
+manager_mod = pytest.importorskip("homa.index.manager", reason="homa/index/manager.py (M3a-2) not present")
+store_mod = pytest.importorskip("homa.index.store", reason="homa/index/store.py (M3a-1) not present")
+pytest.importorskip("homa.index.excludes", reason="homa/index/excludes.py (M3a-1) not present")
+query = pytest.importorskip("homa.index.query", reason="homa/index/query.py (M3a-3) not present")
+search = pytest.importorskip("homa.index.search", reason="homa/index/search.py (M3a-3) not present")
+from homa.scheduler import Scheduler  # noqa: E402
 
 
 class FakeSettings:
@@ -132,7 +132,7 @@ def test_changes_under_excluded_directories_and_deny_listed_names_never_surface(
     (rig.root / "id_rsa_backup").write_text("x")
     time.sleep(1.0)
     try:
-        from assistant.security import denylist  # noqa: F401
+        from homa.security import denylist  # noqa: F401
     except ImportError:
         return
     assert not rig.names(".env.production") and not rig.names("id_rsa_backup")
@@ -198,7 +198,7 @@ def test_persisted_index_serves_immediately_with_its_old_built_at_then_rescans(t
     time.sleep(1.1)
     # M3b-0 (b): a persisted index younger than index.scan_if_older_hours is
     # served without a start scan, so age it past the threshold on disk first.
-    from assistant.index.store import IndexStore  # noqa: E402
+    from homa.index.store import IndexStore  # noqa: E402
 
     aged = IndexStore.load(str(tmp_path / "idx" / "files.idx"))
     old_built_at = aged.built_at - 13 * 3600

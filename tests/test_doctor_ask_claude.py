@@ -5,8 +5,8 @@ import sys
 
 import pytest
 
-from assistant import doctor
-from assistant.actions import claude
+from homa import doctor
+from homa.actions import claude
 from conftest import REPO_ROOT
 
 
@@ -33,8 +33,8 @@ def test_a_probe_crash_is_reported_not_raised(monkeypatch):
 
 
 def test_doctor_output_has_the_line(tmp_path):
-    env = dict(os.environ, ASSISTANT_HOME=str(tmp_path))
-    done = subprocess.run([sys.executable, "-m", "assistant", "--doctor"], cwd=REPO_ROOT, env=env,
+    env = dict(os.environ, HOMA_HOME=str(tmp_path))
+    done = subprocess.run([sys.executable, "-m", "homa", "--doctor"], cwd=REPO_ROOT, env=env,
                           capture_output=True, text=True, timeout=120)
     lines = [l for l in done.stdout.splitlines() if l.startswith("Ask Claude")]
     assert len(lines) == 1, done.stdout

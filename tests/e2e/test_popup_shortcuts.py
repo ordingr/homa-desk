@@ -14,15 +14,15 @@ import pytest
 
 from conftest import wait_until
 
-search_ui = pytest.importorskip("assistant.overlay.search_ui", reason="assistant/overlay/search_ui.py not present")
-modes_mod = pytest.importorskip("assistant.search.modes", reason="assistant/search/modes.py not present")
+search_ui = pytest.importorskip("homa.overlay.search_ui", reason="homa/overlay/search_ui.py not present")
+modes_mod = pytest.importorskip("homa.search.modes", reason="homa/search/modes.py not present")
 
-from assistant import uibus  # noqa: E402
-from assistant.actions import claude  # noqa: E402
-from assistant.overlay import ask_claude_ui, gfx, mdrender_tk, theme  # noqa: E402
-from assistant.search.modes import Row  # noqa: E402
-from assistant.search.saved import SavedSearches  # noqa: E402
-from assistant.settings import DEFAULT_SHORTCUTS  # noqa: E402
+from homa import uibus  # noqa: E402
+from homa.actions import claude  # noqa: E402
+from homa.overlay import ask_claude_ui, gfx, mdrender_tk, theme  # noqa: E402
+from homa.search.modes import Row  # noqa: E402
+from homa.search.saved import SavedSearches  # noqa: E402
+from homa.settings import DEFAULT_SHORTCUTS  # noqa: E402
 
 
 class IconStub:

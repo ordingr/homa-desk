@@ -2,14 +2,15 @@ import { createContext, useContext } from "react";
 
 export const ZOOM_STEPS = [80, 90, 100, 110, 125, 150, 175, 200];
 export const ZOOM_DEFAULT = 100;
-const ZOOM_KEY = "assistant.previewZoom";
+const ZOOM_KEY = "homa.previewZoom";
+const LEGACY_ZOOM_KEY = "assistant.previewZoom";
 
 export const ZoomContext = createContext(1);
 export const useZoom = () => useContext(ZoomContext);
 
 export function loadZoom() {
   try {
-    const value = Number(localStorage.getItem(ZOOM_KEY));
+    const value = Number(localStorage.getItem(ZOOM_KEY) ?? localStorage.getItem(LEGACY_ZOOM_KEY));
     return ZOOM_STEPS.includes(value) ? value : ZOOM_DEFAULT;
   } catch {
     return ZOOM_DEFAULT;

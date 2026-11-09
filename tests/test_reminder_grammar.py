@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-grammar = pytest.importorskip("assistant.reminders.grammar", reason="assistant/reminders/grammar.py (M1-2) not present")
+grammar = pytest.importorskip("homa.reminders.grammar", reason="homa/reminders/grammar.py (M1-2) not present")
 
 HELP = "didn't understand — try 'text in 10m' or 'text at 3pm'"
 
@@ -148,12 +148,12 @@ class _Clock:
 
 @pytest.fixture
 def reminders_mod():
-    return pytest.importorskip("assistant.reminders.store", reason="assistant/reminders/store.py (M1-2) not present")
+    return pytest.importorskip("homa.reminders.store", reason="homa/reminders/store.py (M1-2) not present")
 
 
 @pytest.fixture
 def sched():
-    mod = pytest.importorskip("assistant.scheduler", reason="assistant/scheduler.py not present")
+    mod = pytest.importorskip("homa.scheduler", reason="homa/scheduler.py not present")
     s = mod.Scheduler()
     s.start()
     yield s

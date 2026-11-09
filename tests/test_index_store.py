@@ -12,7 +12,7 @@ import pytest
 
 from conftest import ROOT_PARENT, percentile, row_paths
 
-store_mod = pytest.importorskip("assistant.index.store", reason="assistant/index/store.py (M3a-1) not present")
+store_mod = pytest.importorskip("homa.index.store", reason="homa/index/store.py (M3a-1) not present")
 FLAG_DIR = getattr(store_mod, "FLAG_DIR", 1)
 FLAG_DENIED = getattr(store_mod, "FLAG_DENIED", 16)
 FLAG_PLACEHOLDER = getattr(store_mod, "FLAG_PLACEHOLDER", 8)

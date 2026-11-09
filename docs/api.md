@@ -1374,3 +1374,30 @@ Supersedes: section 3.5, the "exit code 0 within 15 s" observation from Review 3
 - Any route above, on a live instance.
 - Security review of 3d7bc25: `docs/security/2026-11-07-m4-review.md`. Review 11 returned BLOCK on R11-F1 (the Continue launcher's working folder). Review 12 returns PASS for commit, with low NOTEs R12-N2 and R12-N3 open. Review 11's file list covers `assistant/actions/{claude,shell}.py`, `assistant/server/{routes_actions,routes_settings}.py` and `assistant/app.py`, which are the code of 13.1, 13.3, 13.4 and 13.6. It does not list `routes_hooks.py`, so 13.5 is not covered by that list.
 - The four known issues in CHANGELOG 2026-11-07 are listed there, not re-tested here.
+
+## 14. Rename to Homa, 2026-11-08
+
+Supersedes: nothing in the HTTP contract. The names in sections 9 and 11 that say `assistant` (the MCP server name, the stdio
+module, the home folder and the pid file) are replaced as described below. Those sections are kept as written.
+
+- Date: 2026-11-08. Written by doc-keeper (R7 of `docs/plans/2026-11-08-rename-to-homa.md`) from the code in the worktree
+  `C:\AI Projects\Assistant-homa`, read, not run. Verification: pending (qa, R5a and R5b).
+- Unchanged: the routes (`/v1/...` and `/mcp`), the bearer token rule, the error shapes, the hook receiver and its payloads,
+  and the card model. The plan's section 1 lists these as non-goals.
+- MCP server name: `homa` (`homa/server/mcp.py`, `SERVER_NAME = "homa"`). The Settings snippets register it as `homa`, with
+  `command` set to the Python that runs Homa and `args` `["-m", "homa.mcp_stdio"]`. An existing client entry named `assistant`
+  still reaches the same URL with the same token.
+- Stdio module: `python -m homa.mcp_stdio` (`homa/mcp_stdio.py`). `python -m assistant.mcp_stdio` (`assistant/mcp_stdio.py`)
+  writes one notice line to stderr and then runs the same code. It is removed in 0.3.0.
+- Home folder: `~/.homa`, or the folder named by `HOMA_HOME`. `ASSISTANT_HOME` is read as a fallback with one deprecation
+  line in the log. Before the first start moves an old folder, `~/.assistant` is used (`homa/paths.py`, `home()`). Every
+  `~/.assistant/...` path in sections 2 to 13 now means `~/.homa/...`.
+- Pid file: `homa.pid` (`homa/app.py`, `pid_file()`). The old `assistant.pid` is deleted by the migration.
+- Messages from the CLI sender and the stdio shim use the new name: `Homa is not running on 127.0.0.1:<port>`,
+  `Homa answered <status>: <message>`, and `No usable token at <path>; run: python -m homa --init`
+  (`homa/send.py`, `homa/mcp_stdio.py`). The older quotations in sections 7 and 9.5 are kept as written.
+- Test-mode variable: `HOMA_TEST_MODE=1` (section 3.7). `ASSISTANT_TEST_MODE` is still read as a fallback.
+- Web storage keys in the full page: `homa.theme`, `homa.split` and `homa.previewZoom`. The page reads the `assistant.*`
+  keys when the new ones are missing (`web/src/App.jsx`, `SplitHandle.jsx`, `preview/zoom.js`).
+- Migration: `homa/migrate.py`, described in `README.md` under "Upgrading (2026-11-08)". It is not part of the HTTP
+  contract, and the card it shows ("Assistant is now Homa") is a normal sticky `custom` card.

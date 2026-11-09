@@ -15,8 +15,8 @@ import zlib
 
 import pytest
 
-from assistant import paths
-from assistant.overlay import cards_ui, fullpage, gfx, icon as icon_mod, monitors, win
+from homa import paths
+from homa.overlay import cards_ui, fullpage, gfx, icon as icon_mod, monitors, win
 
 
 
@@ -76,7 +76,7 @@ def retrying_png_loads(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def scratch_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path / "home"))
 
 
 # ---- fullpage.window_flags --------------------------------------------------------------------------------------------
@@ -189,7 +189,7 @@ def test_the_shipped_assets_cover_icon_muted_and_every_badge_at_every_size():
     for prefix in ["icon", "icon-muted", "badge_plus"] + [f"badge_{n}" for n in range(1, 10)]:
         for size in sizes:
             assert (real / f"{prefix}_{size}.png").is_file(), f"{prefix}_{size}.png is missing"
-    assert (real / "assistant.ico").is_file()
+    assert (real / "homa.ico").is_file()
 
 
 # ---- the icon: assets, badges, fallbacks --------------------------------------------------------------------------------
@@ -391,20 +391,20 @@ def clean_root_logger():
 
 
 def test_logging_setup_without_stderr_attaches_only_the_file_handler(monkeypatch, clean_root_logger):
-    from assistant import app
+    from homa import app
     paths.ensure_layout()
     before = list(clean_root_logger.handlers)
     monkeypatch.setattr(sys, "stderr", None)
     app._setup_logging()
     added = [h for h in clean_root_logger.handlers if h not in before]
     assert len(added) == 1 and isinstance(added[0], logging.handlers.RotatingFileHandler)
-    logging.getLogger("assistant.qa").info("written without a console")
+    logging.getLogger("homa.qa").info("written without a console")
     added[0].flush()
     assert "written without a console" in (paths.logs_dir() / "app.log").read_text(encoding="utf-8")
 
 
 def test_logging_setup_with_stderr_also_attaches_the_console_handler(clean_root_logger):
-    from assistant import app
+    from homa import app
     paths.ensure_layout()
     before = list(clean_root_logger.handlers)
     app._setup_logging()
@@ -414,7 +414,7 @@ def test_logging_setup_with_stderr_also_attaches_the_console_handler(clean_root_
 
 
 def test_the_app_object_can_be_built_with_stderr_none(monkeypatch):
-    from assistant import app, netinfo
+    from homa import app, netinfo
     shown = []
     monkeypatch.setattr(netinfo, "message_box", lambda title, text: shown.append((title, text)))
     monkeypatch.setattr(sys, "stderr", None)
@@ -422,4 +422,4 @@ def test_the_app_object_can_be_built_with_stderr_none(monkeypatch):
     built = app.App()
     assert built._windowed is True
     built._notify_user("hello")
-    assert shown == [("Assistant", "hello")], "with no console the message goes to a box, and nothing raises"
+    assert shown == [("Homa", "hello")], "with no console the message goes to a box, and nothing raises"

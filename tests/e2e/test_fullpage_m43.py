@@ -1,12 +1,12 @@
 """Full page, M4-3 (plan 19.3 "Web half" and 7.5 M4-3; AC-AK-2, AC-AK-3, AC-AK-6, AC-AC-7, AC-PS-1 web).
 
-Headless Edge (playwright-core) drives the COMMITTED build under ``assistant/static/app`` (the one users get) against a
-private test-mode app; ``ASSISTANT_QA_WEB_BUILD`` points at another build folder instead. ``m43_driver.cjs`` holds the
+Headless Edge (playwright-core) drives the COMMITTED build under ``homa/static/app`` (the one users get) against a
+private test-mode app; ``HOMA_QA_WEB_BUILD`` points at another build folder instead. ``m43_driver.cjs`` holds the
 checks (139: the 49 of the first M4-3 harness, the 37 of the M4-3b one and 53 for the M4-3c split/expand/zoom change - custom shortcuts, settings fallbacks, Continue in Claude Code, whole-file send -, extended here: status route 500 and the real status route, an
 ask_claude send that can never reach the real ``claude``); this file runs it once, turns every PASS/FAIL line into an
 assertion, and adds the parts a browser run cannot see (bundle contents, the real ``GET /v1/settings`` theme path).
 
-Needs node, msedge and playwright-core (set ASSISTANT_QA_PLAYWRIGHT_DIR to a folder whose node_modules has it; the
+Needs node, msedge and playwright-core (set HOMA_QA_PLAYWRIGHT_DIR to a folder whose node_modules has it; the
 fallbacks are ``web/node_modules`` and ``~/node_modules``); skips with the reason otherwise.
 """
 import json
@@ -24,7 +24,7 @@ from tests.fixtures.preview import pdf_bytes
 pytestmark = pytest.mark.timeout(600)  # the one browser-driver run (about 100 s) happens inside the first test
 
 WEB = REPO_ROOT / "web"
-PACKAGED = REPO_ROOT / "assistant" / "static" / "app"
+PACKAGED = REPO_ROOT / "homa" / "static" / "app"
 DRIVER = Path(__file__).with_name("m43_driver.cjs")
 EDGE = [p for p in (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
                     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe") if os.path.exists(p)]
@@ -38,7 +38,7 @@ ZOOMFIX_MD = (
 
 
 def _build():
-    given = os.environ.get("ASSISTANT_QA_WEB_BUILD")
+    given = os.environ.get("HOMA_QA_WEB_BUILD")
     build = Path(given) if given else PACKAGED
     if not (build / "index.html").is_file():
         pytest.skip(f"{build} has no index.html")
@@ -46,11 +46,11 @@ def _build():
 
 
 def _playwright_modules():
-    candidates = [os.environ.get("ASSISTANT_QA_PLAYWRIGHT_DIR"), str(WEB), str(REAL_HOME)]
+    candidates = [os.environ.get("HOMA_QA_PLAYWRIGHT_DIR"), str(WEB), str(REAL_HOME)]
     for base in candidates:
         if base and (Path(base) / "node_modules" / "playwright-core").is_dir():
             return str(Path(base) / "node_modules")
-    pytest.skip("needs playwright-core (set ASSISTANT_QA_PLAYWRIGHT_DIR to a folder whose node_modules has it)")
+    pytest.skip("needs playwright-core (set HOMA_QA_PLAYWRIGHT_DIR to a folder whose node_modules has it)")
 
 
 def _tooling():
@@ -80,8 +80,8 @@ def driver_run(tmp_path_factory):
     build = _build()
     base = tmp_path_factory.mktemp("m43")
     root = _tree(base)
-    previous = os.environ.get("ASSISTANT_STATIC_DIR")
-    os.environ["ASSISTANT_STATIC_DIR"] = str(build)
+    previous = os.environ.get("HOMA_STATIC_DIR")
+    os.environ["HOMA_STATIC_DIR"] = str(build)
     try:
         with launch_app(base / "home", _free_port(), {"index": {"roots": [str(root)]}}, test_mode=True) \
                 as (url, token):
@@ -90,9 +90,9 @@ def driver_run(tmp_path_factory):
                                   capture_output=True, text=True, timeout=420)
     finally:
         if previous is None:
-            os.environ.pop("ASSISTANT_STATIC_DIR", None)
+            os.environ.pop("HOMA_STATIC_DIR", None)
         else:
-            os.environ["ASSISTANT_STATIC_DIR"] = previous
+            os.environ["HOMA_STATIC_DIR"] = previous
     lines = done.stdout.splitlines()
     if any(l.startswith("ERROR ") for l in lines) and not any(l.startswith("TOTAL ") for l in lines):
         pytest.fail("the browser driver crashed:\n" + done.stdout[-1500:] + done.stderr[-800:])
@@ -174,6 +174,10 @@ def test_every_browser_check_passes(driver_run):
     ("drag clamps both sides", "6b dragging far right keeps the pane at least 320px"),
     ("handle reset keys", "6b Home on the handle resets"),
     ("bad stored values", "6c junk stored values fall back too"),
+    ("old assistant.theme honoured", "5k only the old key assistant.theme=light is seeded"),
+    ("homa.theme beats assistant.theme", "5k homa.theme wins over assistant.theme"),
+    ("old split and zoom keys honoured", "6c only the old keys assistant.split / assistant.previewZoom are seeded"),
+    ("new split and zoom keys win", "6c homa.split / homa.previewZoom win over the old keys"),
     ("expand hides the list", "6d expand hides the result list"),
     ("Up/Down while expanded", "6d Down in expanded mode changes the selection"),
     ("Esc restores", "6d Esc returns to the list"),
@@ -270,8 +274,8 @@ def test_theme_setting_from_the_real_settings_route_drives_the_page(tmp_path, se
     node, modules = _tooling()
     build = _build()
     root = _tree(tmp_path)
-    previous = os.environ.get("ASSISTANT_STATIC_DIR")
-    os.environ["ASSISTANT_STATIC_DIR"] = str(build)
+    previous = os.environ.get("HOMA_STATIC_DIR")
+    os.environ["HOMA_STATIC_DIR"] = str(build)
     try:
         with launch_app(tmp_path / "home", _free_port(), {"index": {"roots": [str(root)]}, "theme": setting},
                         test_mode=True) as (url, token):
@@ -282,9 +286,9 @@ def test_theme_setting_from_the_real_settings_route_drives_the_page(tmp_path, se
                                   env=browser_env(NODE_PATH=modules), capture_output=True, text=True, timeout=120)
     finally:
         if previous is None:
-            os.environ.pop("ASSISTANT_STATIC_DIR", None)
+            os.environ.pop("HOMA_STATIC_DIR", None)
         else:
-            os.environ["ASSISTANT_STATIC_DIR"] = previous
+            os.environ["HOMA_STATIC_DIR"] = previous
     line = next((l for l in done.stdout.splitlines() if l.startswith("RESULT ")), None)
     assert line, (done.stdout[-500:], done.stderr[-500:])
     result = json.loads(line[len("RESULT "):])

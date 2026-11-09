@@ -1,7 +1,7 @@
 """MCP card and reminder tools over Streamable HTTP (plan 7.2 M2-2; AC-MC-1, AC-MC-6, AC-MC-8, AC-MC-9, AC-RM-7, SEC-1).
 
 Uses the ``mcp`` package's own client against a real uvicorn server running ``create_app(..., mcp_app=...)``
-in this process (conftest ``mcp_live``), with a private ASSISTANT_HOME. The final test additionally checks the
+in this process (conftest ``mcp_live``), with a private HOMA_HOME. The final test additionally checks the
 full app once M2-4 mounts /mcp there.
 """
 import json
@@ -11,7 +11,7 @@ import pytest
 
 from conftest import Api, McpHttp, wait_until
 
-pytest.importorskip("assistant.server.mcp", reason="assistant/server/mcp.py (M2-2) not present")
+pytest.importorskip("homa.server.mcp", reason="homa/server/mcp.py (M2-2) not present")
 
 TOOLS = {"send_card", "update_card", "dismiss_card", "add_reminder"}
 HELP = "didn't understand"
@@ -184,13 +184,13 @@ def fake_user_profile(tmp_path, monkeypatch):
     profile.mkdir()
     monkeypatch.setenv("USERPROFILE", str(profile))
     monkeypatch.setenv("HOME", str(profile))
-    from assistant import hooks_installer
+    from homa import hooks_installer
     assert str(hooks_installer.settings_path()).startswith(str(profile))
     return profile
 
 
 def test_regenerating_the_token_makes_the_old_one_401_immediately_everywhere(mcp_live, fake_user_profile):
-    from assistant.security import token
+    from homa.security import token
     old = mcp_live.token
     assert mcp_live.mcp().call("send_card", {"title": "pre-regen", "id": "regen-a"}).card_id() == "regen-a"
     result = token.regenerate()
@@ -207,8 +207,8 @@ def test_regenerating_the_token_makes_the_old_one_401_immediately_everywhere(mcp
 
 
 def test_regenerating_with_hooks_installed_rewrites_them_with_the_new_token(mcp_live, fake_user_profile):
-    from assistant import hooks_installer
-    from assistant.security import token
+    from homa import hooks_installer
+    from homa.security import token
     assert hooks_installer.install() == 0
     settings_file = hooks_installer.settings_path()
     old = mcp_live.token
@@ -221,8 +221,8 @@ def test_regenerating_with_hooks_installed_rewrites_them_with_the_new_token(mcp_
 
 
 def test_regenerating_with_a_malformed_claude_settings_file_reports_failure_and_leaves_it_alone(mcp_live, fake_user_profile):
-    from assistant import hooks_installer
-    from assistant.security import token
+    from homa import hooks_installer
+    from homa.security import token
     target = hooks_installer.settings_path()
     target.parent.mkdir(parents=True)
     target.write_bytes(b"{ not json")
@@ -238,7 +238,7 @@ def test_running_app_serves_the_same_four_tools_once_m2_4_has_mounted_mcp(runnin
     base, token = running_app
     status, _ = Api(base, token).request("POST", "/mcp/", INIT, headers=MCP_HEADERS)
     if status == 404:
-        pytest.skip("the full app does not mount /mcp yet (M2-4 wiring in assistant/app.py)")
+        pytest.skip("the full app does not mount /mcp yet (M2-4 wiring in homa/app.py)")
     assert status == 200
     names = {t.name for t in McpHttp(base, token).list_tools()}
     assert TOOLS <= names, "the full app serves the four card tools"
@@ -248,7 +248,7 @@ def test_running_app_serves_the_same_four_tools_once_m2_4_has_mounted_mcp(runnin
 # ---- R6-2 (M3-0): U+2028/U+2029 in a tool name cannot split an mcp.log line ---------------------------------
 
 def test_a_tool_name_with_unicode_line_separators_logs_one_physical_line_and_tails_as_one(mcp_live):
-    from assistant.server import routes_health
+    from homa.server import routes_health
     path = mcp_live.home / "logs" / "mcp.log"
     physical = lambda: path.read_text(encoding="utf-8").split("\n")[:-1] if path.is_file() else []  # noqa: E731
     before = len(physical())

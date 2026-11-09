@@ -1,5 +1,5 @@
 <#
-Installs Assistant for the current user. No elevation, no service, no executable.
+Installs Homa for the current user. No elevation, no service, no executable.
 Run:  powershell -ExecutionPolicy Bypass -File install.ps1 [-Hooks] [-NoStart] [-NoShortcut]
 #>
 param(
@@ -34,35 +34,35 @@ try {
     & $python -m pip install --user --only-binary :all: -r (Join-Path $repo 'requirements.txt')
     if ($LASTEXITCODE -ne 0) { Write-Host 'pip install failed; see the output above.'; exit 1 }
 
-    & $python -m assistant --init
-    if ($LASTEXITCODE -ne 0) { Write-Host 'Initialising the Assistant folder failed.'; exit 1 }
-    & $python -m assistant --doctor
+    & $python -m homa --init
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Initialising the Homa folder failed.'; exit 1 }
+    & $python -m homa --doctor
 
     $claude = Get-Command claude -ErrorAction SilentlyContinue
     if ($Hooks -or $claude) {
         $install = $Hooks
         if (-not $Hooks) {
-            $answer = Read-Host 'Claude Code found. Show the hook entries Assistant would add to its settings? [y/N]'
+            $answer = Read-Host 'Claude Code found. Show the hook entries Homa would add to its settings? [y/N]'
             $install = ($answer -match '^[yY]')
-            if (-not $install) { Write-Host 'Skipped. Later: python -m assistant hooks install' }
+            if (-not $install) { Write-Host 'Skipped. Later: python -m homa hooks install' }
         }
         if ($install) {
-            & $python -m assistant hooks install --dry-run
+            & $python -m homa hooks install --dry-run
             $confirm = Read-Host 'Add these entries to ~/.claude/settings.json (a backup is written first)? [y/N]'
-            if ($confirm -match '^[yY]') { & $python -m assistant hooks install }
+            if ($confirm -match '^[yY]') { & $python -m homa hooks install }
         }
     }
 
     $pythonw = Join-Path (Split-Path -Parent $python) 'pythonw.exe'
     if (-not (Test-Path $pythonw)) { $pythonw = $python }
     $startup = [Environment]::GetFolderPath('Startup')
-    $lnkPath = Join-Path $startup 'Assistant.lnk'
+    $lnkPath = Join-Path $startup 'Homa.lnk'
     $shell = New-Object -ComObject WScript.Shell
     $lnk = $shell.CreateShortcut($lnkPath)
     $lnk.TargetPath = $pythonw
-    $lnk.Arguments = '-m assistant'
+    $lnk.Arguments = '-m homa'
     $lnk.WorkingDirectory = $repo
-    $lnk.Description = 'Assistant'
+    $lnk.Description = 'Homa'
     $lnk.Save()
 
     if (-not $NoShortcut) {
@@ -70,15 +70,19 @@ try {
     }
 
     if (-not $NoStart) {
-        Start-Process -FilePath $pythonw -ArgumentList '-m', 'assistant' -WorkingDirectory $repo
-        Write-Host 'Assistant started. Look for the round icon at the bottom-right.'
+        Start-Process -FilePath $pythonw -ArgumentList '-m', 'homa' -WorkingDirectory $repo
+        Write-Host 'Homa started. Look for the round icon at the bottom-right.'
     }
 }
 finally {
     Pop-Location
 }
 
-$homeDir = if ($env:ASSISTANT_HOME) { $env:ASSISTANT_HOME } else { Join-Path $env:USERPROFILE '.assistant' }
+$homeDir = if ($env:HOMA_HOME) { $env:HOMA_HOME } else { Join-Path $env:USERPROFILE '.homa' }
+$legacyHome = Join-Path $env:USERPROFILE '.assistant'
+if (-not $env:HOMA_HOME -and -not (Test-Path $homeDir) -and (Test-Path $legacyHome)) {
+    $homeDir = $legacyHome  # legacy folder: Homa moves it to .homa on its first start
+}
 Write-Host ''
 Write-Host "Settings, token, logs:  $homeDir"
 Write-Host "Starts at login via:    $lnkPath"

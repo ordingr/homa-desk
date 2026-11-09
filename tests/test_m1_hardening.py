@@ -1,7 +1,7 @@
 """Regression tests for the M1-9 hardening (Review 3: B1, F1-F4, N2, N4, uibus future race).
 
-Process-level tests start the real ``python -m assistant`` / ``send`` / ``shutdown`` against a scratch
-ASSISTANT_HOME; API-level tests drive the real ``create_app()`` as an ASGI callable (httpx is not installed).
+Process-level tests start the real ``python -m homa`` / ``send`` / ``shutdown`` against a scratch
+HOMA_HOME; API-level tests drive the real ``create_app()`` as an ASGI callable (httpx is not installed).
 Proxy variables are set only in the environment of the subprocess a test launches.
 """
 import asyncio
@@ -18,12 +18,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from assistant import netinfo, paths, send, uibus
-from assistant.cards import model
-from assistant.cards.store import MAX_OPEN_CARDS, CardStore
-from assistant.reminders.store import ReminderStore
-from assistant.scheduler import Scheduler
-from assistant.server import app as server_app
+from homa import netinfo, paths, send, uibus
+from homa.cards import model
+from homa.cards.store import MAX_OPEN_CARDS, CardStore
+from homa.reminders.store import ReminderStore
+from homa.scheduler import Scheduler
+from homa.server import app as server_app
 
 from conftest import REPO_ROOT, STARTUP_TIMEOUT, _free_port, wait_until
 
@@ -87,7 +87,7 @@ def sink():
 
 def _env(home, **extra) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in _PROXY_VARS}
-    env["ASSISTANT_HOME"] = str(home)
+    env["HOMA_HOME"] = str(home)
     env.update(extra)
     return env
 
@@ -96,13 +96,13 @@ def _prepare_home(tmp_path, port: int):
     home = tmp_path / "home"
     home.mkdir()
     (home / "settings.json").write_text(json.dumps({"schema": 1, "port": port}), encoding="utf-8")
-    subprocess.run([sys.executable, "-m", "assistant", "--init"], cwd=REPO_ROOT, env=_env(home),
+    subprocess.run([sys.executable, "-m", "homa", "--init"], cwd=REPO_ROOT, env=_env(home),
                    capture_output=True, check=True, timeout=60)
     return home
 
 
 def _cli(home, *args, **env_extra):
-    return subprocess.run([sys.executable, "-m", "assistant", *args], cwd=REPO_ROOT, env=_env(home, **env_extra),
+    return subprocess.run([sys.executable, "-m", "homa", *args], cwd=REPO_ROOT, env=_env(home, **env_extra),
                           capture_output=True, text=True, timeout=60)
 
 
@@ -121,18 +121,18 @@ class LiveApp:
     def __init__(self, home, port, **env_extra):
         self.home, self.port = home, port
         self.token = (home / "token").read_text(encoding="ascii").strip()
-        self.proc = subprocess.Popen([sys.executable, "-m", "assistant"], cwd=REPO_ROOT,
+        self.proc = subprocess.Popen([sys.executable, "-m", "homa"], cwd=REPO_ROOT,
                                      env=_env(home, **env_extra), stdout=subprocess.DEVNULL,
                                      stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
         deadline = time.monotonic() + STARTUP_TIMEOUT
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
-                raise RuntimeError(f"assistant exited early ({self.proc.returncode})")
+                raise RuntimeError(f"homa exited early ({self.proc.returncode})")
             if _health(port, self.token):
                 return
             time.sleep(0.2)
         self.stop()
-        raise RuntimeError("assistant did not answer /v1/health in time")
+        raise RuntimeError("homa did not answer /v1/health in time")
 
     def get(self, path: str):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -219,7 +219,7 @@ def test_send_with_proxy_env_and_nothing_listening_reaches_no_proxy(tmp_path, si
     home = _prepare_home(tmp_path, _free_port())
     result = _cli(home, "send", "--title", "x", HTTP_PROXY=sink.url, http_proxy=sink.url)
     assert result.returncode == 1
-    assert "Assistant is not running" in result.stderr
+    assert "Homa is not running" in result.stderr
     assert sink.requests == []
 
 
@@ -294,7 +294,7 @@ def test_cli_refuses_to_send_the_token_to_a_foreign_listener(tmp_path, command):
     other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         home = _prepare_home(tmp_path, squatter.port)
-        (home / "assistant.pid").write_text(f"{other.pid}\n{squatter.port}\n", encoding="ascii")
+        (home / "homa.pid").write_text(f"{other.pid}\n{squatter.port}\n", encoding="ascii")
         result = _cli(home, *command)
         assert result.returncode == 1
         assert f"held by process {os.getpid()}" in result.stderr
@@ -311,7 +311,7 @@ def test_cli_sends_when_the_listener_pid_matches_the_pid_file(tmp_path):
     ours = Sink()
     try:
         home = _prepare_home(tmp_path, ours.port)
-        (home / "assistant.pid").write_text(f"{os.getpid()}\n{ours.port}\n", encoding="ascii")
+        (home / "homa.pid").write_text(f"{os.getpid()}\n{ours.port}\n", encoding="ascii")
         result = _cli(home, "send", "--title", "x")
         # the listener is this pytest process, which the pid file names, so the request goes through
         assert result.returncode == 0, result.stderr
@@ -321,11 +321,11 @@ def test_cli_sends_when_the_listener_pid_matches_the_pid_file(tmp_path):
 
 
 def test_second_instance_exits_with_already_running_and_first_keeps_serving(live):
-    second = subprocess.run([sys.executable, "-m", "assistant"], cwd=REPO_ROOT, env=_env(live.home),
+    second = subprocess.run([sys.executable, "-m", "homa"], cwd=REPO_ROOT, env=_env(live.home),
                             capture_output=True, text=True, timeout=60)
     assert second.returncode == 1
     assert "already running" in second.stderr
-    assert (live.home / "assistant.pid").read_text().split()[0] == str(live.proc.pid) or live.proc.poll() is None
+    assert (live.home / "homa.pid").read_text().split()[0] == str(live.proc.pid) or live.proc.poll() is None
     assert live.get("/v1/health") == 200
     log = (live.home / "logs" / "app.log").read_text(encoding="utf-8")
     assert "already running" in log
@@ -337,15 +337,15 @@ def test_bind_failure_exits_1_and_names_the_port_and_its_owner(tmp_path):
         squat.listen(1)
         port = squat.getsockname()[1]
         home = _prepare_home(tmp_path, port)
-        result = _cli(home, ASSISTANT_TEST_MODE="")
+        result = _cli(home, HOMA_TEST_MODE="")
         assert result.returncode == 1
         assert f"127.0.0.1:{port} is not available" in result.stderr
         assert f"held by process {os.getpid()}" in result.stderr
-        assert not (home / "assistant.pid").exists()
+        assert not (home / "homa.pid").exists()
 
 
 def test_message_box_is_used_only_when_there_is_no_stderr(monkeypatch, capsys):
-    from assistant.app import App
+    from homa.app import App
     shown = []
     monkeypatch.setattr(netinfo, "message_box", lambda title, text: shown.append((title, text)))
     app = App()
@@ -356,7 +356,7 @@ def test_message_box_is_used_only_when_there_is_no_stderr(monkeypatch, capsys):
     app._windowed = True
     monkeypatch.setattr(sys, "stderr", None)
     app._notify_user("no console")
-    assert shown == [("Assistant", "no console")]
+    assert shown == [("Homa", "no console")]
 
 
 # ----- F1: scheduler and far-future inputs --------------------------------------------------------
@@ -366,7 +366,7 @@ def test_scheduler_survives_far_future_jobs_and_a_raising_job(caplog):
     sched.start()
     fired = []
     try:
-        with caplog.at_level(logging.ERROR, logger="assistant.scheduler"):
+        with caplog.at_level(logging.ERROR, logger="homa.scheduler"):
             now = time.time()
             sched.at(now + 300 * DAY, lambda: fired.append("far"))
             sched.at(1e308, lambda: fired.append("inf-ish"))
@@ -376,14 +376,14 @@ def test_scheduler_survives_far_future_jobs_and_a_raising_job(caplog):
             assert wait_until(lambda: "four" in fired, timeout=7.0)
         assert fired == ["two", "four"]
         assert sched._thread.is_alive()
-        errors = [r for r in caplog.records if r.name == "assistant.scheduler" and r.levelno >= logging.ERROR]
+        errors = [r for r in caplog.records if r.name == "homa.scheduler" and r.levelno >= logging.ERROR]
         assert len(errors) == 1 and "ZeroDivisionError" in (errors[0].exc_text or "") + str(errors[0].exc_info)
     finally:
         sched.stop()
 
 
 def test_scheduler_wait_clamp_is_below_the_threading_timeout_limit():
-    from assistant import scheduler
+    from homa import scheduler
     assert scheduler.MAX_WAIT_S == 3600.0 < threading.TIMEOUT_MAX
 
 
@@ -488,7 +488,7 @@ def test_action_caps_accept_the_limit_and_reject_one_more(cards_app, part, limit
 
 def test_205_non_sticky_posts_leave_200_open_and_log_a_warning(cards_app, caplog):
     store, app = cards_app
-    with caplog.at_level(logging.WARNING, logger="assistant.cards.store"):
+    with caplog.at_level(logging.WARNING, logger="homa.cards.store"):
         for i in range(MAX_OPEN_CARDS + 5):
             assert _post_card(app, title=f"c{i}", sticky=False)[0] == 201
     assert MAX_OPEN_CARDS == 200
@@ -511,10 +511,10 @@ def test_200_sticky_cards_then_one_more_is_422_too_many_cards(cards_app):
 def test_150_unknown_fields_log_at_most_100_names_plus_one_cap_line(monkeypatch, caplog):
     monkeypatch.setattr(model, "_logged_unknown", set())
     body = {"title": "t", **{f"zz{i}": 1 for i in range(150)}}
-    with caplog.at_level(logging.WARNING, logger="assistant.cards.model"):
+    with caplog.at_level(logging.WARNING, logger="homa.cards.model"):
         model.Card.from_dict(body)
         model.Card.from_dict(body)
-    messages = [r.getMessage() for r in caplog.records if r.name == "assistant.cards.model"]
+    messages = [r.getMessage() for r in caplog.records if r.name == "homa.cards.model"]
     ignored = [m for m in messages if m.startswith("ignoring unknown card field")]
     caps = [m for m in messages if "further unknown" in m]
     assert len(ignored) == 100, len(ignored)
@@ -558,7 +558,7 @@ def test_future_cancelled_while_its_callable_runs_does_not_raise(caplog):
 def test_debug_ui_requests_racing_shutdown_leave_no_traceback(tmp_path):
     port = _free_port()
     home = _prepare_home(tmp_path, port)
-    app = LiveApp(home, port, ASSISTANT_TEST_MODE="1")
+    app = LiveApp(home, port, HOMA_TEST_MODE="1")
     assert app.get("/v1/_debug/ui") == 200
     statuses = []
 
@@ -592,31 +592,31 @@ def _everyone_aces(path):
 
 
 @pytest.mark.parametrize("residue", ["state.json.tmp", "state.json.corrupt", "reminders.json.tmp",
-                                     "reminders.json.corrupt", "settings.json.tmp", "assistant.pid",
+                                     "reminders.json.corrupt", "settings.json.tmp", "homa.pid",
                                      "hooks-install.json"])
 def test_crash_residue_does_not_stop_secure_home(tmp_path, monkeypatch, caplog, residue):
-    root = tmp_path / "assistant-home"
+    root = tmp_path / "homa-home"
     root.mkdir()
     (root / "state.json").write_text("{}", encoding="utf-8")
     (root / residue).write_text("x", encoding="utf-8")
-    monkeypatch.setenv("ASSISTANT_HOME", str(root))
+    monkeypatch.setenv("HOMA_HOME", str(root))
     monkeypatch.setattr(paths, "_fresh_roots", set())
     subprocess.run(["icacls", str(root), "/grant", "*S-1-1-0:(R)"], check=True, capture_output=True)
     assert _everyone_aces(root)
-    with caplog.at_level(logging.WARNING, logger="assistant.paths"):
+    with caplog.at_level(logging.WARNING, logger="homa.paths"):
         paths.secure_home()
     assert not [r for r in caplog.records if "not restricting" in r.getMessage()]
     assert _everyone_aces(root) == []
 
 
 def test_a_foreign_file_still_stops_secure_home(tmp_path, monkeypatch, caplog):
-    root = tmp_path / "assistant-home"
+    root = tmp_path / "homa-home"
     root.mkdir()
     (root / "state.json.tmp").write_text("x", encoding="utf-8")
     (root / "holiday-photos.zip").write_text("x", encoding="utf-8")
-    monkeypatch.setenv("ASSISTANT_HOME", str(root))
+    monkeypatch.setenv("HOMA_HOME", str(root))
     monkeypatch.setattr(paths, "_fresh_roots", set())
-    with caplog.at_level(logging.WARNING, logger="assistant.paths"):
+    with caplog.at_level(logging.WARNING, logger="homa.paths"):
         paths.secure_home()
     assert [r for r in caplog.records if "not restricting" in r.getMessage()]
 
@@ -640,12 +640,12 @@ def _foreign_listener(port: int):
 def test_r41_no_pid_file_and_non_python_listener_is_refused(tmp_path, command):
     port = _free_port()
     home = _prepare_home(tmp_path, port)
-    assert not (home / "assistant.pid").exists()
+    assert not (home / "homa.pid").exists()
     squatter = _foreign_listener(port)
     try:
         result = _cli(home, *command)
         assert result.returncode == 1
-        assert "No assistant.pid" in result.stderr
+        assert "No homa.pid" in result.stderr
         assert "powershell" in result.stderr.lower()
         assert f"pid {netinfo.listener_pid(port)}" in result.stderr
         assert "nothing was sent" in result.stderr
@@ -658,7 +658,7 @@ def test_r41_no_pid_file_and_python_listener_sends(tmp_path):
     ours = Sink()
     try:
         home = _prepare_home(tmp_path, ours.port)
-        assert not (home / "assistant.pid").exists()
+        assert not (home / "homa.pid").exists()
         result = _cli(home, "send", "--title", "x")
         assert result.returncode == 0, result.stderr
         assert len(ours.requests) == 1
@@ -670,11 +670,11 @@ def test_r41_no_pid_file_and_nothing_listening_is_not_a_listener_refusal(tmp_pat
     home = _prepare_home(tmp_path, _free_port())
     result = _cli(home, "send", "--title", "x")
     assert result.returncode != 0
-    assert "No assistant.pid" not in result.stderr
+    assert "No homa.pid" not in result.stderr
 
 
 def test_r41_no_pid_file_with_the_real_app_sends_and_shuts_down(live):
-    (live.home / "assistant.pid").unlink()
+    (live.home / "homa.pid").unlink()
     assert _cli(live.home, "send", "--title", "x").returncode == 0
     assert _cli(live.home, "shutdown").returncode == 0
     live.proc.wait(timeout=20)
@@ -685,7 +685,7 @@ def test_r42_stale_pid_file_with_a_reused_python_pid_is_removed_and_the_app_star
     home = _prepare_home(tmp_path, port)
     unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     try:
-        pid_file = home / "assistant.pid"
+        pid_file = home / "homa.pid"
         pid_file.write_text(f"{unrelated.pid}\n{port}\n", encoding="ascii")
         app = LiveApp(home, port)
         try:
@@ -707,22 +707,22 @@ def test_r42_pid_file_naming_a_dead_pid_is_removed_too(tmp_path):
     home = _prepare_home(tmp_path, port)
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
-    (home / "assistant.pid").write_text(f"{dead.pid}\n{port}\n", encoding="ascii")
+    (home / "homa.pid").write_text(f"{dead.pid}\n{port}\n", encoding="ascii")
     app = LiveApp(home, port)
     try:
-        assert (home / "assistant.pid").read_text(encoding="ascii").split()[0] != str(dead.pid)
+        assert (home / "homa.pid").read_text(encoding="ascii").split()[0] != str(dead.pid)
         assert (home / "logs" / "app.log").read_text(encoding="utf-8").count("removing stale pid file") == 1
     finally:
         app.stop()
 
 
 def test_r42_refusal_names_the_pid_file_and_leaves_it_alone(live):
-    before = (live.home / "assistant.pid").read_text(encoding="ascii")
-    second = subprocess.run([sys.executable, "-m", "assistant"], cwd=REPO_ROOT, env=_env(live.home),
+    before = (live.home / "homa.pid").read_text(encoding="ascii")
+    second = subprocess.run([sys.executable, "-m", "homa"], cwd=REPO_ROOT, env=_env(live.home),
                             capture_output=True, text=True, timeout=60)
     assert second.returncode == 1
-    assert f"pid file {live.home / 'assistant.pid'}" in second.stderr
-    assert (live.home / "assistant.pid").read_text(encoding="ascii") == before
+    assert f"pid file {live.home / 'homa.pid'}" in second.stderr
+    assert (live.home / "homa.pid").read_text(encoding="ascii") == before
     assert "removing stale" not in (live.home / "logs" / "app.log").read_text(encoding="utf-8")
     assert live.get("/v1/health") == 200
 
@@ -732,19 +732,19 @@ def _asyncio_record(exc, message, name="asyncio"):
 
 
 def test_r43_filter_drops_only_the_proactor_connection_lost_reset():
-    from assistant.app import _ProactorResetFilter
+    from homa.app import _ProactorResetFilter
     flt = _ProactorResetFilter()
     lost = "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)"
     assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), lost)) is False
-    assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), "peer reset", name="assistant.x")) is True
+    assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), "peer reset", name="homa.x")) is True
     assert flt.filter(_asyncio_record(ConnectionResetError(10054, "reset"), "Exception in callback other()")) is True
     assert flt.filter(_asyncio_record(ValueError("boom"), lost)) is True
     assert flt.filter(logging.LogRecord("asyncio", logging.ERROR, __file__, 1, lost, None, None)) is True
 
 
 def test_r43_filter_installed_by_setup_logging_stops_a_real_loop_exception_report(tmp_path, monkeypatch):
-    from assistant import app as app_module
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path))
+    from homa import app as app_module
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path))
     monkeypatch.setattr(paths, "_fresh_roots", set())
     paths.ensure_layout()
     root = logging.getLogger()

@@ -4,7 +4,7 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const devTarget = process.env.ASSISTANT_DEV_TARGET;
+const devTarget = process.env.HOMA_DEV_TARGET;
 
 const PDFJS_ASSETS = [
   ["standard_fonts", /\.(ttf|pfb)$|^LICENSE/],
@@ -15,7 +15,7 @@ const PDFJS_ASSETS = [
 function pdfjsAssets() {
   const root = path.dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"));
   return {
-    name: "assistant-pdfjs-assets",
+    name: "homa-pdfjs-assets",
     generateBundle() {
       for (const [folder, pattern] of PDFJS_ASSETS) {
         for (const file of readdirSync(path.join(root, folder)).sort()) {
@@ -33,7 +33,7 @@ function pdfjsAssets() {
 
 function noCdn() {
   return {
-    name: "assistant-no-cdn",
+    name: "homa-no-cdn",
     enforce: "pre",
     transform(code, id) {
       if (!/\/node_modules\/(npm2url|markmap-common)\//.test(id)) return null;
@@ -49,8 +49,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: false,
-    ...(process.env.ASSISTANT_WEB_OUT
-      ? { outDir: process.env.ASSISTANT_WEB_OUT, emptyOutDir: true }
+    ...(process.env.HOMA_WEB_OUT
+      ? { outDir: process.env.HOMA_WEB_OUT, emptyOutDir: true }
       : {}),
   },
 });

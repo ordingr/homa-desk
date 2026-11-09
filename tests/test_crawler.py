@@ -13,9 +13,9 @@ import pytest
 
 from conftest import BULK_COUNT, default_exclude_patterns, load_search_spec, store_flag
 
-crawler = pytest.importorskip("assistant.index.crawler", reason="assistant/index/crawler.py (M3a-2) not present")
-store_mod = pytest.importorskip("assistant.index.store", reason="assistant/index/store.py (M3a-1) not present")
-excludes_mod = pytest.importorskip("assistant.index.excludes", reason="assistant/index/excludes.py (M3a-1) not present")
+crawler = pytest.importorskip("homa.index.crawler", reason="homa/index/crawler.py (M3a-2) not present")
+store_mod = pytest.importorskip("homa.index.store", reason="homa/index/store.py (M3a-1) not present")
+excludes_mod = pytest.importorskip("homa.index.excludes", reason="homa/index/excludes.py (M3a-1) not present")
 
 EXCLUDED_PREFIXES = ("node_modules", "$RECYCLE.BIN", "AppData")
 
@@ -112,7 +112,7 @@ def test_flags_for_directories_denied_and_ordinary_files(search_tree):
     assert flags["docs"] & f_dir and not flags["designer.md"] & f_dir
     assert not flags["designer.md"] & f_denied
     try:
-        from assistant.security import denylist  # noqa: F401
+        from homa.security import denylist  # noqa: F401
     except ImportError:
         pytest.skip("denylist.py (M3a-1) not present: flag assertions for SEC-3 names skipped")
     for rel in (".env", "id_rsa", "vault.kdbx", "secrets\\server.pem", ".aws\\credentials"):
@@ -176,9 +176,9 @@ def test_crawl_speed_is_printed_and_sane(search_tree):
 
 @pytest.mark.timeout(1500)
 def test_real_roots_crawl_is_recorded_against_p7():
-    roots = os.environ.get("ASSISTANT_PERF_ROOT")
+    roots = os.environ.get("HOMA_PERF_ROOT")
     if not roots:
-        pytest.skip("set ASSISTANT_PERF_ROOT (';'-separated) to record the real-root crawl against P7 (M3a-2 Done cell)")
+        pytest.skip("set HOMA_PERF_ROOT (';'-separated) to record the real-root crawl against P7 (M3a-2 Done cell)")
     rootlist = [r for r in roots.split(";") if r]
     started = time.perf_counter()
     result = crawl(rootlist, default_exclude_patterns())

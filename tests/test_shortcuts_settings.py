@@ -1,13 +1,13 @@
 """Keyboard shortcuts in settings (plan 7.5 M4-2; AC-PS-4): defaults, validation, repair on load.
 
-Real Settings object against a scratch ASSISTANT_HOME; nothing mocked.
+Real Settings object against a scratch HOMA_HOME; nothing mocked.
 """
 import json
 
 import pytest
 
-from assistant import paths
-from assistant.settings import DEFAULT_SHORTCUTS, DEFAULTS, Settings
+from homa import paths
+from homa.settings import DEFAULT_SHORTCUTS, DEFAULTS, Settings
 
 ACTIONS = {"open", "reveal", "copy_path", "rename", "properties", "recycle", "md_vault", "folder_listing",
            "cycle_sort", "save_search", "cycle_date", "cycle_mode", "context_menu", "full_page", "close"}
@@ -15,7 +15,7 @@ ACTIONS = {"open", "reveal", "copy_path", "rename", "properties", "recycle", "md
 
 @pytest.fixture(autouse=True)
 def scratch_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path))
 
 
 def load(shortcuts):

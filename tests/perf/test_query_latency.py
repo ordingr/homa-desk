@@ -7,7 +7,7 @@ Everything prints p50 / p95 (run with ``-s``, or read the captured output of a f
 
 * synthetic: the 2,000,000-name conftest store at the store level, through ``search.run``, and 50 random 2-6 character
   queries split into selective / dense by hit count.
-* real: set ``ASSISTANT_PERF_ROOT`` (';'-separated roots); a private app indexes them and 50 random 2-6 character
+* real: set ``HOMA_PERF_ROOT`` (';'-separated roots); a private app indexes them and 50 random 2-6 character
   substrings of real file names are timed through ``GET /v1/search``.
 """
 import os
@@ -82,8 +82,8 @@ def test_synthetic_2m_fifty_random_queries_split_by_density(synthetic_store_2m):
 
 
 def test_synthetic_2m_through_search_run_selective_and_dense(synthetic_store_2m):
-    query = pytest.importorskip("assistant.index.query", reason="query.py (M3a-3) not present")
-    search = pytest.importorskip("assistant.index.search", reason="search.py (M3a-3) not present")
+    query = pytest.importorskip("homa.index.query", reason="query.py (M3a-3) not present")
+    search = pytest.importorskip("homa.index.search", reason="search.py (M3a-3) not present")
     store, _, _ = synthetic_store_2m
 
     def run(text, limit=50):
@@ -105,9 +105,9 @@ def test_synthetic_2m_through_search_run_selective_and_dense(synthetic_store_2m)
 
 @pytest.mark.timeout(1500)
 def test_real_index_random_queries_via_http():
-    roots = os.environ.get("ASSISTANT_PERF_ROOT")
+    roots = os.environ.get("HOMA_PERF_ROOT")
     if not roots:
-        pytest.skip("set ASSISTANT_PERF_ROOT (';'-separated) to time the real index through GET /v1/search")
+        pytest.skip("set HOMA_PERF_ROOT (';'-separated) to time the real index through GET /v1/search")
     import json
     import tempfile
     import urllib.parse

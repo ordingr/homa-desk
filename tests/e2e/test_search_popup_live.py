@@ -11,13 +11,13 @@ import pytest
 
 from conftest import walk_store
 
-search_ui = pytest.importorskip("assistant.overlay.search_ui", reason="assistant/overlay/search_ui.py not present")
-modes_mod = pytest.importorskip("assistant.search.modes", reason="assistant/search/modes.py not present")
+search_ui = pytest.importorskip("homa.overlay.search_ui", reason="homa/overlay/search_ui.py not present")
+modes_mod = pytest.importorskip("homa.search.modes", reason="homa/search/modes.py not present")
 
-from assistant import uibus  # noqa: E402
-from assistant.actions import claude  # noqa: E402
-from assistant.overlay import gfx, theme  # noqa: E402
-from assistant.search.saved import SavedSearches  # noqa: E402
+from homa import uibus  # noqa: E402
+from homa.actions import claude  # noqa: E402
+from homa.overlay import gfx, theme  # noqa: E402
+from homa.search.saved import SavedSearches  # noqa: E402
 
 KNOWN = {"md", "py", "html", "txt", "yml", "pdf", "docx", "xlsx", "csv", "png", "json", "js", "ts"}
 

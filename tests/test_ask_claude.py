@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-from assistant.actions import claude
+from homa.actions import claude
 from conftest import Api, _free_port, launch_app, wait_index, wait_until
 from tests.fixtures.preview import build_preview_tree
 
@@ -136,7 +136,7 @@ def clean_shim_state(request):
 def home(tmp_path, monkeypatch):
     folder = tmp_path / "ahome"
     folder.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(folder))
+    monkeypatch.setenv("HOMA_HOME", str(folder))
     return folder
 
 
@@ -227,7 +227,7 @@ def test_send_uses_exact_argv_with_the_prompt_on_stdin_only(shim, home):
     assert "Secret Plans" not in stdin and str(home) not in stdin, "only the base name goes in the prompt"
     assert not any("alpha" in a or "Secret" in a for a in call["argv"]), "no file data on the command line"
     assert out["bytes"] == len(stdin.encode("utf-8"))
-    assert Path(call["cwd"]).resolve() == home.resolve(), "claude runs in the Assistant home, not in the file's folder"
+    assert Path(call["cwd"]).resolve() == home.resolve(), "claude runs in the Homa home, not in the file's folder"
 
 
 def test_marker_lookalikes_in_the_file_cannot_close_the_untrusted_block(shim, home):
@@ -311,7 +311,7 @@ def test_continue_writes_the_context_under_home_tmp_and_launches_once(shim, home
     script = Path(launcher).read_text(encoding="ascii")
     assert f'--append-system-prompt-file "{ctx}"' in script and claude.FIRST_MESSAGE in script
     assert "context body" not in script, "only the fixed message travels on the command line"
-    assert cwd == str(home), "the console starts in Assistant's own home, never in the file's folder"
+    assert cwd == str(home), "the console starts in Homa's own home, never in the file's folder"
     assert f' --add-dir "{docs}"' in script, "the file's folder is granted with --add-dir instead"
     assert script.index("--add-dir") < script.index("--append-system-prompt-file")
     assert [r[1:4] for r in send_log(home)][-1] == [claude.ROUTE_CONTINUE, str(len(text.encode())), "launched"]
@@ -378,7 +378,7 @@ def test_a_folder_with_both_a_caret_and_a_percent_reaches_claude_unchanged(shim,
 def test_a_caret_percent_folder_under_a_percent_home_works_end_to_end(shim, tmp_path, monkeypatch):
     weird_home = tmp_path / "h%PATH%x"
     weird_home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
+    monkeypatch.setenv("HOMA_HOME", str(weird_home))
     monkeypatch.setattr(claude, "_launch", run_launcher_hidden)
     odd = tmp_path / "src^%dir"
     odd.mkdir()
@@ -391,7 +391,7 @@ def test_a_caret_percent_folder_under_a_percent_home_works_end_to_end(shim, tmp_
 def test_a_caret_in_the_home_path_survives_the_launcher(shim, tmp_path, monkeypatch):
     weird_home = tmp_path / "h^x"
     weird_home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
+    monkeypatch.setenv("HOMA_HOME", str(weird_home))
     monkeypatch.setattr(claude, "_launch", run_launcher_hidden)
     claude.send(str(weird_home / "n.txt"), "n.txt", "x")
     assert claude.continue_session()["ok"] is True
@@ -402,7 +402,7 @@ def test_a_caret_in_the_home_path_survives_the_launcher(shim, tmp_path, monkeypa
 def test_a_home_path_with_ampersand_bang_and_paren_survives_the_launcher(shim, tmp_path, monkeypatch):
     weird_home = tmp_path / "h&x!(y)"
     weird_home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
+    monkeypatch.setenv("HOMA_HOME", str(weird_home))
     monkeypatch.setattr(claude, "_launch", run_launcher_hidden)
     claude.send(str(weird_home / "n.txt"), "n.txt", "x")
     assert claude.continue_session()["ok"] is True
@@ -413,7 +413,7 @@ def test_a_home_path_with_ampersand_bang_and_paren_survives_the_launcher(shim, t
 def test_launch_passes_a_relative_launcher_when_the_path_has_a_percent(shim, tmp_path, monkeypatch):
     weird_home = tmp_path / "h%PATH%x"
     weird_home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
+    monkeypatch.setenv("HOMA_HOME", str(weird_home))
     seen = []
     monkeypatch.setattr(claude, "_launch", lambda target, cwd: seen.append((target, cwd)))
     claude.send(str(weird_home / "n.txt"), "n.txt", "x")
@@ -426,7 +426,7 @@ def test_launch_passes_a_relative_launcher_when_the_path_has_a_percent(shim, tmp
 def test_a_percent_in_the_home_path_survives_the_launcher(shim, tmp_path, monkeypatch):
     weird_home = tmp_path / "h%PATH%x"
     weird_home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(weird_home))
+    monkeypatch.setenv("HOMA_HOME", str(weird_home))
     monkeypatch.setattr(claude, "_launch", run_launcher_hidden)
     claude.send(str(weird_home / "n.txt"), "n.txt", "pct body")
     assert claude.continue_session()["ok"] is True

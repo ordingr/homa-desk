@@ -18,7 +18,7 @@ _REAL_USER_ENV = {k: os.environ[k] for k in ("USERPROFILE", "HOME", "HOMEDRIVE",
 
 
 def browser_env(**extra) -> dict:
-    """os.environ for a node/Edge child: the session points USERPROFILE at a temp dir so no Assistant process can reach the
+    """os.environ for a node/Edge child: the session points USERPROFILE at a temp dir so no Homa process can reach the
     real ~/.claude, but a browser needs its real profile folders to start."""
     return dict(os.environ, **_REAL_USER_ENV, **extra)
 STARTUP_TIMEOUT = 30.0
@@ -76,12 +76,14 @@ def _health_ok(port: int, token: str) -> bool:
 
 @pytest.fixture(scope="session", autouse=True)
 def isolated_home_env(tmp_path_factory):
-    """Point this process's own ASSISTANT_HOME at a temp dir so in-process tests never touch ~/.assistant."""
+    """Point this process's own HOMA_HOME at a temp dir so in-process tests never touch ~/.homa."""
     home = tmp_path_factory.mktemp("inproc_home")
     fake_user = tmp_path_factory.mktemp("fake_userprofile")
     drive, rest = os.path.splitdrive(str(fake_user))
-    overrides = {"ASSISTANT_HOME": str(home), "USERPROFILE": str(fake_user), "HOME": str(fake_user),
-                 "HOMEDRIVE": drive, "HOMEPATH": rest}
+    fake_local = tmp_path_factory.mktemp("fake_localappdata")
+    overrides = {"HOMA_HOME": str(home), "USERPROFILE": str(fake_user), "HOME": str(fake_user),
+                 "HOMEDRIVE": drive, "HOMEPATH": rest, "LOCALAPPDATA": str(fake_local)}
+    os.environ.pop("ASSISTANT_HOME", None)
     previous = {key: os.environ.get(key) for key in overrides}
     os.environ.update(overrides)
     yield home
@@ -93,50 +95,50 @@ def isolated_home_env(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def assistant_home(tmp_path_factory) -> Path:
-    return tmp_path_factory.mktemp("assistant_home")
+def homa_home(tmp_path_factory) -> Path:
+    return tmp_path_factory.mktemp("homa_home")
 
 
 @pytest.fixture(scope="session")
-def assistant_port() -> int:
+def homa_port() -> int:
     return _free_port()
 
 
 @pytest.fixture(scope="session")
-def assistant_env(assistant_home) -> dict:
-    return dict(os.environ, ASSISTANT_HOME=str(assistant_home))
+def homa_env(homa_home) -> dict:
+    return dict(os.environ, HOMA_HOME=str(homa_home))
 
 
 @pytest.fixture(scope="session")
-def running_app(assistant_home, assistant_port, assistant_env):
-    """Start ``python -m assistant`` against an isolated home and yield (base_url, token)."""
-    (assistant_home / "settings.json").write_text(
-        json.dumps({"schema": 1, "port": assistant_port}), encoding="utf-8")
-    console = open(assistant_home / "console.txt", "wb")
-    proc = subprocess.Popen([sys.executable, "-m", "assistant"], cwd=REPO_ROOT, env=assistant_env,
+def running_app(homa_home, homa_port, homa_env):
+    """Start ``python -m homa`` against an isolated home and yield (base_url, token)."""
+    (homa_home / "settings.json").write_text(
+        json.dumps({"schema": 1, "port": homa_port}), encoding="utf-8")
+    console = open(homa_home / "console.txt", "wb")
+    proc = subprocess.Popen([sys.executable, "-m", "homa"], cwd=REPO_ROOT, env=homa_env,
                             stdout=console, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
-    token_path = assistant_home / "token"
+    token_path = homa_home / "token"
     token = ""
     deadline = time.monotonic() + STARTUP_TIMEOUT
     try:
         while time.monotonic() < deadline:
             if proc.poll() is not None:
-                raise RuntimeError(f"assistant exited early with code {proc.returncode}:\n"
-                                   + (assistant_home / "console.txt").read_text(errors="replace"))
+                raise RuntimeError(f"homa exited early with code {proc.returncode}:\n"
+                                   + (homa_home / "console.txt").read_text(errors="replace"))
             if not token and token_path.is_file():
                 token = token_path.read_text(encoding="ascii").strip()
-            if token and _health_ok(assistant_port, token):
+            if token and _health_ok(homa_port, token):
                 break
             time.sleep(0.2)
         else:
-            raise RuntimeError("assistant did not answer /v1/health within "
+            raise RuntimeError("homa did not answer /v1/health within "
                                f"{STARTUP_TIMEOUT:.0f}s:\n"
-                               + (assistant_home / "console.txt").read_text(errors="replace"))
-        yield f"http://127.0.0.1:{assistant_port}", token
+                               + (homa_home / "console.txt").read_text(errors="replace"))
+        yield f"http://127.0.0.1:{homa_port}", token
     finally:
-        _stop(proc, assistant_port, token)
+        _stop(proc, homa_port, token)
         console.close()
-        log_path = assistant_home / "logs" / "app.log"
+        log_path = homa_home / "logs" / "app.log"
         if log_path.is_file():
             assert "shutting down" in log_path.read_text(encoding="utf-8"), "no graceful-shutdown line in app.log"
 
@@ -174,7 +176,7 @@ def _stop(proc: subprocess.Popen, port: int | None = None, token: str = "") -> N
         except subprocess.TimeoutExpired:
             subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=30)
             proc.wait(timeout=10)
-            pytest.fail("assistant did not shut down gracefully and was force-killed")
+            pytest.fail("homa did not shut down gracefully and was force-killed")
 
 
 class Api:
@@ -241,26 +243,26 @@ import threading
 
 @contextlib.contextmanager
 def launch_app(home: Path, port: int, settings: dict | None = None, test_mode: bool = False):
-    """Start a second, private ``python -m assistant`` and yield (base_url, token); stops it gracefully."""
+    """Start a second, private ``python -m homa`` and yield (base_url, token); stops it gracefully."""
     home.mkdir(parents=True, exist_ok=True)
     (home / "settings.json").write_text(json.dumps({"schema": 1, "port": port, **(settings or {})}), encoding="utf-8")
-    env = dict(os.environ, ASSISTANT_HOME=str(home))
+    env = dict(os.environ, HOMA_HOME=str(home))
     fake_user = home.parent / (home.name + "_userprofile")
     fake_user.mkdir(parents=True, exist_ok=True)
     drive, rest = os.path.splitdrive(str(fake_user))
     env.update(USERPROFILE=str(fake_user), HOME=str(fake_user), HOMEDRIVE=drive, HOMEPATH=rest)
-    env.pop("ASSISTANT_TEST_MODE", None)
+    env.pop("HOMA_TEST_MODE", None)
     if test_mode:
-        env["ASSISTANT_TEST_MODE"] = "1"
+        env["HOMA_TEST_MODE"] = "1"
     console = open(home / "console.txt", "wb")
-    proc = subprocess.Popen([sys.executable, "-m", "assistant"], cwd=REPO_ROOT, env=env, stdout=console,
+    proc = subprocess.Popen([sys.executable, "-m", "homa"], cwd=REPO_ROOT, env=env, stdout=console,
                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     token = ""
     deadline = time.monotonic() + STARTUP_TIMEOUT
     try:
         while time.monotonic() < deadline:
             if proc.poll() is not None:
-                raise RuntimeError(f"assistant exited early with code {proc.returncode}:\n"
+                raise RuntimeError(f"homa exited early with code {proc.returncode}:\n"
                                    + (home / "console.txt").read_text(errors="replace"))
             if not token and (home / "token").is_file():
                 token = (home / "token").read_text(encoding="ascii").strip()
@@ -268,7 +270,7 @@ def launch_app(home: Path, port: int, settings: dict | None = None, test_mode: b
                 break
             time.sleep(0.2)
         else:
-            raise RuntimeError(f"assistant did not answer /v1/health within {STARTUP_TIMEOUT:.0f}s:\n"
+            raise RuntimeError(f"homa did not answer /v1/health within {STARTUP_TIMEOUT:.0f}s:\n"
                                + (home / "console.txt").read_text(errors="replace"))
         yield f"http://127.0.0.1:{port}", token
     finally:
@@ -293,7 +295,7 @@ def _ics_stamp(epoch: float) -> str:
 
 def build_ics(events: list) -> str:
     """Minimal VCALENDAR. Event keys: uid, subject, start, end (epoch seconds), location, description, declined."""
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Assistant QA//EN"]
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Homa QA//EN"]
     for e in events:
         lines += ["BEGIN:VEVENT", f"UID:{e['uid']}", f"DTSTAMP:{_ics_stamp(time.time())}",
                   f"DTSTART:{_ics_stamp(e['start'])}", f"DTEND:{_ics_stamp(e['end'])}", f"SUMMARY:{e['subject']}"]
@@ -411,9 +413,9 @@ class McpHttp:
 
 
 def run_stdio_shim(home: Path, lines: list, timeout: float = 20.0, expect: int | None = None):
-    """Run ``python -m assistant.mcp_stdio`` against ``home``, feed JSON-RPC ``lines``; return (stdout lines, stderr)."""
-    env = dict(os.environ, ASSISTANT_HOME=str(home))
-    proc = subprocess.Popen([sys.executable, "-m", "assistant.mcp_stdio"], cwd=REPO_ROOT, env=env,
+    """Run ``python -m homa.mcp_stdio`` against ``home``, feed JSON-RPC ``lines``; return (stdout lines, stderr)."""
+    env = dict(os.environ, HOMA_HOME=str(home))
+    proc = subprocess.Popen([sys.executable, "-m", "homa.mcp_stdio"], cwd=REPO_ROOT, env=env,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out: list = []
     want = expect if expect is not None else sum(1 for line in lines if '"id"' in line)
@@ -443,7 +445,7 @@ def run_stdio_shim(home: Path, lines: list, timeout: float = 20.0, expect: int |
 
 
 class MiniLive:
-    """In-process Assistant server (real create_app + real uvicorn thread) with the MCP app mounted, on a private home."""
+    """In-process Homa server (real create_app + real uvicorn thread) with the MCP app mounted, on a private home."""
 
     def __init__(self, home, port, store, reminders, server, mcp_server):
         self.home, self.port, self.store, self.reminders = home, port, store, reminders
@@ -463,19 +465,19 @@ class MiniLive:
 
 @pytest.fixture(scope="module")
 def mcp_live(tmp_path_factory):
-    """Skips until assistant/server/mcp.py exists. Home, store, scheduler and reminders are private to the module."""
-    build = pytest.importorskip("assistant.server.mcp", reason="assistant/server/mcp.py (M2-2) not present").build_mcp
-    from assistant import paths
-    from assistant.cards.store import CardStore
-    from assistant.reminders.store import ReminderStore
-    from assistant.scheduler import Scheduler
-    from assistant.security import token as token_mod
-    from assistant.server.app import ServerThread, create_app
+    """Skips until homa/server/mcp.py exists. Home, store, scheduler and reminders are private to the module."""
+    build = pytest.importorskip("homa.server.mcp", reason="homa/server/mcp.py (M2-2) not present").build_mcp
+    from homa import paths
+    from homa.cards.store import CardStore
+    from homa.reminders.store import ReminderStore
+    from homa.scheduler import Scheduler
+    from homa.security import token as token_mod
+    from homa.server.app import ServerThread, create_app
 
     home = tmp_path_factory.mktemp("mcp_live_home")
     port = _free_port()
     mp = pytest.MonkeyPatch()
-    mp.setenv("ASSISTANT_HOME", str(home))
+    mp.setenv("HOMA_HOME", str(home))
     paths.ensure_layout()
     (home / "settings.json").write_text(json.dumps({"schema": 1, "port": port}), encoding="utf-8")
     token_mod.ensure()
@@ -579,14 +581,14 @@ def row_names(rows) -> list:
 
 
 def store_flag(name: str, fallback: int) -> int:
-    """FLAG_DIR / FLAG_HIDDEN / FLAG_SYSTEM / FLAG_PLACEHOLDER / FLAG_DENIED exported by assistant.index.store;
+    """FLAG_DIR / FLAG_HIDDEN / FLAG_SYSTEM / FLAG_PLACEHOLDER / FLAG_DENIED exported by homa.index.store;
     the fallback is the order in plan 4b (dir, hidden, system, placeholder, deny-listed = 1, 2, 4, 8, 16)."""
-    mod = pytest.importorskip("assistant.index.store", reason="assistant/index/store.py (M3a-1) not present")
+    mod = pytest.importorskip("homa.index.store", reason="homa/index/store.py (M3a-1) not present")
     return getattr(mod, name, fallback)
 
 
 def _mini_deny(path: str) -> bool:
-    """Name-only stand-in for denylist.matches, used until assistant.security.denylist exists."""
+    """Name-only stand-in for denylist.matches, used until homa.security.denylist exists."""
     low = path.replace("/", "\\").casefold()
     leaf = low.rsplit("\\", 1)[-1]
     return (leaf.startswith((".env", "id_rsa", "id_ed25519")) or leaf.endswith((".pem", ".kdbx", ".key", ".pfx"))
@@ -598,7 +600,7 @@ def walk_store(root, *, prune=("node_modules", "$RECYCLE.BIN"), skip_suffixes=("
     directories are entries but never entered; deny-listed names get FLAG_DENIED; OFFLINE gets FLAG_PLACEHOLDER."""
     store_mod = store_api()
     try:
-        from assistant.security import denylist
+        from homa.security import denylist
     except ImportError:
         denylist = _types.SimpleNamespace(matches=_mini_deny)
     f_hid, f_sys = getattr(store_mod, "FLAG_HIDDEN", 2), getattr(store_mod, "FLAG_SYSTEM", 4)
@@ -659,7 +661,7 @@ _SYNTH_EXTS = [".txt", ".md", ".pdf", ".docx", ".py", ".json", ".png", ".xlsx"]
 
 def build_synthetic_store(total: int = 2_000_000, per_dir: int = 100):
     """``total`` names generated in-process: returns (store, build_seconds, private_bytes_delta)."""
-    store_mod = pytest.importorskip("assistant.index.store", reason="assistant/index/store.py (M3a-1) not present")
+    store_mod = pytest.importorskip("homa.index.store", reason="homa/index/store.py (M3a-1) not present")
     gc.collect()
     before = private_bytes()
     started = time.perf_counter()
@@ -745,7 +747,7 @@ def search_app_protected(tmp_path_factory):
     yield from _search_app(tmp_path_factory, "search_app_protected", True)
 
 
-# ---- stand-in IndexStore (plan 4b API) for query/rank/search tests until assistant.index.store lands -------------
+# ---- stand-in IndexStore (plan 4b API) for query/rank/search tests until homa.index.store lands -------------
 
 import array as _array
 import types as _types
@@ -824,10 +826,10 @@ STAND_IN = _types.SimpleNamespace(IndexBuilder=_StandInBuilder, FLAG_DIR=1, FLAG
 
 
 def store_api():
-    """The real assistant.index.store when it exists, else the stand-in (query/rank/search tests only)."""
+    """The real homa.index.store when it exists, else the stand-in (query/rank/search tests only)."""
     try:
         import importlib
-        return importlib.import_module("assistant.index.store")
+        return importlib.import_module("homa.index.store")
     except ImportError:
         return STAND_IN
 
@@ -839,11 +841,11 @@ def using_stand_in() -> bool:
 def default_exclude_patterns() -> list:
     """The shipped default exclude list: settings.DEFAULTS['index']['excludes'] (17.4 item 2) or excludes.DEFAULT_EXCLUDES."""
     try:
-        from assistant.settings import DEFAULTS
+        from homa.settings import DEFAULTS
         found = DEFAULTS["index"]["excludes"]
     except (ImportError, KeyError, TypeError):
         try:
-            from assistant.index import excludes as mod
+            from homa.index import excludes as mod
             found = getattr(mod, "DEFAULT_EXCLUDES", None) or getattr(mod, "DEFAULTS", None)
         except ImportError:
             found = None

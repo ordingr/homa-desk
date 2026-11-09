@@ -1,9 +1,9 @@
 """Full page end to end (plan 7.4 M3b-1/M3b-3/M3b-6; AC-SH-7, AC-PV-1, SEC-2, SEC-5).
 
-A private test-mode app serves a *local build* of ``web/`` through ``ASSISTANT_STATIC_DIR`` (built with
-``npm run build`` and ``ASSISTANT_WEB_OUT``, the same command ``scripts/build-web.ps1`` runs after ``npm ci``; running the
+A private test-mode app serves a *local build* of ``web/`` through ``HOMA_STATIC_DIR`` (built with
+``npm run build`` and ``HOMA_WEB_OUT``, the same command ``scripts/build-web.ps1`` runs after ``npm ci``; running the
 script itself would delete ``web/node_modules`` under the ``ui`` task, so the tests call the build step only). Set
-``ASSISTANT_QA_WEB_BUILD`` to a prebuilt folder to skip the build.
+``HOMA_QA_WEB_BUILD`` to a prebuilt folder to skip the build.
 
 Layers, each skipping with its reason when the piece it needs is missing:
 
@@ -34,19 +34,19 @@ EDGE = [p for p in (r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.e
 
 @pytest.fixture(scope="module")
 def web_build(tmp_path_factory):
-    given = os.environ.get("ASSISTANT_QA_WEB_BUILD")
+    given = os.environ.get("HOMA_QA_WEB_BUILD")
     if given:
         build = Path(given)
         if not (build / "index.html").is_file():
-            pytest.skip(f"ASSISTANT_QA_WEB_BUILD={given} has no index.html")
+            pytest.skip(f"HOMA_QA_WEB_BUILD={given} has no index.html")
         return build
     if not (WEB / "package.json").is_file():
         pytest.skip("web/ does not exist yet (M3b-1)")
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if npm is None or not (WEB / "node_modules").is_dir():
-        pytest.skip("no npm or no web/node_modules: run `npm ci` in web/ (or set ASSISTANT_QA_WEB_BUILD)")
+        pytest.skip("no npm or no web/node_modules: run `npm ci` in web/ (or set HOMA_QA_WEB_BUILD)")
     out = tmp_path_factory.mktemp("web_build") / "app"
-    done = subprocess.run([npm, "run", "build"], cwd=WEB, env=dict(os.environ, ASSISTANT_WEB_OUT=str(out)),
+    done = subprocess.run([npm, "run", "build"], cwd=WEB, env=dict(os.environ, HOMA_WEB_OUT=str(out)),
                           capture_output=True, text=True, timeout=300)
     if done.returncode != 0 or not (out / "index.html").is_file():
         pytest.skip(f"npm run build failed ({done.returncode}): {(done.stdout + done.stderr)[-400:]}")
@@ -57,8 +57,8 @@ def web_build(tmp_path_factory):
 def fullpage_app(tmp_path_factory, web_build):
     base = tmp_path_factory.mktemp("fullpage_app")
     root = build_search_tree(base / "root", escape=False)
-    previous = os.environ.get("ASSISTANT_STATIC_DIR")
-    os.environ["ASSISTANT_STATIC_DIR"] = str(web_build)
+    previous = os.environ.get("HOMA_STATIC_DIR")
+    os.environ["HOMA_STATIC_DIR"] = str(web_build)
     try:
         with launch_app(base / "home", _free_port(), {"index": {"roots": [str(root)]}}, test_mode=True) \
                 as (base_url, token):
@@ -72,9 +72,9 @@ def fullpage_app(tmp_path_factory, web_build):
             yield app
     finally:
         if previous is None:
-            os.environ.pop("ASSISTANT_STATIC_DIR", None)
+            os.environ.pop("HOMA_STATIC_DIR", None)
         else:
-            os.environ["ASSISTANT_STATIC_DIR"] = previous
+            os.environ["HOMA_STATIC_DIR"] = previous
 
 
 def fetch(app, path, token=False):
@@ -110,7 +110,7 @@ def test_the_launch_url_serves_the_page_and_every_referenced_asset_resolves(full
 
 
 def test_the_page_never_carries_the_token_and_the_exchange_trades_the_nonce_once(fullpage_app):
-    from assistant.server import auth
+    from homa.server import auth
     status, _, data = fetch(fullpage_app, "/app/?launch=qa-unknown")
     assert fullpage_app.token.encode() not in data
     status, body = fullpage_app.api.post("/v1/session/exchange", {"nonce": "qa-unknown"}, token=False)
@@ -157,7 +157,7 @@ def test_pdf_worker_is_served_from_the_same_origin(web_build):
 # ---- 3. Edge app mode ------------------------------------------------------------------------------------------------------
 
 def _edge_windows():
-    from assistant.overlay import fullpage
+    from homa.overlay import fullpage
     return fullpage.edge_windows()
 
 
@@ -192,7 +192,7 @@ def test_edge_app_mode_opens_the_page_takes_a_screenshot_and_closes_only_its_own
 # ---- R9-B1: hostile Mermaid config and SVG must not make the page fetch anything external -------------------------------
 # Headless Edge (playwright-core) drives the committed build against a private app. A beacon HTTP server on another
 # port records every request that reaches it; the assertion is zero hits. Needs node, msedge and playwright-core
-# (set ASSISTANT_QA_PLAYWRIGHT_DIR to a folder whose node_modules holds playwright-core); skips otherwise.
+# (set HOMA_QA_PLAYWRIGHT_DIR to a folder whose node_modules holds playwright-core); skips otherwise.
 
 BEACON_DRIVER = r"""
 const { chromium } = require("playwright-core");
@@ -268,9 +268,9 @@ def test_hostile_mermaid_config_and_svg_cause_zero_external_requests_and_the_dia
     if not EDGE:
         pytest.skip("msedge.exe is not installed")
     node = shutil.which("node")
-    pw_dir = os.environ.get("ASSISTANT_QA_PLAYWRIGHT_DIR") or str(WEB)
+    pw_dir = os.environ.get("HOMA_QA_PLAYWRIGHT_DIR") or str(WEB)
     if node is None or not (Path(pw_dir) / "node_modules" / "playwright-core").is_dir():
-        pytest.skip("needs node and playwright-core (set ASSISTANT_QA_PLAYWRIGHT_DIR to a folder whose node_modules has it)")
+        pytest.skip("needs node and playwright-core (set HOMA_QA_PLAYWRIGHT_DIR to a folder whose node_modules has it)")
     port, hits = beacon
     url = f"http://127.0.0.1:{port}"
     root = tmp_path / "root"
@@ -292,7 +292,7 @@ def test_hostile_mermaid_config_and_svg_cause_zero_external_requests_and_the_dia
         f'<foreignObject><iframe src="{url}/svg-iframe"></iframe></foreignObject>'
         f'<rect x="10" y="10" width="100" height="60" fill="#2a78d6" style="background:url({url}/svg-inline)"/>'
         '<circle cx="150" cy="60" r="30" fill="#e34948"/></svg>', encoding="utf-8")
-    previous = os.environ.pop("ASSISTANT_STATIC_DIR", None)
+    previous = os.environ.pop("HOMA_STATIC_DIR", None)
     try:
         with launch_app(tmp_path / "home", _free_port(), {"index": {"roots": [str(root)]}}, test_mode=True) \
                 as (base_url, token):
@@ -305,7 +305,7 @@ def test_hostile_mermaid_config_and_svg_cause_zero_external_requests_and_the_dia
                                   env=env)
     finally:
         if previous is not None:
-            os.environ["ASSISTANT_STATIC_DIR"] = previous
+            os.environ["HOMA_STATIC_DIR"] = previous
     line = next((l for l in done.stdout.splitlines() if l.startswith("RESULT ")), None)
     assert line, (done.stdout[-600:], done.stderr[-600:])
     result = json.loads(line[len("RESULT "):])

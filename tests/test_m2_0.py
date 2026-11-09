@@ -14,10 +14,10 @@ import uuid
 
 import pytest
 
-from assistant import paths
-from assistant.cards.model import Card, CardValidationError, strip_control, validate_fields
-from assistant.cards.store import FADE_SECONDS, CardStore
-from assistant.server import app as server_app
+from homa import paths
+from homa.cards.model import Card, CardValidationError, strip_control, validate_fields
+from homa.cards.store import FADE_SECONDS, CardStore
+from homa.server import app as server_app
 
 from conftest import REPO_ROOT, wait_until
 
@@ -242,7 +242,7 @@ def _read_state(home):
     return json.loads((home / "state.json").read_text(encoding="utf-8"))
 
 
-def test_c_permission_summary_masks_bearer_authorization_and_long_runs(api, assistant_home, uniq):
+def test_c_permission_summary_masks_bearer_authorization_and_long_runs(api, homa_home, uniq):
     longrun = "A1b2C3d4E5" * 5  # 50 chars, token-like
     cmd = (f"curl -H 'Authorization: Bearer abc.DEF-123' https://x.example/{uniq} "
            f"--data {longrun} -H \"Authorization: Basic dXNlcjpwYXNz\"")
@@ -266,9 +266,9 @@ def test_c_permission_summary_masks_bearer_authorization_and_long_runs(api, assi
             assert "dXNlcjpwYXNz" not in detail
             assert "***" in detail
         time.sleep(0.6)
-        raw = (assistant_home / "state.json").read_text(encoding="utf-8")
-        wait_until(lambda: uniq in (assistant_home / "state.json").read_text(encoding="utf-8"), timeout=3)
-        raw = (assistant_home / "state.json").read_text(encoding="utf-8")
+        raw = (homa_home / "state.json").read_text(encoding="utf-8")
+        wait_until(lambda: uniq in (homa_home / "state.json").read_text(encoding="utf-8"), timeout=3)
+        raw = (homa_home / "state.json").read_text(encoding="utf-8")
         assert uniq in raw
         assert "abc.DEF" not in raw and longrun not in raw and "dXNlcjpwYXNz" not in raw
     finally:
@@ -277,7 +277,7 @@ def test_c_permission_summary_masks_bearer_authorization_and_long_runs(api, assi
 
 
 def test_c_masking_leaves_ordinary_text_alone():
-    from assistant.cards.claude_sessions import _tool_summary
+    from homa.cards.claude_sessions import _tool_summary
     assert _tool_summary({"command": "git status --short"}) == "git status --short"
     path = r"C:\Users\<user>\projects\my-project\src\a_rather_long_but_spaced path.py"
     assert _tool_summary({"file_path": path}) == path
@@ -288,7 +288,7 @@ def test_c_masking_leaves_ordinary_text_alone():
 
 
 def test_c_text_strips_control_in_session_cards():
-    from assistant.cards.claude_sessions import _text
+    from homa.cards.claude_sessions import _text
     assert _text("pro\u200bject\x07", 50) == "project"
 
 
@@ -358,17 +358,17 @@ def test_d_live_expires_at_then_delete(api, uniq):
 
 # ---- (e) send --id ----------------------------------------------------------------------------
 
-def _send(assistant_env, *args):
-    return subprocess.run([sys.executable, "-m", "assistant", "send", *args], cwd=REPO_ROOT, env=assistant_env,
+def _send(homa_env, *args):
+    return subprocess.run([sys.executable, "-m", "homa", "send", *args], cwd=REPO_ROOT, env=homa_env,
                           capture_output=True, text=True, timeout=30)
 
 
-def test_e_send_id_updates_in_place(api, assistant_env, uniq):
+def test_e_send_id_updates_in_place(api, homa_env, uniq):
     cid = "m20-" + uuid.uuid4().hex[:8]
     try:
-        r1 = _send(assistant_env, "--id", cid, "--title", uniq)
+        r1 = _send(homa_env, "--id", cid, "--title", uniq)
         assert r1.returncode == 0, (r1.stdout, r1.stderr)
-        r2 = _send(assistant_env, "--id", cid, "--title", uniq + "-v2")
+        r2 = _send(homa_env, "--id", cid, "--title", uniq + "-v2")
         assert r2.returncode == 0, (r2.stdout, r2.stderr)
         s, cards = api.get("/v1/cards")
         mine = [c for c in cards if c["id"] == cid]
@@ -378,9 +378,9 @@ def test_e_send_id_updates_in_place(api, assistant_env, uniq):
         api.request("DELETE", f"/v1/cards/{cid}")
 
 
-def test_e_send_without_id_still_creates_distinct_cards(api, assistant_env, uniq):
-    _send(assistant_env, "--title", uniq)
-    _send(assistant_env, "--title", uniq)
+def test_e_send_without_id_still_creates_distinct_cards(api, homa_env, uniq):
+    _send(homa_env, "--title", uniq)
+    _send(homa_env, "--title", uniq)
     s, cards = api.get("/v1/cards")
     mine = [c for c in cards if c["title"] == uniq]
     try:
@@ -391,7 +391,7 @@ def test_e_send_without_id_still_creates_distinct_cards(api, assistant_env, uniq
 
 
 def test_e_send_parser_accepts_id_flag():
-    from assistant.__main__ import _build_parser
+    from homa.__main__ import _build_parser
     args = _build_parser().parse_args(["send", "--id", "abc", "--title", "t"])
     assert args.id == "abc"
     assert _build_parser().parse_args(["send", "--title", "t"]).id is None
@@ -418,10 +418,10 @@ def test_f_home_with_state_ui_tmp_counts_as_known_layout(tmp_path, caplog, monke
     (home / "stranger.txt").write_text("x", encoding="utf-8")
     assert not paths._known_layout_only(home)
     (home / "stranger.txt").unlink()
-    monkeypatch.setenv("ASSISTANT_HOME", str(home))
+    monkeypatch.setenv("HOMA_HOME", str(home))
     paths._fresh_roots.discard(home)
     import logging
-    with caplog.at_level(logging.DEBUG, logger="assistant.paths"):
+    with caplog.at_level(logging.DEBUG, logger="homa.paths"):
         paths.secure_home()
     assert not [r for r in caplog.records if "not restricting" in r.getMessage()]
 

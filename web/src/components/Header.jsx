@@ -9,7 +9,7 @@ export default function Header({ entries, builtAt, theme, onToggleTheme, onPanel
     : "index not built yet";
   return (
     <header className="topbar">
-      <span className="brand">Assistant</span>
+      <span className="brand">Homa</span>
       <span className="topbar-stat" data-testid="entries">
         {entries === null ? "" : `${fmtCount(entries)} entries`}
       </span>

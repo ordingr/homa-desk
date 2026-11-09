@@ -14,7 +14,7 @@ import pytest
 
 from conftest import NOTES_FIXTURE, percentile
 
-notes_bm25 = pytest.importorskip("assistant.search.notes_bm25", reason="assistant/search/notes_bm25.py (M3a-6) not present")
+notes_bm25 = pytest.importorskip("homa.search.notes_bm25", reason="homa/search/notes_bm25.py (M3a-6) not present")
 
 NotesIndex, AskNotesMode = notes_bm25.NotesIndex, notes_bm25.AskNotesMode
 UNSET = "Set your notes folder in Settings"
@@ -38,7 +38,7 @@ def vault(tmp_path):
 
 @pytest.fixture
 def no_env(monkeypatch):
-    monkeypatch.delenv("ASSISTANT_NOTES_DIR", raising=False)
+    monkeypatch.delenv("HOMA_NOTES_DIR", raising=False)
 
 
 def make_index(folder, tmp_path, name="notes.json.gz"):
@@ -62,12 +62,12 @@ def test_unset_folder_reports_set_your_notes_folder_and_returns_nothing(no_env, 
 
 
 def test_env_override_beats_the_setting_and_a_setting_alone_works(vault, tmp_path, monkeypatch):
-    monkeypatch.delenv("ASSISTANT_NOTES_DIR", raising=False)
+    monkeypatch.delenv("HOMA_NOTES_DIR", raising=False)
     via_setting = AskNotesMode(settings=FakeSettings(str(vault)), index_path=tmp_path / "a.gz")
     assert via_setting.index().wait_ready(30)
     assert via_setting.message is None and via_setting.search("zebrafish")
     via_setting.close()
-    monkeypatch.setenv("ASSISTANT_NOTES_DIR", str(vault))
+    monkeypatch.setenv("HOMA_NOTES_DIR", str(vault))
     via_env = AskNotesMode(settings=FakeSettings(""), index_path=tmp_path / "b.gz")
     assert via_env.index().wait_ready(30)
     assert via_env.search("zebrafish")
@@ -239,7 +239,7 @@ def _tags_at(widget, needle):
 
 
 def test_markdown_renders_headings_bold_lists_code_tables_with_tags_and_hits(tk_text):
-    mdrender = pytest.importorskip("assistant.overlay.mdrender_tk", reason="mdrender_tk.py (M3a-6) not present")
+    mdrender = pytest.importorskip("homa.overlay.mdrender_tk", reason="mdrender_tk.py (M3a-6) not present")
     md = (NOTES_FIXTURE / "projects" / "alpha.md").read_text(encoding="utf-8")
     mdrender.render(tk_text, md, terms=["zebrafish", "migration"])
     shown = tk_text.get("1.0", "end")
@@ -256,7 +256,7 @@ def test_markdown_renders_headings_bold_lists_code_tables_with_tags_and_hits(tk_
 
 
 def test_render_clear_true_replaces_and_clear_false_appends(tk_text):
-    mdrender = pytest.importorskip("assistant.overlay.mdrender_tk", reason="mdrender_tk.py (M3a-6) not present")
+    mdrender = pytest.importorskip("homa.overlay.mdrender_tk", reason="mdrender_tk.py (M3a-6) not present")
     mdrender.render(tk_text, "# one\n")
     mdrender.render(tk_text, "# two\n")
     assert "one" not in tk_text.get("1.0", "end") and "two" in tk_text.get("1.0", "end")
@@ -265,6 +265,6 @@ def test_render_clear_true_replaces_and_clear_false_appends(tk_text):
 
 
 def test_render_survives_unbalanced_markup(tk_text):
-    mdrender = pytest.importorskip("assistant.overlay.mdrender_tk", reason="mdrender_tk.py (M3a-6) not present")
+    mdrender = pytest.importorskip("homa.overlay.mdrender_tk", reason="mdrender_tk.py (M3a-6) not present")
     mdrender.render(tk_text, "**bold never closed\n```\nfence never closed\n| a | b\n[link](\n", terms=["bold"])
     assert "bold never closed" in tk_text.get("1.0", "end")

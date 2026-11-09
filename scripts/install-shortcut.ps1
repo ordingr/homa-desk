@@ -1,5 +1,5 @@
 <#
-Creates "Assistant.lnk" on the current user's Desktop. It starts Assistant without a console window.
+Creates "Homa.lnk" on the current user's Desktop. It starts Homa without a console window.
 Run:  powershell -ExecutionPolicy Bypass -File scripts\install-shortcut.ps1
 #>
 $ErrorActionPreference = 'Stop'
@@ -13,13 +13,13 @@ if (-not (Test-Path $pythonw)) {
     else { throw "pythonw.exe not found (looked in $repo\.venv\Scripts and on PATH)." }
 }
 
-$lnkPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Assistant.lnk'
+$lnkPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Homa.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($lnkPath)
 $lnk.TargetPath = $pythonw
-$lnk.Arguments = '-m assistant'
+$lnk.Arguments = '-m homa'
 $lnk.WorkingDirectory = $repo
-$lnk.IconLocation = (Join-Path $repo 'assistant\assets\assistant.ico') + ',0'
-$lnk.Description = 'Assistant ' + [char]0x2014 + ' alerts and file search'
+$lnk.IconLocation = (Join-Path $repo 'homa\assets\homa.ico') + ',0'
+$lnk.Description = 'Homa ' + [char]0x2014 + ' alerts and file search'
 $lnk.Save()
 Write-Host "Created $lnkPath"

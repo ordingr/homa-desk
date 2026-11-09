@@ -8,9 +8,9 @@ import pytest
 
 from conftest import ROOT_PARENT, row_names, row_paths
 
-query = pytest.importorskip("assistant.index.query")
-search = pytest.importorskip("assistant.index.search")
-store_mod = pytest.importorskip("assistant.index.store")
+query = pytest.importorskip("homa.index.query")
+search = pytest.importorskip("homa.index.search")
+store_mod = pytest.importorskip("homa.index.store")
 KNOWN = {"md", "py", "txt", "pdf"}
 MTIME = 1.7e9
 

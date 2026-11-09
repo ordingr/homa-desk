@@ -1007,3 +1007,17 @@ Source: api.md §12.9–12.10, Review 9 "Before M4" and "Any time", the perf and
 - **api.md §12.9 items 1–16 and §12.10:** 1 → A23; 2–3 → recorded (M4-3 may raise the window); 4 → closed by M3b-11; 5, 8, 11, 14 → M4-0 (5)–(6); 6 → by design (Ctrl+double-click reveals); 7 → M4-3; 9 → M4-1; 10 → A24; 12–13, 15–16 → recorded, doc-keeper wording.
 
 New planner defaults: **A23** (drop the download button), **A24** (tech-lead: protected files actionable locally). Open items after this Revision: the security re-check text; the git-keeper commit set; the user-run and qa items in 19.2.
+
+## 20. Revision 7 2026-11-08 (rename)
+
+- Date: 2026-11-08. Author: doc-keeper, recording the planner's rename plan against this plan. The plan is
+  `docs/plans/2026-11-08-rename-to-homa.md`. Supersedes: nothing in sections 1 to 19 is removed or edited.
+- What changes against this plan: the product name and the names of the package, the CLI, the home folder, the environment
+  variables, the MCP server name, the pid file, the shortcut and the Edge profile folder. Section 1 (goal and non-goals), the
+  file names in section 5 and the section 7 risks keep their meaning. Where this plan says `assistant/`, `~/.assistant/`,
+  `python -m assistant`, `ASSISTANT_HOME` or the MCP name `assistant`, the rename plan's section 4.1 table is the replacement.
+- Examples: the stdio shim is `python -m homa.mcp_stdio` and the home folder is `~/.homa`. Where any earlier section of this
+  plan names `~/.assistant` or `python -m assistant`, read the new name. The rename-era facts are in `docs/api.md` section 14.
+  The one-time migration of an existing `~/.assistant` is in the rename plan's section 4.5.
+- Status: the rename is at the planning stage plus the R0 to R4 and R7 dispatches recorded in `CHANGELOG.md` 2026-11-08.
+  Verification is pending (qa R5a and R5b; security R6). The cutover (R9) is not run.

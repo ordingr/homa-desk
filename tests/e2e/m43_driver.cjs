@@ -257,9 +257,9 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
   }
   // ---- item 4: theme ----
   {
-    const t = async (opts, mocks) => { const r = await newPage({ scheme: opts.scheme, mocks }); await r.page.evaluate(() => localStorage.removeItem("assistant.theme")); return r; };
+    const t = async (opts, mocks) => { const r = await newPage({ scheme: opts.scheme, mocks }); await r.page.evaluate(() => localStorage.removeItem("homa.theme")); return r; };
     let { page, ctx } = await newPage({ scheme: "light", mocks: { settings: { theme: "system" } } });
-    await page.evaluate(() => localStorage.removeItem("assistant.theme"));
+    await page.evaluate(() => localStorage.removeItem("homa.theme"));
     // reload loses launch nonce; re-open
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     const th = () => page.evaluate(() => document.documentElement.dataset.theme);
@@ -274,7 +274,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     await ctx.close();
 
     ({ page, ctx } = await newPage({ scheme: "dark", mocks: { settings: { theme: "light" } } }));
-    await page.evaluate(() => localStorage.removeItem("assistant.theme"));
+    await page.evaluate(() => localStorage.removeItem("homa.theme"));
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
     check("5c app setting light is the default with no stored preference (OS dark)", (await th()) === "light");
@@ -287,7 +287,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
     check("5d toggle light -> system follows OS dark", (await th()) === "dark" && /Theme: system/.test(labelSystem), labelSystem);
     check("5d the toggle POSTs /v1/settings/theme with the next theme", themePosts.length === 1 && themePosts[0] === "system", themePosts);
-    check("5d after a successful POST the page keeps no stored preference (the app setting is the source)", (await page.evaluate(() => localStorage.getItem("assistant.theme"))) === null);
+    check("5d after a successful POST the page keeps no stored preference (the app setting is the source)", (await page.evaluate(() => localStorage.getItem("homa.theme"))) === null);
     check("5d the app really saved it (GET /v1/settings)", (await realTheme()) === "system");
     await page.click("[data-testid=theme-toggle]"); // system -> dark
     await page.click("[data-testid=theme-toggle]"); // dark -> light
@@ -296,13 +296,13 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     check("5e one POST per click, in cycle order", JSON.stringify(themePosts) === JSON.stringify(["system", "dark", "light"]), themePosts);
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
-    check("5f after a reload the saved app setting applies and no stored preference exists", (await th()) === "light" && (await page.evaluate(() => localStorage.getItem("assistant.theme"))) === null);
+    check("5f after a reload the saved app setting applies and no stored preference exists", (await th()) === "light" && (await page.evaluate(() => localStorage.getItem("homa.theme"))) === null);
     check("5f the app setting is what the real route reports", (await realTheme()) === "light");
     await ctx.close();
 
     await setRealTheme("dark");
     ({ page, ctx } = await newPage({ scheme: "light" })); // the real settings route, theme dark, OS light
-    await page.evaluate(() => localStorage.removeItem("assistant.theme"));
+    await page.evaluate(() => localStorage.removeItem("homa.theme"));
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
     check("5g default theme from the real settings route (dark) beats an OS in light mode", (await th()) === "dark");
@@ -310,12 +310,13 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
 
     // the POST route is missing (older app): only then the page keeps its own preference in localStorage
     ({ page, ctx } = await newPage({ scheme: "dark", mocks: { settings: { theme: "dark" } } }));
-    await page.evaluate(() => localStorage.removeItem("assistant.theme"));
+    await page.evaluate(() => localStorage.removeItem("homa.theme"));
     await page.route("**/v1/settings/theme", (r) => r.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "not_found", message: "no" } }) }));
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     await page.click("[data-testid=theme-toggle]"); // dark -> light
     await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
-    check("5h POST 404: the toggle still works and the choice is kept in localStorage", (await th()) === "light" && (await page.evaluate(() => localStorage.getItem("assistant.theme"))) === "light");
+    await page.waitForFunction(() => localStorage.getItem("homa.theme") === "light", null, { timeout: 5000 }).catch(() => {});
+    check("5h POST 404: the toggle still works and the choice is kept in localStorage", (await th()) === "light" && (await page.evaluate(() => localStorage.getItem("homa.theme"))) === "light");
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
     check("5h POST 404: the stored preference survives a reload (it beats the app setting)", (await th()) === "light");
@@ -323,27 +324,42 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
 
     // any other failure is not the 404 case: the choice must not be silently kept as a page-only preference
     ({ page, ctx } = await newPage({ scheme: "dark", mocks: { settings: { theme: "dark" } } }));
-    await page.evaluate(() => localStorage.removeItem("assistant.theme"));
+    await page.evaluate(() => localStorage.removeItem("homa.theme"));
     await page.route("**/v1/settings/theme", (r) => r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "boom", message: "no" } }) }));
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     await page.click("[data-testid=theme-toggle]");
     await page.waitForTimeout(500);
     await page.waitForTimeout(300);
     check("5i POST 500: the theme is restored (still dark)", (await th()) === "dark" && /Theme: dark/.test(await page.getAttribute("[data-testid=theme-toggle]", "aria-label")));
-    check("5i POST 500: nothing is written to localStorage", (await page.evaluate(() => localStorage.getItem("assistant.theme"))) === null);
+    check("5i POST 500: nothing is written to localStorage", (await page.evaluate(() => localStorage.getItem("homa.theme"))) === null);
     check("5i POST 500: an error toast is shown", (await page.locator(".toast").count()) >= 1, await page.locator(".toast").allInnerTexts().catch(() => []));
     await ctx.close();
     ({ page, ctx } = await newPage({ scheme: "dark", mocks: { settings: { theme: "dark" } } }));
-    await page.evaluate(() => localStorage.removeItem("assistant.theme"));
+    await page.evaluate(() => localStorage.removeItem("homa.theme"));
     await page.route("**/v1/settings/theme", (r) => r.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: { code: "unauthorized", message: "no" } }) }));
     await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
     check("5j POST 401: before the click the theme is dark", (await th()) === "dark");
     await page.click("[data-testid=theme-toggle]");
     await page.waitForTimeout(500);
     check("5j POST 401: the theme is unchanged (dark)", (await th()) === "dark", [await th(), await page.locator("body").innerText()]);
-    check("5j POST 401: nothing is written to localStorage", (await page.evaluate(() => localStorage.getItem("assistant.theme"))) === null);
+    check("5j POST 401: nothing is written to localStorage", (await page.evaluate(() => localStorage.getItem("homa.theme"))) === null);
     await ctx.close();
     await setRealTheme("dark");
+  }
+  // ---- item 4b: a pre-rename stored theme (assistant.theme) is still honoured, and homa.theme wins over it ----
+  {
+    const { page, ctx } = await newPage({ scheme: "dark", mocks: { settings: { theme: "dark" } } });
+    const th = () => page.evaluate(() => document.documentElement.dataset.theme);
+    await page.evaluate(() => { localStorage.removeItem("homa.theme"); localStorage.setItem("assistant.theme", "light"); });
+    await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+    check("5k only the old key assistant.theme=light is seeded: the page is light although the app setting and OS are dark", (await th()) === "light");
+    await page.evaluate(() => { localStorage.setItem("homa.theme", "dark"); localStorage.setItem("assistant.theme", "light"); });
+    await page.goto(BASE + "/app/?launch=qa"); await page.waitForSelector("[data-testid=query]");
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    check("5k homa.theme wins over assistant.theme when both are stored", (await th()) === "dark");
+    await page.evaluate(() => { localStorage.removeItem("homa.theme"); localStorage.removeItem("assistant.theme"); });
+    await ctx.close();
   }
   // ---- live search, URL q, ghost Tab on the full page ----
   {
@@ -695,7 +711,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     await ctx.close();
   }
   }
-  // ---- item 6: M4-3c reading comfort: split handle, expand mode, zoom (assistant.split / assistant.previewZoom) ----
+  // ---- item 6: M4-3c reading comfort: split handle, expand mode, zoom (homa.split / homa.previewZoom) ----
   {
     const NOTES = "zoomfix notes", PDF = "zoomfix sample";
     const ls = (page, key) => page.evaluate((k) => localStorage.getItem(k), key);
@@ -760,7 +776,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
       await drag(page, -150);
       const w1 = await paneW(page);
       check("6b dragging the handle left widens the pane by about the distance", w1 > w0 + 120 && w1 < w0 + 180, [w0, w1]);
-      const v1 = await valueNow(page), stored = await ls(page, "assistant.split");
+      const v1 = await valueNow(page), stored = await ls(page, "homa.split");
       check("6b ratio changed, aria-valuenow follows and the choice is stored", Number(v1) > 50 && Math.abs(Number(stored) - w1 / total) < 0.03, [v1, stored, w1 / total]);
       await reopen(page);
       check("6b the ratio survives a reload", Math.abs((await paneW(page)) - w1) < 6, [await paneW(page), w1]);
@@ -770,7 +786,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
       check("6b dragging far right keeps the pane at least 320px", (await paneW(page)) >= 318 && (await listW(page)) > 400, [await listW(page), await paneW(page)]);
       await page.locator("[data-testid=split-handle]").dblclick();
       await page.waitForTimeout(150);
-      check("6b double-click resets to 50% and stores it", (await valueNow(page)) === "50" && Number(await ls(page, "assistant.split")) === 0.5);
+      check("6b double-click resets to 50% and stores it", (await valueNow(page)) === "50" && Number(await ls(page, "homa.split")) === 0.5);
       await page.focus("[data-testid=split-handle]");
       await page.keyboard.press("ArrowLeft");
       check("6b ArrowLeft widens the pane by 2%", (await valueNow(page)) === "52", await valueNow(page));
@@ -786,12 +802,19 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     // 6c: bad stored values fall back
     {
       const { page, ctx } = await open({});
-      await page.evaluate(() => { localStorage.setItem("assistant.split", "0.99"); localStorage.setItem("assistant.previewZoom", "133"); });
+      await page.evaluate(() => { localStorage.setItem("homa.split", "0.99"); localStorage.setItem("homa.previewZoom", "133"); });
       await reopen(page);
       check("6c an out-of-range stored split falls back to 50% and a non-step zoom to 100%", (await valueNow(page)) === "50" && (await zoomOf(page)) === "100", [await valueNow(page), await zoomOf(page)]);
-      await page.evaluate(() => { localStorage.setItem("assistant.split", "banana"); localStorage.setItem("assistant.previewZoom", "x"); });
+      await page.evaluate(() => { localStorage.setItem("homa.split", "banana"); localStorage.setItem("homa.previewZoom", "x"); });
       await reopen(page);
       check("6c junk stored values fall back too", (await valueNow(page)) === "50" && (await zoomOf(page)) === "100");
+      await page.evaluate(() => { localStorage.removeItem("homa.split"); localStorage.removeItem("homa.previewZoom"); localStorage.setItem("assistant.split", "0.7"); localStorage.setItem("assistant.previewZoom", "150"); });
+      await reopen(page);
+      check("6c only the old keys assistant.split / assistant.previewZoom are seeded: the page honours them (70 / 150)", (await valueNow(page)) === "70" && (await zoomOf(page)) === "150", [await valueNow(page), await zoomOf(page)]);
+      await page.evaluate(() => { localStorage.setItem("homa.split", "0.3"); localStorage.setItem("homa.previewZoom", "90"); });
+      await reopen(page);
+      check("6c homa.split / homa.previewZoom win over the old keys when both are stored (30 / 90)", (await valueNow(page)) === "30" && (await zoomOf(page)) === "90", [await valueNow(page), await zoomOf(page)]);
+      await page.evaluate(() => { for (const k of ["homa.split", "homa.previewZoom", "assistant.split", "assistant.previewZoom"]) localStorage.removeItem(k); });
       await ctx.close();
     }
     // 6d: expand mode
@@ -832,7 +855,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     // 6e: zoom
     {
       const { page, ctx } = await open({});
-      const fs = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-testid=preview-markdown]")).fontSize));
+      const fs = async () => { await page.waitForSelector("[data-testid=preview-markdown]", { timeout: 10000 }); return page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("[data-testid=preview-markdown]")).fontSize)); };
       await page.click("[data-testid=preview-zoom-in]");
       check("6e zoom in steps 100 -> 110", (await zoomOf(page)) === "110" && /110%/.test(await page.locator("[data-testid=preview-zoom-reset]").textContent()));
       check("6e --pv-zoom and the prose size follow (110% of 16px)", (await page.evaluate(() => getComputedStyle(document.querySelector("[data-testid=pane]")).getPropertyValue("--pv-zoom").trim())) === "1.1" && Math.abs((await fs()) - 17.6) < 0.1, await fs());
@@ -853,14 +876,14 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
       for (let i = 0; i < 9; i++) await page.click("[data-testid=preview-zoom-out]", { force: true, timeout: 1500 }).catch(() => {});
       check("6e zoom bottoms out at 80 and zoom-out disables", (await zoomOf(page)) === "80" && (await page.locator("[data-testid=preview-zoom-out]").isDisabled()), await zoomOf(page));
       for (let i = 0; i < 5; i++) await page.click("[data-testid=preview-zoom-in]");
-      check("6e 80 -> 150 after five steps and it is stored", (await zoomOf(page)) === "150" && (await ls(page, "assistant.previewZoom")) === "150", [await zoomOf(page), await ls(page, "assistant.previewZoom")]);
+      check("6e 80 -> 150 after five steps and it is stored", (await zoomOf(page)) === "150" && (await ls(page, "homa.previewZoom")) === "150", [await zoomOf(page), await ls(page, "homa.previewZoom")]);
       await reopen(page);
       check("6e the zoom survives a reload", (await zoomOf(page)) === "150" && Math.abs((await fs()) - 24) < 0.1);
       await page.focus("[data-testid=query]");
       await page.keyboard.press("Control+=");
       check("6e Ctrl+= with focus in the query box does not zoom the preview", (await zoomOf(page)) === "150", await zoomOf(page));
       await page.click("[data-testid=preview-zoom-reset]");
-      check("6e clicking the percentage resets to 100", (await zoomOf(page)) === "100" && (await ls(page, "assistant.previewZoom")) === "100");
+      check("6e clicking the percentage resets to 100", (await zoomOf(page)) === "100" && (await ls(page, "homa.previewZoom")) === "100");
       await ctx.close();
     }
     // 6f: localStorage that throws must not break the page

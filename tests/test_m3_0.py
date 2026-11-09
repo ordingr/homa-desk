@@ -1,6 +1,6 @@
 """M3-0: M2 leftovers (plan 17.3 (a)-(j)) and the R6-1/R6-2 fixes.
 
-Real components: Settings on the isolated ASSISTANT_HOME, a real MeetingScheduler/CardStore/Scheduler,
+Real components: Settings on the isolated HOMA_HOME, a real MeetingScheduler/CardStore/Scheduler,
 real ``parse_ics``, the real ``mcp.log`` writer and tail, and (for (a), (b), (j)) a private full app.
 The Settings-window items ((c), (d), (h), R6-4) live in tests/e2e/test_settings_live_apply.py, which owns
 the one Tk interpreter.
@@ -15,14 +15,14 @@ import pytest
 
 from conftest import Api, build_ics, wait_until
 
-from assistant import paths, uibus
-from assistant.calendar import ics, meetings
-from assistant.cards.store import CardStore
-from assistant.overlay import sounds
-from assistant.scheduler import Scheduler
-from assistant.server import mcp as mcp_mod
-from assistant.server import routes_health
-from assistant.settings import MUTE_SOURCES, Settings
+from homa import paths, uibus
+from homa.calendar import ics, meetings
+from homa.cards.store import CardStore
+from homa.overlay import sounds
+from homa.scheduler import Scheduler
+from homa.server import mcp as mcp_mod
+from homa.server import routes_health
+from homa.settings import MUTE_SOURCES, Settings
 
 UTC = timezone.utc
 

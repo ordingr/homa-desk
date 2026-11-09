@@ -1,7 +1,7 @@
 """Meeting cards from calendar sources (plan 7.2 M2-1; AC-MT-1, AC-MT-3, AC-MT-4, AC-MT-5, AC-MT-6, AC-MT-7).
 
 Real components throughout: a real CardStore, a real Scheduler thread, real Settings (on the isolated
-in-process ASSISTANT_HOME from conftest), and real IcsSource objects fetching from a local HTTP server.
+in-process HOMA_HOME from conftest), and real IcsSource objects fetching from a local HTTP server.
 The only fakes are ``FakeSource`` (to inject all-day / declined / failing feeds, which the ICS builder
 cannot express as cheaply) and the injected clock in the one-hour staleness test.
 
@@ -16,13 +16,13 @@ import pytest
 
 from conftest import build_ics, wait_until
 
-meetings = pytest.importorskip("assistant.calendar.meetings", reason="assistant/calendar/meetings.py (M2-1) not present")
-ics = pytest.importorskip("assistant.calendar.ics", reason="assistant/calendar/ics.py (M2-1) not present")
+meetings = pytest.importorskip("homa.calendar.meetings", reason="homa/calendar/meetings.py (M2-1) not present")
+ics = pytest.importorskip("homa.calendar.ics", reason="homa/calendar/ics.py (M2-1) not present")
 
-from assistant import uibus  # noqa: E402
-from assistant.cards.store import CardStore  # noqa: E402
-from assistant.scheduler import Scheduler  # noqa: E402
-from assistant.settings import Settings  # noqa: E402
+from homa import uibus  # noqa: E402
+from homa.cards.store import CardStore  # noqa: E402
+from homa.scheduler import Scheduler  # noqa: E402
+from homa.settings import Settings  # noqa: E402
 
 
 class FakeSource:
@@ -260,8 +260,8 @@ def test_status_lists_every_source_with_label_and_a_successful_poll_time(env):
 # ---- Outlook ----------------------------------------------------------------------------------
 
 def test_outlook_source_reports_availability_as_a_bool_without_raising():
-    outlook = pytest.importorskip("assistant.calendar.outlook", reason="assistant/calendar/outlook.py (M2-1) not present")
-    from assistant.overlay.settings_ui import outlook_classic_present
+    outlook = pytest.importorskip("homa.calendar.outlook", reason="homa/calendar/outlook.py (M2-1) not present")
+    from homa.overlay.settings_ui import outlook_classic_present
     if outlook_classic_present():
         pytest.skip("classic Outlook is installed here; QA does not start Outlook (AC-MT-2 is a personal-laptop check)")
     assert outlook.OutlookSource().available() is False

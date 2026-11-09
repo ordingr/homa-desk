@@ -18,7 +18,7 @@ HELP = "didn't understand — try 'text in 10m' or 'text at 3pm'"
 def cards_api(api):
     status, _ = api.get("/v1/cards")
     if status == 404:
-        pytest.skip("GET /v1/cards is not served yet: assistant/server/routes_cards.py (M1-4) or app wiring (M1-6) missing")
+        pytest.skip("GET /v1/cards is not served yet: homa/server/routes_cards.py (M1-4) or app wiring (M1-6) missing")
     return api
 
 
@@ -200,8 +200,8 @@ def test_reminders_require_the_token(cards_api):
 
 # ---- file drop (AC-CS-12) -----------------------------------------------------------
 
-def test_file_drop_becomes_a_card_and_the_file_is_consumed(cards_api, assistant_home):
-    events = assistant_home / "events"
+def test_file_drop_becomes_a_card_and_the_file_is_consumed(cards_api, homa_home):
+    events = homa_home / "events"
     if not events.is_dir():
         pytest.skip("events/ folder not created by this build")
     cid = _uid()
@@ -210,20 +210,20 @@ def test_file_drop_becomes_a_card_and_the_file_is_consumed(cards_api, assistant_
     tmp.write_text(json.dumps({"id": cid, "title": "dropped", "kind": "custom"}), encoding="utf-8")
     tmp.replace(target)
     if not wait_until(lambda: cid in _open_ids(cards_api), timeout=2.0):
-        pytest.skip("file-drop watcher (assistant/cards/filedrop.py, M1-4/M1-6) not running")
+        pytest.skip("file-drop watcher (homa/cards/filedrop.py, M1-4/M1-6) not running")
     assert wait_until(lambda: not target.exists(), timeout=2.0), "file must be deleted after it is consumed"
     status, card = cards_api.get(f"/v1/cards/{cid}")
     assert card["source"] == "file"
     cards_api.request("DELETE", f"/v1/cards/{cid}")
 
 
-def test_malformed_file_drop_is_moved_to_rejected_with_an_error_txt(cards_api, assistant_home):
-    events = assistant_home / "events"
+def test_malformed_file_drop_is_moved_to_rejected_with_an_error_txt(cards_api, homa_home):
+    events = homa_home / "events"
     probe = _uid()
     ok = events / f"{probe}.json"
     ok.write_text(json.dumps({"id": probe, "title": "probe"}), encoding="utf-8")
     if not wait_until(lambda: probe in _open_ids(cards_api), timeout=2.0):
-        pytest.skip("file-drop watcher (assistant/cards/filedrop.py, M1-4/M1-6) not running")
+        pytest.skip("file-drop watcher (homa/cards/filedrop.py, M1-4/M1-6) not running")
     cards_api.request("DELETE", f"/v1/cards/{probe}")
 
     name = _uid()

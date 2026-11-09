@@ -10,7 +10,7 @@ import pytest
 
 from conftest import wait_until
 
-monitors = pytest.importorskip("assistant.overlay.monitors", reason="monitors.py not present")
+monitors = pytest.importorskip("homa.overlay.monitors", reason="monitors.py not present")
 
 M1 = (0, 0, 1920, 1080)
 M2 = (1920, 0, 3840, 1080)
@@ -30,7 +30,7 @@ def two_monitors(monkeypatch):
 
 @pytest.fixture
 def test_mode(monkeypatch):
-    monkeypatch.setenv("ASSISTANT_TEST_MODE", "1")
+    monkeypatch.setenv("HOMA_TEST_MODE", "1")
 
 
 class FakeIcon:
@@ -79,12 +79,12 @@ def test_out_of_range_index_is_an_index_error(two_monitors, test_mode, idx):
 
 
 def test_seams_raise_outside_test_mode(two_monitors, monkeypatch):
-    monkeypatch.delenv("ASSISTANT_TEST_MODE", raising=False)
-    with pytest.raises(RuntimeError, match="ASSISTANT_TEST_MODE"):
+    monkeypatch.delenv("HOMA_TEST_MODE", raising=False)
+    with pytest.raises(RuntimeError, match="HOMA_TEST_MODE"):
         monitors.simulate_remove(1)
-    with pytest.raises(RuntimeError, match="ASSISTANT_TEST_MODE"):
+    with pytest.raises(RuntimeError, match="HOMA_TEST_MODE"):
         monitors.simulate_restore()
-    monkeypatch.setenv("ASSISTANT_TEST_MODE", "0")
+    monkeypatch.setenv("HOMA_TEST_MODE", "0")
     with pytest.raises(RuntimeError):
         monitors.simulate_remove(1)
     assert monitors.simulated_hidden() == []
@@ -147,7 +147,7 @@ def test_watcher_registers_for_simulated_changes(two_monitors, test_mode):
     monitors._watchers.append(w)
     posted = []
     try:
-        import assistant.uibus as uibus
+        import homa.uibus as uibus
         orig = uibus.post
         uibus.post = lambda fn, *a: posted.append(fn)
         try:

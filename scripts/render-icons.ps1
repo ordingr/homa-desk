@@ -1,18 +1,18 @@
 <#
-Rasterises assistant/assets/icon.svg and icon-muted.svg into the PNG tiles, badge PNGs and assistant.ico the
+Rasterises homa/assets/icon.svg and icon-muted.svg into the PNG tiles, badge PNGs and homa.ico the
 overlay loads at runtime. Needs node, Microsoft Edge and playwright-core (a node_modules folder that has it:
 set PLAYWRIGHT_MODULES, else ~/node_modules). Run when the SVGs change and commit the output:
   powershell -ExecutionPolicy Bypass -File scripts\render-icons.ps1
 #>
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$assets = Join-Path $repo 'assistant\assets'
+$assets = Join-Path $repo 'homa\assets'
 $modules = if ($env:PLAYWRIGHT_MODULES) { $env:PLAYWRIGHT_MODULES } else { Join-Path $env:USERPROFILE 'node_modules' }
 if (-not (Test-Path (Join-Path $modules 'playwright-core'))) { throw "playwright-core not found in $modules" }
 $venvPython = Join-Path $repo '.venv\Scripts\python.exe'
 $python = if (Test-Path $venvPython) { $venvPython } else { 'python' }
 
-$work = Join-Path ([IO.Path]::GetTempPath()) ('assistant-icons-' + [guid]::NewGuid().ToString('N'))
+$work = Join-Path ([IO.Path]::GetTempPath()) ('homa-icons-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
 $driver = Join-Path $work 'render.cjs'
 @'
@@ -68,7 +68,7 @@ try {
     & node $driver $assets $work
     if ($LASTEXITCODE -ne 0) { throw 'node render failed' }
     $frames = @(16, 24, 32, 48, 64, 256) | ForEach-Object { Join-Path $work "ico_$_.png" }
-    & $python (Join-Path $repo 'scripts\pack_ico.py') (Join-Path $assets 'assistant.ico') @frames
+    & $python (Join-Path $repo 'scripts\pack_ico.py') (Join-Path $assets 'homa.ico') @frames
     if ($LASTEXITCODE -ne 0) { throw 'ico packing failed' }
     Write-Host "Wrote icons to $assets"
 }

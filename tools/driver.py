@@ -11,7 +11,7 @@
     python tools/driver.py fullpage --query "<q>" --screenshot <png> [--via-api]
 
 Coordinates are physical pixels, the same space as the rectangles in GET /v1/_debug/ui. Nothing here
-writes inside the repository: the driver's own state (pid, port, home) lives in %TEMP%\\assistant-driver.
+writes inside the repository: the driver's own state (pid, port, home) lives in %TEMP%\\homa-driver.
 Stdlib + ctypes; Pillow is imported only by ``screenshot`` / ``fullpage``.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-STATE_FILE = Path(tempfile.gettempdir()) / "assistant-driver" / "state.json"
+STATE_FILE = Path(tempfile.gettempdir()) / "homa-driver" / "state.json"
 DEFAULT_PORT = 17171
 STARTUP_TIMEOUT = 30.0
 
@@ -92,22 +92,39 @@ def cmd_start(args) -> int:
     existing = load_state()
     if existing.get("pid") and health_ok(existing):
         sys.exit(f"driver: an instance is already running (pid {existing['pid']}, home {existing['home']}); run `stop`")
+    if args.port == DEFAULT_PORT and not getattr(args, "allow_live_port", False):
+        sys.exit(f"driver: port {DEFAULT_PORT} is the live instance's port; pass a free --port, "
+                 "or --allow-live-port if you really mean it")
     home = Path(args.home).resolve()
     home.mkdir(parents=True, exist_ok=True)
     settings = home / "settings.json"
-    if not settings.exists():
-        settings.write_text(json.dumps({"schema": 1, "port": args.port}), encoding="utf-8")
-    env = dict(os.environ, ASSISTANT_HOME=str(home))
-    env.pop("ASSISTANT_TEST_MODE", None)
+    try:
+        current = json.loads(settings.read_text(encoding="utf-8"))
+        if not isinstance(current, dict):
+            raise ValueError("not an object")
+    except (OSError, ValueError):
+        current = {"schema": 1}
+    current["port"] = args.port
+    settings.write_text(json.dumps(current), encoding="utf-8")
+    fake_profile = home / "userprofile"
+    fake_local = fake_profile / "AppData" / "Local"
+    fake_roaming = fake_profile / "AppData" / "Roaming"
+    fake_local.mkdir(parents=True, exist_ok=True)
+    fake_roaming.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, HOMA_HOME=str(home), USERPROFILE=str(fake_profile), HOME=str(fake_profile),
+               LOCALAPPDATA=str(fake_local), APPDATA=str(fake_roaming))
+    env.pop("HOMEDRIVE", None)
+    env.pop("HOMEPATH", None)
+    env.pop("HOMA_TEST_MODE", None)
     if args.test_mode:
-        env["ASSISTANT_TEST_MODE"] = "1"
+        env["HOMA_TEST_MODE"] = "1"
     exe = Path(sys.executable)
     pythonw = exe.with_name("pythonw.exe")
     interpreter = exe if args.console or not pythonw.exists() else pythonw
     console = open(home / "console.txt", "wb")
-    proc = subprocess.Popen([str(interpreter), "-m", "assistant"], cwd=REPO_ROOT, env=env, stdout=console,
+    proc = subprocess.Popen([str(interpreter), "-m", "homa"], cwd=REPO_ROOT, env=env, stdout=console,
                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
-    state = {"pid": proc.pid, "port": json.loads(settings.read_text(encoding="utf-8")).get("port", args.port),
+    state = {"pid": proc.pid, "port": args.port,
              "home": str(home), "test_mode": bool(args.test_mode)}
     save_state(state)
     deadline = time.monotonic() + STARTUP_TIMEOUT
@@ -432,7 +449,7 @@ def cmd_fullpage(args) -> int:
     if edge is None:
         sys.exit("driver: msedge.exe not found")
     url = f"http://127.0.0.1:{state['port']}/app/?q={quote(args.query)}"
-    profile = Path(tempfile.gettempdir()) / "assistant-driver" / "edge-profile"
+    profile = Path(tempfile.gettempdir()) / "homa-driver" / "edge-profile"
     proc = subprocess.Popen([edge, f"--app={url}", f"--user-data-dir={profile}", "--no-first-run"])
     time.sleep(args.wait)
     grab(Path(args.screenshot))
@@ -448,9 +465,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("start", help="launch the app and wait for /v1/health")
-    p.add_argument("--home", required=True, help="scratch ASSISTANT_HOME (never ~/.assistant)")
+    p.add_argument("--home", required=True, help="scratch HOMA_HOME (never ~/.homa)")
     p.add_argument("--port", type=int, default=DEFAULT_PORT)
-    p.add_argument("--test-mode", action="store_true", help="set ASSISTANT_TEST_MODE=1 (exposes /v1/_debug/ui)")
+    p.add_argument("--allow-live-port", action="store_true", help="permit the live instance's default port 17171")
+    p.add_argument("--test-mode", action="store_true", help="set HOMA_TEST_MODE=1 (exposes /v1/_debug/ui)")
     p.add_argument("--console", action="store_true", help="use python.exe instead of pythonw.exe")
     p.set_defaults(fn=cmd_start)
 

@@ -1,11 +1,13 @@
 <#
-Stops Assistant, removes its login shortcut and its Claude Code hook entries,
-and asks before deleting the Assistant folder.
+Stops Homa, removes its login shortcut and its Claude Code hook entries,
+and asks before deleting the Homa folder.
 Run:  powershell -ExecutionPolicy Bypass -File uninstall.ps1
 #>
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path -Parent $MyInvocation.MyCommand.Path
-$homeDir = if ($env:ASSISTANT_HOME) { $env:ASSISTANT_HOME } else { Join-Path $env:USERPROFILE '.assistant' }
+$homeDir = if ($env:HOMA_HOME) { $env:HOMA_HOME } else { Join-Path $env:USERPROFILE '.homa' }
+$legacyHome = Join-Path $env:USERPROFILE '.assistant'  # legacy folder from before the rename
+if (-not $env:HOMA_HOME -and -not (Test-Path $homeDir) -and (Test-Path $legacyHome)) { $homeDir = $legacyHome }  # legacy
 
 $python = $null
 foreach ($name in @('python', 'py')) {
@@ -16,9 +18,10 @@ if (-not $python) { Write-Host 'Python was not found on PATH; only the shortcut 
 Push-Location $repo
 try {
     if ($python) {
-        & $python -m assistant shutdown
+        & $python -m homa shutdown
         if ($LASTEXITCODE -eq 2) {
-            $pidFile = Join-Path $homeDir 'assistant.pid'
+            $pidFile = Join-Path $homeDir 'homa.pid'
+            if (-not (Test-Path $pidFile)) { $pidFile = Join-Path $homeDir 'assistant.pid' }  # legacy pid file
             if (Test-Path $pidFile) {
                 $recorded = [int](Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
                 if ($recorded) {
@@ -32,17 +35,19 @@ try {
                 }
             }
         }
-        & $python -m assistant hooks remove
+        & $python -m homa hooks remove
     }
 }
 finally {
     Pop-Location
 }
 
-$lnkPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Assistant.lnk'
-if (Test-Path $lnkPath) {
-    Remove-Item -LiteralPath $lnkPath
-    Write-Host "Removed $lnkPath"
+foreach ($lnkName in @('Homa.lnk', 'Assistant.lnk')) {  # Assistant.lnk is the legacy name
+    $lnkPath = Join-Path ([Environment]::GetFolderPath('Startup')) $lnkName
+    if (Test-Path $lnkPath) {
+        Remove-Item -LiteralPath $lnkPath
+        Write-Host "Removed $lnkPath"
+    }
 }
 
 if (Test-Path $homeDir) {
@@ -57,5 +62,5 @@ if (Test-Path $homeDir) {
 }
 
 Write-Host ''
-Write-Host 'The Python packages Assistant installed are still in place. To remove them, run:'
+Write-Host 'The Python packages Homa installed are still in place. To remove them, run:'
 Write-Host "    $(if ($python) { $python } else { 'python' }) -m pip uninstall -y -r `"$(Join-Path $repo 'requirements.txt')`""

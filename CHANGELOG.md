@@ -200,3 +200,31 @@
     - The new-file figure of about 1 second in search results is a target. The watcher batch is 0.25 s (`assistant/index/manager.py`, `HINT_BATCH_S`). The end-to-end time was not measured.
     - Security review of 3d7bc25: `docs/security/2026-11-07-m4-review.md`. Review 11 returned BLOCK on R11-F1 (the Continue launcher's working folder). Review 12 returns PASS for commit, with R11-F1 closed by observation and low NOTEs R12-N2 and R12-N3 open (R12-N1 resolved in place).
   - Docs: `README.md` (a correction at the top, and "What 3d7bc25 adds" in Features, with correction notes in Install, Search files, Full page and previews, Actions on a file, Roots and excludes, and a "3d7bc25 additions" note in Security and privacy; Status). `docs/api.md` section 13. `docs/search-grammar.md` section 12.
+
+## 2026-11-08
+- PR: none (the repo has no remote, so there is no PR number). Rename of the app from Assistant to Homa, per
+  `docs/plans/2026-11-08-rename-to-homa.md` (rollback tag `pre-homa-rename` at `bcebd08`, work on branch `rename-homa` in the
+  worktree `C:\AI Projects\Assistant-homa`). Why: the plan's goal, that the app is called Homa everywhere a person can see it
+  (plan section 1). What changed: the package is `homa` (`python -m homa`, distribution `homa-desk` 0.2.0), the data folder is
+  `%USERPROFILE%\.homa` (`HOMA_HOME`), the MCP server is `homa`, the icon is the new Homa bird, and the first start moves an
+  existing `%USERPROFILE%\.assistant` and `%LOCALAPPDATA%\Assistant\edge-profile`, rewrites the matching `Assistant.lnk` and
+  shows an "Assistant is now Homa" card. `python -m assistant` and `python -m assistant.mcp_stdio` remain as a 0.2.x shim, and
+  the `ASSISTANT_*` variables are read as a fallback, both removed in 0.3.0. Details: `README.md`, "Upgrading (2026-11-08)".
+  - Dispatch chain per the plan's section 5: R0 git-keeper (tag, worktree), R1 dev (package move), R2 dev (migration),
+    R3 ui (web rename and bundle), R4 dev (icon artwork), R7 doc-keeper (this entry and the docs). R5a qa (tests), R6 security
+    (review of the migration), R8 git-keeper (`--ff-only` merge into `main`) and R9 (cutover on the personal laptop, needs the
+    user's go-ahead) are not done as of this entry.
+  - Verified in the worktree by reading the code on 2026-11-08 (not by running it): `homa/migrate.py` (decision table, shutdown
+    through `/v1/shutdown`, rename, shortcut rewrite, marker `migrated-from.json`), `homa/paths.py` (`home()` fallback order,
+    deprecation warning for `ASSISTANT_*`), `homa/__init__.py` (`0.2.0`), `pyproject.toml` (`homa-desk`), `homa/server/mcp.py`
+    (`SERVER_NAME = "homa"`), `homa/overlay/fullpage.py` (`WINDOW_TITLE`, Edge profile), `homa/calendar/ics.py` (`Homa/1`),
+    `homa/index/store.py` (format tag `assistant-index`, unchanged on purpose), `assistant/__main__.py` and
+    `assistant/mcp_stdio.py` (stderr notice). Tag `pre-homa-rename` and branch `rename-homa` exist in the repository.
+  - Verification status: the test suite is pending (qa, R5a and R5b, `tests/test_rename_complete.py` included); the security
+    review of the migration is pending (R6). No test result is claimed here.
+  - Open decisions, from the plan's section 8: the repository folder stays `C:\AI Projects\Assistant` (Q1); re-installing the
+    Claude Code hook entries at cutover needs the user's approval (Q2); the shim's lifetime is one minor release (Q3); icon
+    sign-off is on the R4 screenshots, which are not in this entry (Q4).
+  - Found while reading the code, not changed here: the Claude Code hook entries on the personal laptop point at port 62480,
+    while the app listens on 17171 (plan section 2, F5). The migration reports this with a card and a `--doctor` suffix; it does
+    not rewrite the entries.

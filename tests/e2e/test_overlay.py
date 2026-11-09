@@ -1,6 +1,6 @@
 """On-screen overlay checks, driven through tools/driver.py and GET /v1/_debug/ui (plan 8.3, M1-3a/3b/6 Done cells).
 
-The app runs with ASSISTANT_TEST_MODE=1 against a scratch ASSISTANT_HOME on its own port. Everything is
+The app runs with HOMA_TEST_MODE=1 against a scratch HOMA_HOME on its own port. Everything is
 skipped until the test-mode debug route is served (M1-6 wiring + M1-3a icon). Keys that the plan leaves open in
 the debug payload (card window list, timer text, button rectangles) are read tolerantly and the test says which
 key it expected; adjust the reader, not the assertion, if the dev names it differently.
@@ -21,9 +21,9 @@ import pytest
 
 from conftest import REPO_ROOT, wait_until
 
-spec = importlib.util.spec_from_file_location("assistant_driver", REPO_ROOT / "tools" / "driver.py")
+spec = importlib.util.spec_from_file_location("homa_driver", REPO_ROOT / "tools" / "driver.py")
 driver = importlib.util.module_from_spec(spec)
-sys.modules["assistant_driver"] = driver
+sys.modules["homa_driver"] = driver
 spec.loader.exec_module(driver)
 
 GWL_EXSTYLE = -20
@@ -105,7 +105,7 @@ def overlay(tmp_path_factory):
     try:
         ui = ov.ui_or_none()
         if ui is None:
-            pytest.skip("GET /v1/_debug/ui is not served with ASSISTANT_TEST_MODE=1 yet (M1-6 wiring / M1-3a)")
+            pytest.skip("GET /v1/_debug/ui is not served with HOMA_TEST_MODE=1 yet (M1-6 wiring / M1-3a)")
         if "icon" not in ui:
             pytest.skip("debug payload has no 'icon' entry (M1-3a not wired into the app yet)")
         yield ov
@@ -216,7 +216,7 @@ def test_remind_me_shows_live_interpretation_and_the_didnt_understand_line(overl
 # ---- M1-3b / M1-6: cards ------------------------------------------------------------
 
 def _colours():
-    gfx = pytest.importorskip("assistant.overlay.gfx", reason="assistant/overlay/gfx.py (M1-3a) not present")
+    gfx = pytest.importorskip("homa.overlay.gfx", reason="homa/overlay/gfx.py (M1-3a) not present")
     return {"waiting": gfx.AMBER, "done": gfx.GREEN, "meeting": gfx.BLUE, "reminder": gfx.PURPLE, "custom": gfx.PURPLE}
 
 
@@ -228,7 +228,7 @@ def test_card_appears_within_1s_of_the_post(overlay):
 def _monitor_count() -> int:
     """Number of monitors the app enumerates, read in-process (the debug payload does not expose monitors)."""
     try:
-        from assistant.overlay import monitors
+        from homa.overlay import monitors
         return len(monitors.list_monitors())
     except Exception:
         import win32api
@@ -237,7 +237,7 @@ def _monitor_count() -> int:
 
 def _icon_monitor_index(overlay) -> int:
     """Index (in the order the app lists monitors, as used by the window 'monitor' key) of the icon's monitor."""
-    from assistant.overlay import monitors
+    from homa.overlay import monitors
     left, top, right, bottom = overlay.ui()["icon"]["rect"]
     target = monitors.monitor_at((left + right) // 2, (top + bottom) // 2)
     return [m.handle for m in monitors.list_monitors()].index(target.handle)
@@ -321,7 +321,7 @@ def test_done_card_disappears_20_s_after_it_is_seen(overlay):
 
 
 def test_mute_greys_the_icon_and_queues_cards(overlay):
-    gfx = pytest.importorskip("assistant.overlay.gfx")
+    gfx = pytest.importorskip("homa.overlay.gfx")
     _choose_menu_item(overlay, "Mute")  # lands on the submenu entry; Enter again picks its first choice
     driver.press_keys(["enter"])
     time.sleep(0.4)

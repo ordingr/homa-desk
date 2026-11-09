@@ -10,7 +10,7 @@ import pytest
 
 from conftest import PEM_TEXT
 
-denylist = pytest.importorskip("assistant.security.denylist", reason="assistant/security/denylist.py (M3a-1) not present")
+denylist = pytest.importorskip("homa.security.denylist", reason="homa/security/denylist.py (M3a-1) not present")
 
 DENIED = [
     "C:\\u\\.env", "C:\\u\\.env.local", "C:\\u\\app\\.env.production", "C:\\u\\server.pem", "C:\\u\\tls.key",
@@ -75,7 +75,7 @@ def test_matching_does_not_open_or_require_the_file_to_exist():
 
 # ---- SEC-4 / AC-MC-5: path resolution ---------------------------------------------------------------------------------
 
-pathcheck = pytest.importorskip("assistant.security.pathcheck", reason="assistant/security/pathcheck.py (M3a-1) not present")
+pathcheck = pytest.importorskip("homa.security.pathcheck", reason="homa/security/pathcheck.py (M3a-1) not present")
 
 
 def junction(link, target):
@@ -142,7 +142,7 @@ def test_junction_inside_the_root_resolves_to_the_target_not_the_link(layout):
 
 def test_junction_into_an_excluded_tree_resolves_and_the_excludes_refuse_it(layout):
     """Done cell: a junction into an excluded tree resolves and is refused."""
-    excludes_mod = pytest.importorskip("assistant.index.excludes", reason="excludes.py (M3a-1) not present")
+    excludes_mod = pytest.importorskip("homa.index.excludes", reason="excludes.py (M3a-1) not present")
     _, root, _, _ = layout
     junction(root / "linkdir", root / "node_modules")
     got = pathcheck.resolve_in_roots(str(root / "linkdir" / "pkg" / "probe.txt"), [str(root)])

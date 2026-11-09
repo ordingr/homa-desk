@@ -2,7 +2,7 @@
 
 Real components: real ICS parser and IcsSource against local HTTP servers, a real token file and hooks installer
 in private homes, real Settings, an in-process MCP server (mcp_live) and the shared running app. Nothing touches the
-real ~/.claude or ~/.assistant.
+real ~/.claude or ~/.homa.
 """
 import http.client
 import http.server
@@ -20,9 +20,9 @@ import pytest
 
 from conftest import REPO_ROOT, build_ics, launch_app, wait_until, _free_port, Api
 
-from assistant import paths
-from assistant.calendar import ics, meetings
-from assistant.calendar.meetings import find_join_url
+from homa import paths
+from homa.calendar import ics, meetings
+from homa.calendar.meetings import find_join_url
 
 HOOK = "/v1/hooks/claude-code"
 
@@ -83,9 +83,9 @@ def _hostile_feed(now):
 
 
 def test_f2_hostile_events_do_not_silence_the_feed_and_source_is_marked_ok(tmp_path, ics_server, caplog):
-    from assistant.cards.store import CardStore
-    from assistant.scheduler import Scheduler
-    from assistant.settings import Settings
+    from homa.cards.store import CardStore
+    from homa.scheduler import Scheduler
+    from homa.settings import Settings
     now = time.time()
     source = ics.IcsSource(ics_server.serve("/hostile.ics", _hostile_feed(now)), "Hostile")
     scheduler = Scheduler()
@@ -204,7 +204,7 @@ def test_n4_unknown_tzid_warnings_are_capped_with_one_closing_line(caplog):
     saved = set(ics._WARNED_TZIDS)
     ics._WARNED_TZIDS.clear()
     try:
-        with caplog.at_level(logging.WARNING, logger="assistant.calendar.ics"):
+        with caplog.at_level(logging.WARNING, logger="homa.calendar.ics"):
             for i in range(80):
                 assert ics._tz_for(f"Bogus/Zone{i}") is timezone.utc
         assert len(ics._WARNED_TZIDS) == 50
@@ -222,13 +222,13 @@ def test_n4_unknown_tzid_warnings_are_capped_with_one_closing_line(caplog):
 def private_home(tmp_path, monkeypatch):
     home = tmp_path / "ah"
     home.mkdir()
-    monkeypatch.setenv("ASSISTANT_HOME", str(home))
+    monkeypatch.setenv("HOMA_HOME", str(home))
     paths.ensure_layout()
     return home
 
 
 def _regenerate_under_readers(pause):
-    from assistant.security import token as token_mod
+    from homa.security import token as token_mod
     token_mod.ensure()
     stop = threading.Event()
     reader_errors = []
@@ -271,7 +271,7 @@ def test_f3_sixty_regenerations_under_four_spinning_readers_never_fail(private_h
 
 
 def test_f3_replace_retries_a_transient_permission_error(private_home, monkeypatch):
-    from assistant.security import token as token_mod
+    from homa.security import token as token_mod
     real, calls = os.replace, []
 
     def flaky(a, b):
@@ -286,13 +286,13 @@ def test_f3_replace_retries_a_transient_permission_error(private_home, monkeypat
 
 
 def test_f3_live_app_serves_the_new_token_on_the_next_request(tmp_path):
-    from assistant.security import token as token_mod
+    from homa.security import token as token_mod
     home = tmp_path / "live_home"
     with launch_app(home, _free_port()) as (base, old):
         old_api = Api(base, old)
         assert old_api.get("/v1/health")[0] == 200
         mp = pytest.MonkeyPatch()
-        mp.setenv("ASSISTANT_HOME", str(home))
+        mp.setenv("HOMA_HOME", str(home))
         try:
             new = token_mod.regenerate().token
         finally:
@@ -312,12 +312,12 @@ def _hooks_env(tmp_path):
     ah.mkdir()
     (ah / "settings.json").write_text(json.dumps({"schema": 1, "port": 17333}), encoding="utf-8")
     drive, rest = os.path.splitdrive(str(user))
-    env = dict(os.environ, USERPROFILE=str(user), HOME=str(user), ASSISTANT_HOME=str(ah), HOMEDRIVE=drive, HOMEPATH=rest)
+    env = dict(os.environ, USERPROFILE=str(user), HOME=str(user), HOMA_HOME=str(ah), HOMEDRIVE=drive, HOMEPATH=rest)
     return env, user / ".claude" / "settings.json"
 
 
 def _cli(env, *args):
-    r = subprocess.run([sys.executable, "-m", "assistant", *args], cwd=REPO_ROOT, env=env, capture_output=True,
+    r = subprocess.run([sys.executable, "-m", "homa", *args], cwd=REPO_ROOT, env=env, capture_output=True,
                        text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     return r.stdout
@@ -325,7 +325,7 @@ def _cli(env, *args):
 
 def _regen(env):
     r = subprocess.run([sys.executable, "-c",
-                        "from assistant.security import token; r=token.regenerate(); print(r.hooks)"],
+                        "from homa.security import token; r=token.regenerate(); print(r.hooks)"],
                        cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -349,7 +349,7 @@ def test_f4_install_edit_regenerate_remove_leaves_no_bearer(tmp_path):
     assert after["model"] == "opus" and after["theme"] == "dark"
     assert after["permissions"] == {"allow": ["Bash(git status)"]}
     assert after["hooks"]["Stop"] == [{"hooks": [{"type": "command", "command": "echo mine"}]}]
-    code = subprocess.run([sys.executable, "-c", "from assistant import hooks_installer as h; print(h.installed())"],
+    code = subprocess.run([sys.executable, "-c", "from homa import hooks_installer as h; print(h.installed())"],
                           cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=30)
     assert code.stdout.strip() == "no", code.stdout + code.stderr
 
@@ -357,9 +357,9 @@ def test_f4_install_edit_regenerate_remove_leaves_no_bearer(tmp_path):
 # ---- R5-F5 / R5-N7: settings ------------------------------------------------------------------------
 
 def _load_settings(home, monkeypatch, content):
-    monkeypatch.setenv("ASSISTANT_HOME", str(home))
+    monkeypatch.setenv("HOMA_HOME", str(home))
     (home / "settings.json").write_text(json.dumps(content), encoding="utf-8")
-    from assistant.settings import Settings
+    from homa.settings import Settings
     s = Settings()
     s.load()
     return s
@@ -380,8 +380,8 @@ def test_f5_a_bad_lead_does_not_discard_the_urls_and_outlook_defaults_off(shome,
 
 
 def test_f5_default_outlook_is_off_with_no_settings_file(shome, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(shome))
-    from assistant.settings import DEFAULTS, Settings
+    monkeypatch.setenv("HOMA_HOME", str(shome))
+    from homa.settings import DEFAULTS, Settings
     s = Settings()
     s.load()
     assert s.get("calendars")["outlook"] is False and DEFAULTS["calendars"]["outlook"] is False
@@ -521,20 +521,20 @@ def test_n5_normal_prose_is_not_masked(hook_session):
 # ---- R5-N11: desktop snippet -------------------------------------------------------------------------
 
 def test_n11_snippet_uses_the_interpreter_path_not_bare_python():
-    settings_ui = pytest.importorskip("assistant.overlay.settings_ui")
-    server = json.loads(settings_ui.desktop_snippet())["mcpServers"]["assistant"]
+    settings_ui = pytest.importorskip("homa.overlay.settings_ui")
+    server = json.loads(settings_ui.desktop_snippet())["mcpServers"]["homa"]
     assert server["command"] != "python"
     assert server["command"] == sys.executable
     assert os.path.isfile(server["command"]) and server["command"].lower().endswith("python.exe")
-    assert server["args"] == ["-m", "assistant.mcp_stdio"]
+    assert server["args"] == ["-m", "homa.mcp_stdio"]
 
 
 def test_n11_pythonw_is_swapped_for_the_console_python(tmp_path, monkeypatch):
-    settings_ui = pytest.importorskip("assistant.overlay.settings_ui")
+    settings_ui = pytest.importorskip("homa.overlay.settings_ui")
     (tmp_path / "pythonw.exe").write_bytes(b"")
     (tmp_path / "python.exe").write_bytes(b"")
     monkeypatch.setattr(sys, "executable", str(tmp_path / "pythonw.exe"))
-    assert json.loads(settings_ui.desktop_snippet())["mcpServers"]["assistant"]["command"] == str(tmp_path / "python.exe")
+    assert json.loads(settings_ui.desktop_snippet())["mcpServers"]["homa"]["command"] == str(tmp_path / "python.exe")
 
 
 # ---- --doctor ---------------------------------------------------------------------------------------
@@ -544,12 +544,12 @@ def test_doctor_says_outlook_off_when_the_key_is_absent(tmp_path):
     ah.mkdir()
     (ah / "settings.json").write_text(json.dumps({"schema": 1, "port": _free_port(), "calendars": {"ics_urls": []}}),
                                       encoding="utf-8")
-    env = dict(os.environ, ASSISTANT_HOME=str(ah))
-    r = subprocess.run([sys.executable, "-m", "assistant", "--doctor"], cwd=REPO_ROOT, env=env, capture_output=True,
+    env = dict(os.environ, HOMA_HOME=str(ah))
+    r = subprocess.run([sys.executable, "-m", "homa", "--doctor"], cwd=REPO_ROOT, env=env, capture_output=True,
                        text=True, timeout=90)
     assert "0 ICS feed(s), Outlook off" in r.stdout, r.stdout + r.stderr
     (ah / "settings.json").write_text(json.dumps({"schema": 1, "port": _free_port(), "calendars": {"outlook": True}}),
                                       encoding="utf-8")
-    r = subprocess.run([sys.executable, "-m", "assistant", "--doctor"], cwd=REPO_ROOT, env=env, capture_output=True,
+    r = subprocess.run([sys.executable, "-m", "homa", "--doctor"], cwd=REPO_ROOT, env=env, capture_output=True,
                        text=True, timeout=90)
     assert "Outlook on" in r.stdout, r.stdout

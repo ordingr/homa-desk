@@ -15,7 +15,7 @@ import pytest
 
 from conftest import REPO_ROOT
 
-ics = pytest.importorskip("assistant.calendar.ics", reason="assistant/calendar/ics.py (M2-1) not present")
+ics = pytest.importorskip("homa.calendar.ics", reason="homa/calendar/ics.py (M2-1) not present")
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "calendars"
 UTC = timezone.utc

@@ -1,9 +1,9 @@
 """Claude Code hooks installer / remover (plan 7.1 M1-5; AC-CS-1, AC-CS-2, AC-IN-3).
 
-Driven through the CLI (``python -m assistant hooks install|remove [--dry-run]``) in a subprocess whose
-USERPROFILE/HOME and ASSISTANT_HOME point at a temp dir, so the user-level settings file
+Driven through the CLI (``python -m homa hooks install|remove [--dry-run]``) in a subprocess whose
+USERPROFILE/HOME and HOMA_HOME point at a temp dir, so the user-level settings file
 ``~/.claude/settings.json`` is a fixture and the real one is never touched. Skipped until
-assistant/hooks_installer.py (M1-5) exists.
+homa/hooks_installer.py (M1-5) exists.
 """
 import json
 import os
@@ -14,7 +14,7 @@ import pytest
 
 from conftest import REPO_ROOT
 
-pytest.importorskip("assistant.hooks_installer", reason="assistant/hooks_installer.py (M1-5) not present")
+pytest.importorskip("homa.hooks_installer", reason="homa/hooks_installer.py (M1-5) not present")
 
 EVENTS = ["PermissionRequest", "Notification", "Stop", "StopFailure",
           "UserPromptSubmit", "PostToolUse", "SessionStart", "SessionEnd"]
@@ -35,16 +35,16 @@ FOREIGN = {
 def env(tmp_path):
     home = tmp_path / "user"
     (home / ".claude").mkdir(parents=True)
-    assistant_home = tmp_path / "assistant_home"
-    assistant_home.mkdir()
-    (assistant_home / "settings.json").write_text(json.dumps({"schema": 1, "port": 17333}), encoding="utf-8")
-    e = dict(os.environ, USERPROFILE=str(home), HOME=str(home), ASSISTANT_HOME=str(assistant_home))
+    homa_home = tmp_path / "homa_home"
+    homa_home.mkdir()
+    (homa_home / "settings.json").write_text(json.dumps({"schema": 1, "port": 17333}), encoding="utf-8")
+    e = dict(os.environ, USERPROFILE=str(home), HOME=str(home), HOMA_HOME=str(homa_home))
     e["HOMEDRIVE"], e["HOMEPATH"] = os.path.splitdrive(str(home))[0], str(home)[len(os.path.splitdrive(str(home))[0]):]
-    return e, home / ".claude" / "settings.json", assistant_home
+    return e, home / ".claude" / "settings.json", homa_home
 
 
 def run(env_, *args, check=True):
-    result = subprocess.run([sys.executable, "-m", "assistant", "hooks", *args], cwd=REPO_ROOT, env=env_,
+    result = subprocess.run([sys.executable, "-m", "homa", "hooks", *args], cwd=REPO_ROOT, env=env_,
                             capture_output=True, text=True, timeout=60)
     if check:
         assert result.returncode == 0, result.stdout + result.stderr

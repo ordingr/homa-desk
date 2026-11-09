@@ -51,7 +51,7 @@ export async function exchangeNonce(nonce) {
 }
 
 export async function request(method, path, { params, body, signal } = {}) {
-  if (token === null) throw new ApiError(401, "No session. Open this page from Assistant.");
+  if (token === null) throw new ApiError(401, "No session. Open this page from Homa.");
   let url = path;
   if (params) {
     const query = new URLSearchParams();
@@ -77,7 +77,7 @@ export async function request(method, path, { params, body, signal } = {}) {
 }
 
 export async function requestRaw(path, params) {
-  if (token === null) throw new ApiError(401, "No session. Open this page from Assistant.");
+  if (token === null) throw new ApiError(401, "No session. Open this page from Homa.");
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params || {})) {
     if (value !== "" && value !== undefined && value !== null) query.set(key, String(value));

@@ -1,7 +1,7 @@
 """Search executor over the fixture tree (plan 7.3 M3a-3; AC-FI-8 .. AC-FI-18, SEC-3).
 
 The store is built by conftest.walk_store from tests/fixtures/tree_search.json: the real
-assistant.index.store when it exists, otherwise the 4b-API stand-in in conftest. node_modules and $RECYCLE.BIN are
+homa.index.store when it exists, otherwise the 4b-API stand-in in conftest. node_modules and $RECYCLE.BIN are
 pruned and *.vhdx skipped by the helper, as the default excludes would.
 """
 import time
@@ -11,8 +11,8 @@ import pytest
 
 from conftest import BULK_COUNT, row_names, row_paths, walk_store
 
-query = pytest.importorskip("assistant.index.query", reason="assistant/index/query.py (M3a-3) not present")
-search = pytest.importorskip("assistant.index.search", reason="assistant/index/search.py (M3a-3) not present")
+query = pytest.importorskip("homa.index.query", reason="homa/index/query.py (M3a-3) not present")
+search = pytest.importorskip("homa.index.search", reason="homa/index/search.py (M3a-3) not present")
 KNOWN = {"md", "py", "html", "txt", "yml", "pdf", "docx", "xlsx", "csv", "png", "json", "js", "ts"}
 DOT = "·"
 
@@ -221,7 +221,7 @@ def test_hostile_queries_finish_quickly_and_do_not_raise(store):
 
 
 def test_delta_removal_and_addition_are_honoured(search_tree, store):
-    mod = pytest.importorskip("assistant.index.store", reason="real IndexStore/IndexDelta (M3a-1) not present")
+    mod = pytest.importorskip("homa.index.store", reason="real IndexStore/IndexDelta (M3a-1) not present")
     delta = mod.IndexDelta()
     target = row_paths(run(store, "designer.md").rows)[0]
     delta.remove(target)

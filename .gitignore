@@ -7,5 +7,5 @@ dist/
 build/
 *.egg-info/
 .pytest_cache/
-!assistant/static/
-!assistant/static/**
+!homa/static/
+!homa/static/**

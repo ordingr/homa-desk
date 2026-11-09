@@ -54,3 +54,21 @@ Construction:
 Expected 16 px reading (geometry only, unobserved): a gold V of two raised wings with a narrow body and a split tail below. Notches in the trailing edge are about 5 units deep and may soften to a slightly serrated edge. The beak is about 1.5 px wide and may merge with the head.
 
 If it still misreads: first fix to try is to enlarge the head and beak by about 20 percent and drop the second wing notch (L10 33 and L22 40), giving 3 feather tips per wing.
+
+## R4 render outcome (2026-11-08)
+
+Supersedes: nothing. The paths above (`assistant/assets/`, `assistant.ico`) are from before the rename. The same files are
+now `homa/assets/` and `homa/assets/homa.ico` (plan `docs/plans/2026-11-08-rename-to-homa.md`, section 4.7). The paths above are
+kept as written.
+
+- Date: 2026-11-08. Recorded by doc-keeper (R7) from the R4 report relayed by the tech-lead.
+- Render: `scripts\render-icons.ps1` ran with exit 0. The output is in `homa/assets/`: `icon_60.png` and `icon-muted_60.png`
+  (plus the other PNG sizes and the badge set), and `homa.ico` at 21,447 bytes with six frames at 16, 24, 32, 48, 64 and 256 px,
+  all 32 bpp.
+- Read-out, as reported by the tech-lead from the rendered contact sheet `docs/design/2026-11-08-homa-icon-preview.png`:
+  `icon_60.png`, `icon-muted_60.png` and the 256 px frame are crisp. At 16 px the gold bird's overall shape and outstretched
+  wings still read, but the tail blurs into a vertical smudge and the wing tips and head detail are lost. The 24 and 32 px
+  frames hold better. That is acceptable for the tray. The badge covers the right wing tip; the head, body and left wing stay
+  visible.
+- Decision: the tech-lead accepted Revision 2 on this rendered sheet. No further design revision is scheduled from this read-out.
+  Sign-off on the artwork (plan section 8, Q4) is taken from this read-out. The rename does not wait on it.

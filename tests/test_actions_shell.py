@@ -20,7 +20,7 @@ import pytest
 from conftest import REPO_ROOT, wait_until
 from tests.fixtures.preview import BAT_MARKER
 
-pytest.importorskip("assistant.actions.shell", reason="assistant/actions/shell.py (M3b-4) not present")
+pytest.importorskip("homa.actions.shell", reason="homa/actions/shell.py (M3b-4) not present")
 
 
 def outcome(result):
@@ -93,7 +93,7 @@ def test_unknown_verb_and_missing_token_and_bad_body(app):
 
 
 def test_every_documented_verb_is_routed(app):
-    from assistant.actions import VERBS
+    from homa.actions import VERBS
     expected = {"open", "open_with", "reveal", "copy_path", "rename", "properties", "recycle", "md_vault",
                 "folder_listing", "ask_claude"}
     assert expected <= set(VERBS)
@@ -322,7 +322,7 @@ def test_recycle_is_refused_on_a_network_path(app):
 
 
 def test_recycle_is_refused_on_a_removable_volume_with_an_explanation():
-    shell = pytest.importorskip("assistant.actions.shell")
+    shell = pytest.importorskip("homa.actions.shell")
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     drives = [f"{c}:\\" for c in "DEFGHIJKLMNOPQRSTUVWXYZ" if k32.GetDriveTypeW(f"{c}:\\") == 2]
     if not drives:
@@ -331,7 +331,7 @@ def test_recycle_is_refused_on_a_removable_volume_with_an_explanation():
 
 
 def test_volume_check_names_the_network_reason():
-    shell = pytest.importorskip("assistant.actions.shell")
+    shell = pytest.importorskip("homa.actions.shell")
     reason = shell._volume_problem("\\\\server\\share\\a.txt")
     assert reason and "network" in reason
 
@@ -399,9 +399,9 @@ def test_actions_are_recorded_in_the_debug_snapshot(app):
 
 DELETE_CALLS = re.compile(r"\bos\.(remove|unlink|rmdir|removedirs)\b|\.unlink\(|\brmtree\b|\.rmdir\(|DeleteFile|"
                           r"SHEmptyRecycleBin|FOF_NOCONFIRMATION|FO_DELETE")
-ACTION_SURFACE = ["assistant/actions", "assistant/server/routes_actions.py", "assistant/server/routes_files.py",
-                  "assistant/preview", "assistant/server/static.py", "assistant/overlay/search_ui.py",
-                  "assistant/server/mcp.py", "assistant/overlay/fullpage.py"]
+ACTION_SURFACE = ["homa/actions", "homa/server/routes_actions.py", "homa/server/routes_files.py",
+                  "homa/preview", "homa/server/static.py", "homa/overlay/search_ui.py",
+                  "homa/server/mcp.py", "homa/overlay/fullpage.py"]
 
 
 def _sources(rel):
@@ -421,21 +421,21 @@ def test_the_action_surface_has_no_delete_call_except_the_recycle_bin_move():
                 if DELETE_CALLS.search(code):
                     hits.append((str(path.relative_to(REPO_ROOT)), no, line.strip()))
     assert hits, "the Recycle Bin move (FO_DELETE with FOF_ALLOWUNDO) should be the one deletion call"
-    assert all(h[0].replace("\\", "/") == "assistant/actions/shell.py" and "FO_DELETE" in h[2] for h in hits), hits
+    assert all(h[0].replace("\\", "/") == "homa/actions/shell.py" and "FO_DELETE" in h[2] for h in hits), hits
 
 
 def test_every_fof_flag_set_in_the_package_keeps_allowundo():
-    for path in (REPO_ROOT / "assistant").rglob("*.py"):
+    for path in (REPO_ROOT / "homa").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         if "SHFileOperation" in text:
             assert "FOF_ALLOWUNDO" in text or "_FOF_ALLOWUNDO" in text, path
             assert "NOCONFIRMATION" not in text, path
-    shell_src = (REPO_ROOT / "assistant" / "actions" / "shell.py").read_text(encoding="utf-8")
+    shell_src = (REPO_ROOT / "homa" / "actions" / "shell.py").read_text(encoding="utf-8")
     assert re.search(r"flags\s*=\s*_FOF_ALLOWUNDO", shell_src)
 
 
 def test_no_http_route_can_delete():
-    routes = (REPO_ROOT / "assistant" / "server" / "routes_actions.py").read_text(encoding="utf-8")
+    routes = (REPO_ROOT / "homa" / "server" / "routes_actions.py").read_text(encoding="utf-8")
     assert "delete" not in routes.lower().replace("recycle", "")
 
 
@@ -448,7 +448,7 @@ def test_py_and_hta_files_need_confirmation_before_open(app, key):
 
 
 def test_recycle_is_refused_when_the_bin_is_smaller_than_the_item_or_set_to_delete_at_once(tmp_path, monkeypatch):
-    from assistant.actions import shell
+    from homa.actions import shell
     target = tmp_path / "bin-limit-qa.bin"
     target.write_bytes(b"x" * (3 * 1024 * 1024))
     monkeypatch.setattr(shell, "_vet", lambda index, path, **kw: str(target))

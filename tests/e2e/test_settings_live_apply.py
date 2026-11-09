@@ -22,10 +22,10 @@ import pytest
 
 from conftest import REPO_ROOT, Api, build_ics, wait_until
 
-settings_ui = pytest.importorskip("assistant.overlay.settings_ui", reason="assistant/overlay/settings_ui.py (M2-3) not present")
+settings_ui = pytest.importorskip("homa.overlay.settings_ui", reason="homa/overlay/settings_ui.py (M2-3) not present")
 
-from assistant import paths, uibus  # noqa: E402
-from assistant.settings import Settings  # noqa: E402
+from homa import paths, uibus  # noqa: E402
+from homa.settings import Settings  # noqa: E402
 
 PAGES = ["General", "Cards", "Calendars", "Claude Code", "MCP", "About"]
 PORT = 17171
@@ -90,7 +90,7 @@ def tk_root():
 
 @pytest.fixture
 def ui(tk_root, tmp_path, monkeypatch):
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path / "ui_home"))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path / "ui_home"))
     paths.ensure_layout()
     root = tk_root
     settings = Settings()
@@ -175,8 +175,8 @@ def test_mcp_page_shows_the_claude_code_command_and_the_claude_desktop_snippet(u
     window.show("MCP")
     pump(root, 0.2)
     blob = "\n".join(texts(window.pages["MCP"]))
-    assert f'claude mcp add --transport http assistant http://127.0.0.1:{PORT}/mcp --header "Authorization: Bearer ' in blob
-    assert '"mcpServers"' in blob and "assistant.mcp_stdio" in blob
+    assert f'claude mcp add --transport http homa http://127.0.0.1:{PORT}/mcp --header "Authorization: Bearer ' in blob
+    assert '"mcpServers"' in blob and "homa.mcp_stdio" in blob
 
 
 def test_claude_code_page_states_what_hooks_can_and_cannot_see(ui):
@@ -264,8 +264,8 @@ def test_standalone_settings_window_starts_and_stays_up(tmp_path):
     home = tmp_path / "standalone_home"
     home.mkdir()
     (home / "settings.json").write_text(json.dumps({"schema": 1, "port": 17999}), encoding="utf-8")
-    proc = subprocess.Popen([sys.executable, "-m", "assistant.overlay.settings_ui"], cwd=REPO_ROOT,
-                            env=dict(os.environ, ASSISTANT_HOME=str(home)), stdout=subprocess.PIPE,
+    proc = subprocess.Popen([sys.executable, "-m", "homa.overlay.settings_ui"], cwd=REPO_ROOT,
+                            env=dict(os.environ, HOMA_HOME=str(home)), stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
     try:
         time.sleep(4)
@@ -356,7 +356,7 @@ LABEL_URL = f"https://cal.example.test/{SECRETPATH}/basic.ics"
 @pytest.fixture
 def ui2(tk_root, tmp_path, monkeypatch):
     """Window factory with an injectable calendar status and runner; yields (root, settings, make)."""
-    monkeypatch.setenv("ASSISTANT_HOME", str(tmp_path / "ui2_home"))
+    monkeypatch.setenv("HOMA_HOME", str(tmp_path / "ui2_home"))
     paths.ensure_layout()
     settings = Settings()
     settings.load()
@@ -382,7 +382,7 @@ def all_text(window):
 
 
 def test_c_mcp_page_log_viewer_shows_exactly_the_last_100_lines_of_the_tail_and_refreshes(ui2):
-    from assistant.server import routes_health
+    from homa.server import routes_health
     root, settings, make = ui2
     log_file = paths.logs_dir() / "mcp.log"
     log_file.write_text("".join(f"2026-01-01T00:00:00 tools/call tool=t{n} args=[] result_bytes=1 ok\n" for n in range(150)),
@@ -536,7 +536,7 @@ def test_r6_4_regenerate_runs_off_the_ui_thread_and_reports_error_then_success(u
     profile.mkdir()
     monkeypatch.setenv("USERPROFILE", str(profile))
     monkeypatch.setenv("HOME", str(profile))
-    from assistant.security import token as token_mod
+    from homa.security import token as token_mod
     token_mod.ensure()
     window = make()
     window.show("MCP")

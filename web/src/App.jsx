@@ -17,7 +17,8 @@ import { CloudOffIcon, LocalIcon } from "./components/Icons.jsx";
 
 const PAGE_SIZE = 100;
 const SEARCH_DELAY_MS = 150;
-const THEME_KEY = "assistant.theme";
+const THEME_KEY = "homa.theme";
+const LEGACY_THEME_KEY = "assistant.theme";
 
 const THEME_PREFS = ["dark", "light", "system"];
 const DARK_QUERY = "(prefers-color-scheme: dark)";
@@ -27,7 +28,7 @@ const EXPAND_CHORD = parseChord(EXPAND_HINT);
 
 function storedTheme() {
   try {
-    const value = localStorage.getItem(THEME_KEY);
+    const value = localStorage.getItem(THEME_KEY) ?? localStorage.getItem(LEGACY_THEME_KEY);
     return THEME_PREFS.includes(value) ? value : null;
   } catch {
     return null;
@@ -82,17 +83,17 @@ export default function App({ session }) {
   const [expired, setExpired] = useState(false);
   if (session.status === "no-token" || expired) {
     return (
-      <Notice title="Open this page from Assistant">
+      <Notice title="Open this page from Homa">
         {expired
-          ? "The session ended. Open the full page again from Assistant (F11 in the search box)."
-          : "This page needs a launch link from the Assistant app. Press F11 in the search box, or choose Full page."}
+          ? "The session ended. Open the full page again from Homa (F11 in the search box)."
+          : "This page needs a launch link from the Homa app. Press F11 in the search box, or choose Full page."}
       </Notice>
     );
   }
   if (session.status === "failed") {
     return (
       <Notice title="Could not start the session">
-        {session.message} Open the full page again from Assistant.
+        {session.message} Open the full page again from Homa.
       </Notice>
     );
   }
@@ -218,6 +219,7 @@ function Workspace({ initialQuery, onExpired }) {
       setThemePref(null);
       try {
         localStorage.removeItem(THEME_KEY);
+        localStorage.removeItem(LEGACY_THEME_KEY);
       } catch {
         /* theme preference is optional */
       }
@@ -879,15 +881,15 @@ function Workspace({ initialQuery, onExpired }) {
         ? {
             title: "Settings",
             body:
-              "Search roots, excludes, hotkey and notes are set in the Assistant app on this PC " +
+              "Search roots, excludes, hotkey and notes are set in the Homa app on this PC " +
               "(tray icon, then Settings). This page only changes its own theme.",
             cancelLabel: "Close",
           }
         : {
             title: "About",
             body:
-              "Assistant full-page search. Files mode runs on this PC; nothing leaves it except " +
-              "the explicit Ask Claude action. The page talks only to the local Assistant app.",
+              "Homa full-page search. Files mode runs on this PC; nothing leaves it except " +
+              "the explicit Ask Claude action. The page talks only to the local Homa app.",
             cancelLabel: "Close",
           },
     );

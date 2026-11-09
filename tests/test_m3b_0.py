@@ -18,8 +18,8 @@ import pytest
 from conftest import (Api, McpHttp, SearchApp, _free_port, launch_app, row_names, row_paths, wait_index, wait_until,
                       walk_store)
 
-from assistant import settings as settings_mod
-from assistant.settings import DEFAULTS, Settings
+from homa import settings as settings_mod
+from homa.settings import DEFAULTS, Settings
 
 KNOWN = set(DEFAULTS["index"].get("known_exts", [])) or {"md", "py", "txt", "pdf", "png", "json"}
 FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM = 0x2, 0x4
@@ -79,7 +79,7 @@ def hidden_tree(tmp_path_factory):
 
 
 def test_a_search_run_drops_hidden_and_system_entries_unless_asked(hidden_tree):
-    from assistant.index import query, search
+    from homa.index import query, search
     store = walk_store(hidden_tree)
     parsed = query.parse("sample", KNOWN)
     try:
@@ -126,8 +126,8 @@ class CountingManager:
 
     @staticmethod
     def make(tmp_path, built_age_hours, roots_setting=None, battery=False, monkeypatch=None):
-        from assistant.index import manager as manager_mod
-        from assistant.scheduler import Scheduler
+        from homa.index import manager as manager_mod
+        from homa.scheduler import Scheduler
 
         class Counting(manager_mod.IndexManager):
             def __init__(self, *a, **k):
@@ -305,7 +305,7 @@ def test_f_known_exts_default_is_the_old_constant_without_doc():
 
 def test_f_known_exts_validation_and_the_route_helper():
     need_default("known_exts")
-    from assistant.server import routes_search
+    from homa.server import routes_search
     s = Settings()
     s.load()
     index = s.get("index")
@@ -321,7 +321,7 @@ def test_f_known_exts_validation_and_the_route_helper():
 
 def test_f_a_custom_extension_becomes_a_filter_in_the_parser():
     need_default("known_exts")
-    from assistant.index import query
+    from homa.index import query
     assert query.parse("report zzq", {"zzq"}).exts == ["zzq"]
     assert query.parse("report zzq", {"md"}).exts == []
 
@@ -368,7 +368,7 @@ def test_h_search_files_returns_the_same_notes_as_http(search_app):
 # ---- (i) AC-AN-2/3: the noun stays "passage(s)" --------------------------------------------------------------------------------
 
 def test_i_ask_notes_noun_is_passages_on_the_real_mode_and_the_placeholder():
-    from assistant.search import modes, notes_bm25
+    from homa.search import modes, notes_bm25
     assert notes_bm25.AskNotesMode.noun == "passage(s)"
     assert modes.AskNotesPlaceholder.noun == "passage(s)"
     assert modes.FilesMode.noun == "file(s)"
@@ -377,7 +377,7 @@ def test_i_ask_notes_noun_is_passages_on_the_real_mode_and_the_placeholder():
 # ---- (j) one-character name term + path term: selective, not truncated --------------------------------------------------------
 
 def test_j_one_char_name_plus_path_term_is_selective_and_fast_on_2m_entries(synthetic_store_2m):
-    from assistant.index import query, search
+    from homa.index import query, search
     store, _, _ = synthetic_store_2m
     parsed = query.parse("a -p d00001", KNOWN)
     search.run(parsed, store, limit=500)  # warm
@@ -395,7 +395,7 @@ def test_j_one_char_name_plus_path_term_is_selective_and_fast_on_2m_entries(synt
 
 def test_j_the_shortcut_returns_what_the_full_scan_returns():
     """A one-character term cannot use the directory table: it scans names only and says so; the ``-p`` form is complete."""
-    from assistant.index import query, search
+    from homa.index import query, search
     from conftest import ROOT_PARENT, store_api
     builder = store_api().IndexBuilder()
     root = builder.add_dir("C:\\j", ROOT_PARENT)
@@ -429,21 +429,23 @@ def test_k_the_root_directory_itself_is_not_returned(search_app):
 # ---- (l) A22: a user's excludes replace the defaults --------------------------------------------------------------------------
 
 def test_l_user_excludes_replace_the_defaults_and_own_data_rules_stay(tmp_path):
-    from assistant.index import manager as manager_mod
-    from assistant.scheduler import Scheduler
+    from homa.index import manager as manager_mod
+    from homa.scheduler import Scheduler
     s = Settings()
     s.load()
     s.set("index", {**s.get("index"), "roots": [str(tmp_path)], "excludes": ["only-this/"]})
     mgr = manager_mod.IndexManager(s, Scheduler(), tmp_path / "i.bin")
     cfg = mgr._config()
     assert cfg["patterns"] == ["only-this/"], "A22: the list is the whole list"
-    assert any(".assistant" in r for r in mgr._own_data_rules()), "the own-data rule is unconditional"
+    rules = mgr._own_data_rules()
+    assert any(".homa" in r for r in rules), "the own-data rule is unconditional"
+    assert any(".assistant" in r for r in rules), "a lingering pre-rename folder is never indexed"
 
 
 # ---- (m) drive-relative default excludes ---------------------------------------------------------------------------------------
 
 def test_m_default_windows_excludes_are_drive_relative():
-    from assistant.index.excludes import DEFAULT_EXCLUDES
+    from homa.index.excludes import DEFAULT_EXCLUDES
     lowered = [r.lower() for r in DEFAULT_EXCLUDES]
     if "c:\\windows\\" in lowered:
         pytest.skip("DEFAULT_EXCLUDES still hold the absolute C:\\Windows\\ rule (M3b-0 (m))")
@@ -453,7 +455,7 @@ def test_m_default_windows_excludes_are_drive_relative():
 
 @pytest.mark.parametrize("drive", ["C", "D", "e"])
 def test_m_the_drive_relative_rule_matches_on_any_drive_and_only_the_top_level(drive):
-    from assistant.index.excludes import Excludes
+    from homa.index.excludes import Excludes
     ex = Excludes(["*:\\Windows\\"])
     full = f"{drive}:\\Windows"
     assert ex.matching_rule(full, "Windows", "Windows", True), full
@@ -466,7 +468,7 @@ def test_m_the_drive_relative_rule_matches_on_any_drive_and_only_the_top_level(d
 # ---- (n) R7-N5: notes index skips deny-listed paths ---------------------------------------------------------------------------
 
 def test_n_notes_index_does_not_hold_text_of_deny_listed_notes(tmp_path):
-    from assistant.search.notes_bm25 import NotesIndex
+    from homa.search.notes_bm25 import NotesIndex
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "ordinary.md").write_text("# Ordinary\n\nthe zebraquartz plan is public\n", encoding="utf-8")
@@ -508,7 +510,7 @@ def vetted_tree(tmp_path):
 
 
 def test_o_vet_accepts_extended_length_prefixed_paths(vetted_tree):
-    from assistant.server import mcp
+    from homa.server import mcp
     root, index = vetted_tree
     plain = str(root / "sub" / "file.txt")
     resolved, reason = mcp._vet(index, plain)
@@ -519,7 +521,7 @@ def test_o_vet_accepts_extended_length_prefixed_paths(vetted_tree):
 
 
 def test_o_a_prefixed_path_outside_the_roots_is_still_refused(vetted_tree, tmp_path):
-    from assistant.server import mcp
+    from homa.server import mcp
     root, index = vetted_tree
     outside = tmp_path / "outside.txt"
     outside.write_text("no\n", encoding="utf-8")
@@ -532,7 +534,7 @@ def test_o_a_prefixed_path_outside_the_roots_is_still_refused(vetted_tree, tmp_p
 # ---- (p) R7-N2: open, then compare the handle's final path with the vetted one -----------------------------------------------------
 
 def test_p_final_path_reports_what_an_open_handle_really_is(tmp_path):
-    from assistant.security import pathcheck
+    from homa.security import pathcheck
     if not hasattr(pathcheck, "final_path"):
         pytest.skip("pathcheck.final_path is not present yet (M3b-0 (p))")
     target = tmp_path / "t.txt"
@@ -543,7 +545,7 @@ def test_p_final_path_reports_what_an_open_handle_really_is(tmp_path):
 
 def test_p_read_text_preview_refuses_when_the_path_now_leads_elsewhere(tmp_path):
     import _winapi
-    from assistant.server import mcp
+    from homa.server import mcp
     if "recheck" not in mcp._read_preview.__code__.co_varnames:
         pytest.skip("mcp._read_preview has no open-then-verify recheck yet (M3b-0 (p))")
     root = tmp_path / "root"

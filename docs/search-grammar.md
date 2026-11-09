@@ -289,3 +289,16 @@ Supersedes: section 4, items 1 and 2 (the first plain term must match the file n
 - A query on a live index, including a multi-word query that relies on 12.1, and a query that hits the `truncated` path.
 - The popup's live search and the page's Tab completion on a live desktop.
 - The "about 1 second" figure for a new file in the README (the watcher batch is 0.25 s in `assistant/index/manager.py`; the end-to-end time was not measured).
+
+## 13. Rename to Homa: module paths, 2026-11-08
+
+Supersedes: nothing. The module paths in sections 1 to 12 (`assistant/index/...`, `assistant/overlay/...`, `assistant/server/...`,
+`assistant/search/...`, `web/src/...`) are kept as written.
+
+- Date: 2026-11-08. Written by doc-keeper (R7). The grammar, its limits and its interpretation strings are unchanged by the
+  rename. The source files named above moved from `assistant/` to `homa/` (plan `docs/plans/2026-11-08-rename-to-homa.md`,
+  section 4.1). Read `homa/index/search.py`, `homa/index/query.py`, `homa/overlay/search_ui.py`, `homa/server/routes_search.py`,
+  `homa/server/mcp.py`, `homa/search/modes.py`, `homa/search/notes_bm25.py` and `homa/index/manager.py` for the same paths now.
+- Notes folder: the setting is unchanged. The environment variable that overrides it is `HOMA_NOTES_DIR` (was
+  `ASSISTANT_NOTES_DIR`). The old name is still read, with a deprecation warning, until 0.3.0.
+- Verification: none by doc-keeper. The rename was not checked against the query tests in this entry.
