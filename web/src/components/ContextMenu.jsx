@@ -6,6 +6,8 @@ export const MENU_ITEMS = [
   { verb: "open", label: "Open", shortcut: "open" },
   { verb: "open_with", label: "Open with…" },
   { verb: "reveal", label: "Reveal in Explorer", shortcut: "reveal" },
+  { verb: "copy_files", label: "Copy", shortcut: "copy_files", many: "Copy {n} files" },
+  { verb: "cut_files", label: "Cut", shortcut: "cut_files", many: "Cut {n} files" },
   { verb: "copy_path", label: "Copy path", shortcut: "copy_path" },
   { verb: "copy_path_quoted", label: "Copy path (quoted)" },
   { separator: true },
@@ -17,7 +19,7 @@ export const MENU_ITEMS = [
   { verb: "ask_claude", label: "Ask Claude about this file", cloud: true },
 ];
 
-export default function ContextMenu({ x, y, claude, shortcuts, onPick, onClose }) {
+export default function ContextMenu({ x, y, claude, shortcuts, count = 1, onPick, onClose }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
@@ -83,7 +85,9 @@ export default function ContextMenu({ x, y, claude, shortcuts, onPick, onClose }
             <span className="marker" title={item.cloud ? "Sends to Claude" : "Stays on this PC"}>
               {item.cloud ? <CloudSendIcon /> : <LocalIcon />}
             </span>
-            <span className="menulabel">{item.label}</span>
+            <span className="menulabel">
+              {item.many && count > 1 ? item.many.replace("{n}", count) : item.label}
+            </span>
             {item.cloud ? (
               <span className="menutag">sends to Claude</span>
             ) : (

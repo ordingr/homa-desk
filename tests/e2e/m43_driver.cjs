@@ -187,10 +187,10 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     await search(page, "alpha");
     await pick(page, "alpha one");
     await page.locator("[data-testid=query]").focus();
-    await page.keyboard.press("Control+c");
+    await page.keyboard.press("Control+Shift+C");
     await page.waitForSelector("[data-testid=toast]");
     const clip = await page.evaluate(() => navigator.clipboard.readText());
-    check("4a Ctrl+C copies the path", /alpha one\.txt$/.test(clip), clip);
+    check("4a Ctrl+Shift+C copies the path", /alpha one\.txt$/.test(clip), clip);
     await page.keyboard.press("Delete");
     await page.waitForSelector("[data-testid=dialog]");
     check("4b Delete opens the page's own Recycle confirm", /Recycle/.test(await page.locator("[data-testid=dialog] h2").innerText()) && !state.verbs.some((v) => v[0] === "recycle"));
@@ -512,7 +512,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
   const kbds = async (page) => {
     await page.locator("[data-testid=row]", { hasText: "alpha one" }).first().click({ button: "right" });
     const out = {};
-    for (const verb of ["open", "reveal", "copy_path", "rename", "properties", "md_vault", "recycle"]) {
+    for (const verb of ["open", "reveal", "copy_files", "cut_files", "copy_path", "rename", "properties", "md_vault", "recycle"]) {
       const k = page.locator(`[data-verb=${verb}] kbd`);
       out[verb] = (await k.count()) ? await k.textContent() : null;
     }
@@ -604,7 +604,7 @@ const check = (name, ok, detail) => { results.push(ok); console.log((ok ? "PASS 
     await page.keyboard.press("Escape");
     await page.keyboard.press("Alt+Enter"); await page.waitForTimeout(250);
     const labels = await kbds(page);
-    check(`2 settings ${name}: defaults (F2 rename, Alt+Enter properties, labels)`, ok && st.verbs.includes("properties") && labels.rename === "F2" && labels.reveal === "Ctrl+Enter" && labels.md_vault === "Ctrl+M" && labels.recycle === "Delete" && labels.properties === "Alt+Enter" && labels.copy_path === "Ctrl+C", labels);
+    check(`2 settings ${name}: defaults (F2 rename, Alt+Enter properties, labels)`, ok && st.verbs.includes("properties") && labels.rename === "F2" && labels.reveal === "Ctrl+Enter" && labels.md_vault === "Ctrl+M" && labels.recycle === "Delete" && labels.properties === "Alt+Enter" && labels.copy_path === "Ctrl+Shift+C" && labels.copy_files === "Ctrl+C" && labels.cut_files === "Ctrl+X", labels);
     await ctx.close();
   }
   // 3: Continue in Claude Code

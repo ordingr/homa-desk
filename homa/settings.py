@@ -46,7 +46,10 @@ _CHORD = re.compile(
 DEFAULT_SHORTCUTS = {
     "open": "Enter",
     "reveal": "Ctrl+Enter",
-    "copy_path": "Ctrl+C",
+    "copy_files": "Ctrl+C",
+    "cut_files": "Ctrl+X",
+    "copy_path": "Ctrl+Shift+C",
+    "select_all": "Ctrl+A",
     "rename": "F2",
     "properties": "Alt+Enter",
     "recycle": "Delete",
@@ -60,6 +63,11 @@ DEFAULT_SHORTCUTS = {
     "full_page": "F11",
     "close": "Escape",
 }
+
+# Actions whose default chord arrived after installs had saved their shortcuts; "" means no chord, which only these
+# can have (a user's chord that collides with one of these defaults wins).
+UNBINDABLE_SHORTCUTS = ("copy_files", "cut_files", "copy_path", "select_all")
+OLD_COPY_PATH_CHORD = "Ctrl+C"
 
 MUTE_SOURCES = ("hooks", "http", "mcp", "file", "reminders", "calendar")
 
@@ -190,6 +198,8 @@ def _check_shortcuts(value: Any) -> None:
     for action, chord in value.items():
         if not isinstance(action, str) or not 0 < len(action) <= MAX_SHORTCUT_CHARS or not action.isidentifier():
             raise ValueError("shortcuts names must be short words such as copy_path")
+        if chord == "" and action in UNBINDABLE_SHORTCUTS:
+            continue
         if not isinstance(chord, str) or len(chord) > MAX_SHORTCUT_CHARS or not _CHORD.fullmatch(chord):
             raise ValueError(f"shortcuts.{action} must be a key such as F2 or Ctrl+Shift+S")
 
@@ -255,7 +265,33 @@ def _merged(loaded: dict[str, Any]) -> dict[str, Any]:
                 continue
             log.warning("invalid %s in settings; using default", key)
             merged[key] = copy.deepcopy(DEFAULTS[key])
+    loaded_shortcuts = loaded.get("shortcuts")
+    if isinstance(loaded_shortcuts, dict):
+        _migrate_shortcuts(set(loaded_shortcuts), merged["shortcuts"])
     return merged
+
+
+def _chord_key(chord: str) -> tuple:
+    parts = [p.casefold() for p in chord.split("+")]
+    return frozenset(parts[:-1]), parts[-1]
+
+
+def _migrate_shortcuts(saved: set, shortcuts: dict) -> None:
+    """Ctrl+C became Copy files on 2026-11-09. A saved copy_path still on the old default moves to Ctrl+Shift+C;
+    a chord the user picked stays. A newer default that collides with a saved chord gets no chord instead."""
+    fresh = [a for a in UNBINDABLE_SHORTCUTS if a not in saved]
+    if "copy_files" not in saved and isinstance(shortcuts.get("copy_path"), str) \
+            and shortcuts["copy_path"].casefold() == OLD_COPY_PATH_CHORD.casefold():
+        shortcuts["copy_path"] = DEFAULT_SHORTCUTS["copy_path"]
+        fresh.append("copy_path")
+    taken = {_chord_key(chord): action for action, chord in shortcuts.items()
+             if action in saved and action not in fresh and isinstance(chord, str) and chord}
+    for action in fresh:
+        owner = taken.get(_chord_key(shortcuts[action])) if shortcuts.get(action) else None
+        if owner is not None:
+            log.warning("shortcut %s for %s is already %s; %s has no shortcut", shortcuts[action], action, owner,
+                        action)
+            shortcuts[action] = ""
 
 
 def _repair_calendars(value: dict) -> None:

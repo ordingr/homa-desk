@@ -13,6 +13,7 @@ import builtins
 import ctypes
 import logging
 import os
+import struct
 import threading
 import time
 from collections import deque
@@ -38,6 +39,9 @@ SIZE_WALK_CAP = 200_000
 ASK_CLAUDE_BYTES = 32_768
 LISTING_DEFAULT_LIMIT = 500
 LOG_MAX = 500
+MAX_CLIPBOARD_PATHS = 1000
+MAX_PATH_CHARS = 32767
+CLIPBOARD_OPS = {"copy": 1, "cut": 2}
 VERBS = ("open", "open_with", "properties", "reveal", "copy_path", "copy_path_quoted", "rename", "recycle",
          "md_vault", "folder_listing", "ask_claude")
 
@@ -78,6 +82,11 @@ class _Stop(Exception):
         self.result = result
 
 
+def _win_trim(path: str) -> str:
+    """The path with trailing dots and spaces dropped from each component, as Win32 does when opening it."""
+    return "\\".join(p if p in (".", "..") else p.rstrip(". ") for p in path.replace("/", "\\").split("\\"))
+
+
 def _vet(index: Any, path: Any, *, protected_ok: bool, not_root: bool = False) -> str:
     """The resolved path, or raises _Stop. Same checks and texts as the MCP `_vet`, deny-list optional."""
     def refuse(text: str) -> _Stop:
@@ -92,7 +101,7 @@ def _vet(index: Any, path: Any, *, protected_ok: bool, not_root: bool = False) -
     roots = [r["path"] for r in index.status().get("roots", [])]
     if not os.path.isabs(path):
         raise refuse("refused: give an absolute path")
-    if _mcp._is_unc(path) and not any(_mcp._is_unc(r) for r in roots):
+    if _mcp._is_unc(path.replace("/", "\\")) and not any(_mcp._is_unc(r) for r in roots):
         raise refuse("refused: the path is outside the indexed roots")
     resolved = pathcheck.resolve_in_roots(path, roots)
     if resolved is None:
@@ -100,7 +109,8 @@ def _vet(index: Any, path: Any, *, protected_ok: bool, not_root: bool = False) -
     own = pathcheck._resolve(str(paths.home()))
     if own and pathcheck._inside(resolved, own):
         raise refuse("refused: Homa's own data")
-    if not protected_ok and (denylist.matches(path) or denylist.matches(resolved)):
+    if not protected_ok and (denylist.matches(path) or denylist.matches(_win_trim(path))
+                             or denylist.matches(resolved)):
         raise refuse("refused: protected file (secrets deny-list)")
     if not os.path.lexists(resolved):
         raise _Stop(_res(False, "That file or folder no longer exists.", "not_found"))
@@ -292,6 +302,118 @@ def _set_clipboard(text: str) -> None:
         win32clipboard.CloseClipboard()
 
 
+def dropfiles_bytes(paths: list) -> bytes:
+    """CF_HDROP payload: a DROPFILES header (pFiles=20, pt=(0,0), fNC=0, fWide=1), then each path as UTF-16LE with a
+    NUL, then a final NUL."""
+    header = struct.pack("<IiiII", 20, 0, 0, 0, 1)
+    return header + "".join(p + "\0" for p in paths).encode("utf-16-le") + "\0".encode("utf-16-le")
+
+
+def _set_clipboard_files(paths: list, effect: int) -> None:
+    import win32clipboard
+    import win32con
+    for attempt in range(5):
+        try:
+            win32clipboard.OpenClipboard()
+            break
+        except Exception:
+            if attempt == 4:
+                raise
+            time.sleep(0.05)
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32con.CF_HDROP, dropfiles_bytes(paths))
+        win32clipboard.SetClipboardData(win32clipboard.RegisterClipboardFormat("Preferred DropEffect"),
+                                        struct.pack("<I", effect))
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def _raw_prefix(path: str) -> bool:
+    """True for the long-path, device and NT-object prefixes in either slash style, checked before any normalising."""
+    head = path.replace("/", "\\")
+    return head.startswith(("\\\\?\\", "\\\\.\\", "\\??\\"))
+
+
+def _clipboard_path(index: Any, path: Any, op: str) -> str:
+    """The path to put on the clipboard for one row, or raises _Stop (section 4.3 of the clipboard plan)."""
+    if not isinstance(path, str) or not path or "\x00" in path or len(path) > MAX_PATH_CHARS:
+        raise _Stop(_res(False, "refused: not a usable path", "refused"))
+    try:
+        path.encode("utf-16-le")
+    except UnicodeEncodeError:
+        raise _Stop(_res(False, "refused: not a usable path", "refused")) from None
+    if _raw_prefix(path):
+        raise _Stop(_res(False, "refused: device and long-path prefixes are not accepted", "refused"))
+    resolved = _vet(index, path, protected_ok=False, not_root=op == "cut")
+    if op != "cut":
+        return resolved
+    own = pathcheck._resolve(str(paths.home()))
+    if own and pathcheck._inside(own, resolved):
+        raise _Stop(_res(False, "refused: that folder holds Homa's own data", "refused"))
+    return _link_or_target(index, path, resolved)
+
+
+def _plural(n: int) -> str:
+    return f"{n} file" if n == 1 else f"{n} files"
+
+
+def clipboard_files(paths: Any, op: str, *, index: Any = None) -> dict:
+    """Put files on the Windows clipboard the way Explorer's Copy (op="copy") or Cut (op="cut") does, so Paste in
+    File Explorer copies or moves them. Homa itself never moves, deletes or opens a file here. Refused paths are
+    skipped and reported; the result is "refused" only when none is left. One action_log line per call."""
+    verb = "cut_files" if op == "cut" else "copy_files"
+    count = len(paths) if isinstance(paths, (list, tuple)) else 0
+    try:
+        result = _clipboard_files(paths, op, index)
+    except Exception as exc:
+        log.warning("clipboard files failed (%s)", type(exc).__name__)
+        result = _res(False, f"The action failed: {type(exc).__name__}", "error")
+    outcome = "ok" if result["ok"] else result["message"] if result.get("kind") == "refused" else \
+        f"{result.get('kind', 'failed')}: {result['message']}"
+    _record(verb, f"{count} paths", outcome[:300])
+    return result
+
+
+def _clipboard_files(paths: Any, op: str, index: Any) -> dict:
+    if not isinstance(op, str) or op not in CLIPBOARD_OPS:
+        return _res(False, "op must be copy or cut.", "invalid", field="op")
+    if not isinstance(paths, (list, tuple)) or not 0 < len(paths) <= MAX_CLIPBOARD_PATHS:
+        return _res(False, f"paths must be a list of 1 to {MAX_CLIPBOARD_PATHS} paths.", "invalid", field="paths")
+    placed: list = []
+    seen: set = set()
+    skipped: list = []
+    for path in paths:
+        try:
+            target = _clipboard_path(index, path, op)
+        except _Stop as stop:
+            if stop.result["message"].startswith("unavailable:"):
+                return _res(False, stop.result["message"], "unavailable")
+            shown = str(path)[:MAX_PATH_CHARS].encode("utf-8", "backslashreplace").decode("utf-8")
+            skipped.append({"path": shown, "reason": stop.result["message"]})
+            continue
+        key = os.path.normcase(target)
+        if key not in seen:
+            seen.add(key)
+            placed.append(target)
+    if not placed:
+        return _res(False, "refused: none of the paths can go on the clipboard", "refused",
+                    op=op, count=0, skipped=skipped)
+    try:
+        _set_clipboard_files(placed, CLIPBOARD_OPS[op])
+    except Exception as exc:
+        log.warning("clipboard unavailable (%s)", type(exc).__name__)
+        return _res(False, "Windows would not let Homa use the clipboard.", "error", op=op, count=0,
+                    skipped=skipped)
+    if op == "copy":
+        message = f"Copied {_plural(len(placed))} \u2014 paste in File Explorer"
+    else:
+        message = f"Cut {_plural(len(placed))} \u2014 paste in File Explorer to move them"
+    if skipped:
+        message += f"; {len(skipped)} skipped"
+    return _res(True, message, op=op, count=len(placed), skipped=skipped)
+
+
 def copy_path(path: str, *, quoted: bool = False, index: Any = None) -> dict:
     _vet(index, path, protected_ok=True)
     plain = pathcheck._plain(path)
@@ -322,7 +444,7 @@ def _link_or_target(index: Any, path: Any, resolved: str) -> str:
     real_parent = pathcheck.resolve_in_roots(parent, roots) if parent else None
     if real_parent is None or (home and pathcheck._inside(real_parent, home)):
         return resolved
-    if denylist.matches(given):
+    if denylist.matches(given) or denylist.matches(_win_trim(given)):
         return resolved
     return given
 

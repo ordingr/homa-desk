@@ -9,7 +9,8 @@ import pytest
 from homa import paths
 from homa.settings import DEFAULT_SHORTCUTS, DEFAULTS, Settings
 
-ACTIONS = {"open", "reveal", "copy_path", "rename", "properties", "recycle", "md_vault", "folder_listing",
+ACTIONS = {"open", "reveal", "copy_files", "cut_files", "copy_path", "select_all", "rename", "properties",
+           "recycle", "md_vault", "folder_listing",
            "cycle_sort", "save_search", "cycle_date", "cycle_mode", "context_menu", "full_page", "close"}
 
 
@@ -25,8 +26,8 @@ def load(shortcuts):
     return s.get("shortcuts")
 
 
-def test_defaults_cover_the_fifteen_actions_and_are_in_a_fresh_settings():
-    assert set(DEFAULT_SHORTCUTS) == ACTIONS and len(DEFAULT_SHORTCUTS) == 15
+def test_defaults_cover_the_eighteen_actions_and_are_in_a_fresh_settings():
+    assert set(DEFAULT_SHORTCUTS) == ACTIONS and len(DEFAULT_SHORTCUTS) == 18
     s = Settings()
     s.load()
     assert s.get("shortcuts") == DEFAULT_SHORTCUTS == DEFAULTS["shortcuts"]
@@ -107,8 +108,8 @@ def test_set_rejects_what_load_would_repair(bad):
 
 def test_duplicate_chords_are_not_rejected_current_behaviour():
     """Recorded, not endorsed: two actions on one chord load as-is (dev reported this as a known gap)."""
-    got = load({"rename": "Ctrl+C", "copy_path": "Ctrl+C"})
-    assert got["rename"] == got["copy_path"] == "Ctrl+C"
+    got = load({"rename": "Ctrl+Y", "copy_path": "Ctrl+Y"})
+    assert got["rename"] == got["copy_path"] == "Ctrl+Y"
 
 
 def test_repair_is_idempotent_through_a_save_and_reload():

@@ -19,7 +19,7 @@ from ..search import modes as search_modes
 from ..search.modes import (MODIFIED_CHOICES, SORT_CHOICES, CHIP_LABELS, CHIPS, ModeUnavailable, Row, SearchResult,
                             valid_modified)
 from ..search.saved import SavedSearches
-from ..settings import DEFAULT_SHORTCUTS
+from ..settings import DEFAULT_SHORTCUTS, UNBINDABLE_SHORTCUTS
 from . import ask_claude_ui, gfx, monitors, panel, theme, win
 
 log = logging.getLogger("homa.overlay.search_ui")
@@ -118,10 +118,13 @@ SLIDE_STEP_MS = 14
 SEARCH_LIMIT_NOTE = 200
 
 MENU_ITEMS = (
+    ("copy_files", "Copy", "Ctrl+C"),
+    ("cut_files", "Cut", "Ctrl+X"),
+    None,
     ("open", "Open", "Enter"),
     ("open_with", "Open with…", ""),
     ("reveal", "Reveal in Explorer", "Ctrl+Enter"),
-    ("copy_path", "Copy path", "Ctrl+C"),
+    ("copy_path", "Copy path", "Ctrl+Shift+C"),
     ("copy_path_quoted", "Copy path (quoted)", ""),
     None,
     ("rename", "Rename…", "F2"),
@@ -264,8 +267,9 @@ class SearchPopup:
 
     def __init__(self, root: tk.Misc, icon: Any, modes: Any, settings: Any = None,
                  run_search: Optional[Callable[..., Any]] = None, saved: Optional[SavedSearches] = None,
-                 on_fullpage: Optional[Callable[[str], None]] = None,
+                 on_fullpage: Optional[Callable[[str, dict], None]] = None,
                  on_action: Optional[Callable[..., Any]] = None,
+                 on_clipboard: Optional[Callable[[list, str], Any]] = None,
                  fullpage_is_open: Optional[Callable[[], bool]] = None,
                  fullpage_close: Optional[Callable[[], Any]] = None,
                  post: Callable[..., None] = uibus.post,
@@ -278,6 +282,7 @@ class SearchPopup:
         self.saved = saved or SavedSearches()
         self.on_fullpage = on_fullpage
         self.on_action = on_action
+        self.on_clipboard = on_clipboard
         self.fullpage_is_open = fullpage_is_open
         self.fullpage_close = fullpage_close
         self.on_context: Optional[Callable[[Row, Any], None]] = self.show_context_menu
@@ -292,6 +297,8 @@ class SearchPopup:
         self.result: Optional[SearchResult] = None
         self.rows: list = []
         self.sel = -1
+        self.marked: set = set()
+        self.anchor = -1
         self.top = 0
         self.header = ""
         self.details = ""
@@ -357,6 +364,7 @@ class SearchPopup:
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._motion)
         self.canvas.bind("<ButtonRelease-1>", self._release)
+        self.canvas.bind("<Double-Button-1>", self._double)
         self.canvas.bind("<ButtonPress-3>", self._context)
         self.canvas.bind("<MouseWheel>", self._wheel)
         self.win.bind("<Escape>", lambda _e: self._escape())
@@ -574,6 +582,7 @@ class SearchPopup:
         self.result = None
         self.rows = []
         self.sel = -1
+        self._clear_marks()
         self.top = 0
         self.header = ""
         self.details = ""
@@ -717,6 +726,7 @@ class SearchPopup:
         if not keep:
             self.header = "searching…"
             self.rows, self.sel, self.top, self.details, self.details_kind = [], -1, 0, "", ""
+            self._clear_marks()
         self.result_noun = getattr(mode, "noun", None) or "result(s)"
         self.last_text = self.var.get()
         self._apply_geometry()
@@ -763,6 +773,7 @@ class SearchPopup:
         self.rows = list(result.rows)
         self.top = 0
         self.sel = 0 if self.rows else -1
+        self._clear_marks()
         elapsed = result.elapsed_ms if result.elapsed_ms is not None else wall_ms
         self.header = result.notice or header_text(result, self.result_noun, elapsed)
         self._update_details()
@@ -836,6 +847,98 @@ class SearchPopup:
         self._update_details()
         self._render()
 
+    def _clear_marks(self) -> None:
+        self.marked = set()
+        self.anchor = -1
+
+    def click_row(self, index: int, ctrl: bool = False, shift: bool = False) -> None:
+        """Click: cursor only, marks cleared. Ctrl+click toggles the row's mark. Shift+click marks anchor..row."""
+        if not 0 <= index < len(self.rows):
+            return
+        if shift:
+            start = self.anchor if 0 <= self.anchor < len(self.rows) else max(0, self.sel)
+            self.marked = set(range(min(start, index), max(start, index) + 1))
+            self.anchor = start
+        elif ctrl:
+            self.marked ^= {index}
+            self.anchor = index
+        else:
+            self._clear_marks()
+            self.anchor = index
+        self.select(index)
+
+    def extend(self, delta: int) -> None:
+        """Shift+Up/Down: move the cursor and mark anchor..cursor."""
+        if self.state != "results" or not self.rows:
+            self.move(delta)
+            return
+        start = self.anchor if 0 <= self.anchor < len(self.rows) else max(0, self.sel)
+        index = max(0, min(len(self.rows) - 1, self.sel + delta))
+        self.marked = set(range(min(start, index), max(start, index) + 1))
+        self.anchor = start
+        self.select(index)
+
+    def select_all(self) -> bool:
+        """Marks every row shown; False (nothing done) when they are all marked already."""
+        if not self.rows or len(self.marked) == len(self.rows):
+            return False
+        self.marked = set(range(len(self.rows)))
+        self._render()
+        return True
+
+    def targets(self) -> list:
+        """The marked rows, or the cursor row when none is marked."""
+        if self.marked:
+            return [self.rows[i] for i in sorted(self.marked) if 0 <= i < len(self.rows)]
+        row = self.selected_row()
+        return [row] if row is not None else []
+
+    def clipboard(self, op: str, rows: Optional[list] = None) -> bool:
+        """Copy (op="copy") or Cut (op="cut") the rows as files, for Paste in File Explorer."""
+        rows = [r for r in (self.targets() if rows is None else rows) if r.kind != "note"]
+        if not rows or self.on_clipboard is None:
+            return False
+        verb = "cut_files" if op == "cut" else "copy_files"
+        try:
+            result = self.on_clipboard([r.path for r in rows], op)
+        except Exception:
+            log.exception("%s failed", verb)
+            result = {"ok": False, "message": "The action failed."}
+        self.last_action = {"verb": verb, "name": rows[0].name if len(rows) == 1 else f"{len(rows)} files",
+                            "result": result}
+        if isinstance(result, dict) and result.get("message"):
+            self.details = str(result["message"]) + self._skipped_note(result.get("skipped"))
+            self.details_kind = "ok" if result.get("ok") else "err"
+        self._render()
+        return True
+
+    @staticmethod
+    def _skipped_note(skipped: Any) -> str:
+        """Why files were left off the clipboard: the first two distinct reasons, like the full page's toast."""
+        if not isinstance(skipped, list):
+            return ""
+        reasons = list(dict.fromkeys(str(s["reason"]) for s in skipped if isinstance(s, dict) and s.get("reason")))
+        if not reasons:
+            return ""
+        return f" ({'; '.join(reasons[:2])}{'; …' if len(reasons) > 2 else ''})"
+
+    def copy_paths(self) -> bool:
+        """Copy path: the cursor row through the action, several marked rows as newline-separated text."""
+        rows = self.targets()
+        if len(rows) <= 1:
+            return self.invoke("copy_path")
+        try:
+            from ..actions import shell
+            shell._set_clipboard("\n".join(r.path for r in rows))
+            result = {"ok": True, "message": f"Copied {len(rows)} paths."}
+        except Exception as exc:
+            log.warning("clipboard unavailable (%s)", type(exc).__name__)
+            result = {"ok": False, "message": "Windows would not let Homa use the clipboard."}
+        self.last_action = {"verb": "copy_path", "name": f"{len(rows)} paths", "result": result}
+        self.details, self.details_kind = result["message"], "ok" if result["ok"] else "err"
+        self._render()
+        return True
+
     def toggle_chip(self, name: str) -> None:
         if name not in CHIPS:
             return
@@ -884,6 +987,8 @@ class SearchPopup:
         return self.rows[self.sel] if 0 <= self.sel < len(self.rows) else None
 
     def invoke(self, verb: str, row: Optional[Row] = None) -> bool:
+        if verb in ("copy_files", "cut_files"):
+            return self.clipboard("cut" if verb == "cut_files" else "copy", [row] if row is not None else None)
         row = row or self.selected_row()
         if row is None or self.on_action is None:
             return False
@@ -986,6 +1091,7 @@ class SearchPopup:
         self._listing_stack.append({"folder": folder, "rows": self.rows, "sel": self.sel, "top": self.top,
                                     "header": self.header, "details": self.details, "kind": self.details_kind})
         self.rows, self.top, self.sel = rows, 0, 0 if rows else -1
+        self._clear_marks()
         self.header = f"Folder: {folder}"
         if result.get("truncated"):
             self.header += f" · showing {len(rows)} of {result.get('total', len(rows))}"
@@ -997,6 +1103,7 @@ class SearchPopup:
     def _leave_listing(self) -> None:
         snap = self._listing_stack.pop()
         self.rows, self.sel, self.top = snap["rows"], snap["sel"], snap["top"]
+        self._clear_marks()
         self.header, self.details, self.details_kind = snap["header"], snap["details"], snap["kind"]
         self._passage_dirty = True
         self._apply_geometry()
@@ -1012,6 +1119,7 @@ class SearchPopup:
                        activeforeground=gfx.WHITE, bd=1, relief="flat",
                        font=("Segoe UI", max(9, round(10 * self.scale))))
         items = []
+        files = self.targets() if self.marked else [row]
         for item in MENU_ITEMS:
             if item is None:
                 menu.add_separator()
@@ -1021,12 +1129,21 @@ class SearchPopup:
             is_claude = verb == "ask_claude"
             found = claude.cached_status() if is_claude else None
             reason = str(found["reason"]) if found and not found["available"] else None
+            command = lambda v=verb, r=row: self.invoke(v, r)
+            if verb in ("copy_files", "cut_files"):
+                op = "cut" if verb == "cut_files" else "copy"
+                if len(files) > 1:
+                    label = f"{label} {len(files)} files"
+                if row.kind == "note":
+                    reason = "not for notes"
+                elif self.on_clipboard is None:
+                    reason = "not available"
+                command = lambda o=op, f=files: self.clipboard(o, f)
             text = f"{CLAUDE_MARK}{label}{CLAUDE_SUFFIX}" if is_claude else f"{LOCAL_MARK}{label}"
             if reason:
                 text = f"{text}  ({reason})"
             menu.add_command(label=text, accelerator=shortcut, state="disabled" if reason else "normal",
-                             foreground=gfx.AMBER if is_claude else gfx.PANEL_OK,
-                             command=lambda v=verb, r=row: self.invoke(v, r))
+                             foreground=gfx.AMBER if is_claude else gfx.PANEL_OK, command=command)
             items.append({"verb": verb, "label": text, "key": shortcut, "scope": "claude" if is_claude else "local",
                           "enabled": reason is None, "reason": reason})
         self._menu, self._menu_items, self.menu_open = menu, items, True
@@ -1146,9 +1263,26 @@ class SearchPopup:
         self._run_dialog(dlg, entry)
         return answer["value"]
 
-    def fullpage(self) -> None:
-        if self.on_fullpage is not None:
-            self.on_fullpage(self.var.get().strip())
+    def fullpage(self, row: Optional[Row] = None) -> None:
+        """Open the full page with the query, chips, date and sort; `row` (or, for F11, the cursor row of the
+        results showing) becomes the selected row there."""
+        if self.on_fullpage is None:
+            return
+        text = self.last_text if row is not None else self.var.get()
+        if row is None and self.state == "results" and text == self.last_text and not self._listing_stack:
+            row = self.selected_row()
+        if row is not None and row.kind == "note":
+            row = None
+        query = text.strip()
+        try:
+            if hasattr(self.modes, "resolve"):
+                query = self.modes.resolve(text, self._current_mode())[1]
+        except ModeUnavailable:
+            pass
+        query, typed_range = extract_range(query)
+        handoff = {"query": query, "chips": sorted(self.chips), "modified": typed_range or self.modified,
+                   "sort": self.sort, "select_path": row.path if row is not None else None}
+        self.on_fullpage(query, handoff)
 
     # ---- keyboard / mouse --------------------------------------------
 
@@ -1160,7 +1294,8 @@ class SearchPopup:
             custom = None
         if isinstance(custom, dict):
             chords.update({k: v for k, v in custom.items()
-                           if k in DEFAULT_SHORTCUTS and isinstance(v, str) and chord_sequences(v)})
+                           if k in DEFAULT_SHORTCUTS and isinstance(v, str)
+                           and (chord_sequences(v) or (v == "" and k in UNBINDABLE_SHORTCUTS))})
         return chords
 
     def chord_label(self, action: str, fallback: str = "") -> str:
@@ -1225,7 +1360,10 @@ class SearchPopup:
         key("full_page", self.fullpage)
         key("close", self._escape)
         raw("recycle", self._delete_key)
+        raw("copy_files", lambda _e: self._clipboard_key("copy"))
+        raw("cut_files", lambda _e: self._clipboard_key("cut"))
         raw("copy_path", self._copy_key)
+        raw("select_all", self._select_all_key)
 
         def fixed(sequence: str, fn: Callable[[], Any], only_results: bool = False) -> None:
             if sequence not in claimed:
@@ -1239,6 +1377,8 @@ class SearchPopup:
             fixed("<ISO_Left_Tab>", lambda: self.cycle_mode(-1))
         fixed("<Up>", lambda: self.move(-1))
         fixed("<Down>", lambda: self.move(1))
+        fixed("<Shift-Up>", lambda: self.extend(-1))
+        fixed("<Shift-Down>", lambda: self.extend(1))
         fixed("<Prior>", lambda: self.move(-VISIBLE_ROWS))
         fixed("<Next>", lambda: self.move(VISIBLE_ROWS))
         fixed("<Home>", lambda: self.select(0), True)
@@ -1262,7 +1402,18 @@ class SearchPopup:
     def _copy_key(self, _event) -> str:
         if not self._row_keys_live():
             return ""
-        self.invoke("copy_path")
+        self.copy_paths()
+        return "break"
+
+    def _clipboard_key(self, op: str) -> str:
+        if not self._row_keys_live():
+            return ""
+        self.clipboard(op)
+        return "break"
+
+    def _select_all_key(self, _event) -> str:
+        if not self._row_keys_live() or not self.select_all():
+            return ""
         return "break"
 
     def _hit(self, event) -> str:
@@ -1301,15 +1452,35 @@ class SearchPopup:
             except OSError:
                 log.exception("could not save the search box position")
             return
-        self.click(d["hit"])
+        state = getattr(event, "state", 0)
+        ctrl, shift = bool(state & 0x4), bool(state & 0x1)
+        if d.get("double") and not ctrl and not shift and self.double_click(d["hit"]):
+            return
+        self.click(d["hit"], ctrl=ctrl, shift=shift)
 
-    def click(self, hit: str) -> None:
+    def _double(self, event) -> None:
+        self._press(event)
+        if self._drag is not None:
+            self._drag["double"] = True
+
+    def double_click(self, hit: str) -> bool:
+        """Double-click on a file row of a search: open the full page on that row. False (not handled) elsewhere."""
+        if not hit.startswith("hit:row:") or self._listing_stack or self.on_fullpage is None:
+            return False
+        index = int(hit.split(":")[2])
+        if not 0 <= index < len(self.rows) or self.rows[index].kind == "note":
+            return False
+        self.select(index)
+        self.fullpage(self.rows[index])
+        return True
+
+    def click(self, hit: str, ctrl: bool = False, shift: bool = False) -> None:
         parts = hit.split(":")
         if len(parts) < 3:
             return
         kind, arg = parts[1], ":".join(parts[2:])
         if kind == "row":
-            self.select(int(arg))
+            self.click_row(int(arg), ctrl=ctrl, shift=shift)
         elif kind == "chip":
             self.toggle_chip(arg)
         elif kind == "date":
@@ -1332,7 +1503,10 @@ class SearchPopup:
     def _context(self, event) -> None:
         hit = self._hit(event)
         if self.on_context is not None and hit.startswith("hit:row:"):
-            self.select(int(hit.split(":")[2]))
+            index = int(hit.split(":")[2])
+            if index not in self.marked:
+                self._clear_marks()
+            self.select(index)
             row = self.selected_row()
             if row is not None:
                 self.on_context(row, event)
@@ -1584,7 +1758,11 @@ class SearchPopup:
     def _draw_row(self, row: Row, index: int, x: float, y: float, width: float, rh: float) -> None:
         c, s = self.canvas, self.scale
         tag = (f"hit:row:{index}", "row")
-        if index == self.sel:
+        if index in self.marked:
+            panel.rounded_rect(c, x, y + 1, x + width, y + rh - 1, 6 * s, tag=tag + ("marked",),
+                               fill=_blend(gfx.BLUE, gfx.PANEL_BG, 0.45),
+                               outline=gfx.BLUE if index == self.sel else "")
+        elif index == self.sel:
             panel.rounded_rect(c, x, y + 1, x + width, y + rh - 1, 6 * s, tag=tag, fill=gfx.BUTTON_BG_HOVER, outline="")
         tag_w = gfx.px(46, s)
         label = "?" if row.is_dir else (row.ext[:4] or "·")
@@ -1682,6 +1860,8 @@ class SearchPopup:
             "total": self.result.total if self.result else 0,
             "selected": self.sel,
             "selected_name": sel.name if sel else None,
+            "marked": sorted(self.marked),
+            "marked_count": len(self.marked),
             "chips": sorted(self.chips),
             "modified": self.modified,
             "sort": self.sort,

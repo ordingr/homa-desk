@@ -253,7 +253,8 @@ def test_menu_accelerators_show_the_default_chords(root, popups, monkeypatch):
     pop.open()
     pump(root, 0.1)
     keys = menu_labels(pop, monkeypatch)
-    assert keys["open"] == "Enter" and keys["reveal"] == "Ctrl+Enter" and keys["copy_path"] == "Ctrl+C"
+    assert keys["open"] == "Enter" and keys["reveal"] == "Ctrl+Enter" and keys["copy_path"] == "Ctrl+Shift+C"
+    assert keys["copy_files"] == "Ctrl+C" and keys["cut_files"] == "Ctrl+X"
     assert keys["rename"] == "F2" and keys["properties"] == "Alt+Enter"
     assert keys["md_vault"] == "Ctrl+M" and keys["recycle"] == "Delete"
     assert keys["open_with"] == "" and keys["ask_claude"] == "" and keys["copy_path_quoted"] == ""

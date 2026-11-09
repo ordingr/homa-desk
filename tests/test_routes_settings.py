@@ -50,7 +50,7 @@ def test_exact_key_set_and_shapes(served):
     assert body["md_vault"] == {"url": "https://vault.example.test/open"}
     assert set(body["index"]) == {"known_exts"} and "zzz" in body["index"]["known_exts"]
     assert body["index"]["known_exts"] == sorted(body["index"]["known_exts"])
-    assert body["shortcuts"]["rename"] == "F3" and body["shortcuts"]["open"] == "Enter" and len(body["shortcuts"]) == 15
+    assert body["shortcuts"]["rename"] == "F3" and body["shortcuts"]["open"] == "Enter" and len(body["shortcuts"]) == 18
 
 
 def test_no_secret_or_path_appears_anywhere_in_the_body(served):
@@ -92,7 +92,7 @@ def test_defaults_on_a_pristine_home(app_factory):
         api = Api(base, token)
         status, body = api.get("/v1/settings")
         assert status == 200 and set(body) == EXPECTED_KEYS
-        assert body["theme"] == "dark" and body["md_vault"] == {"url": ""} and len(body["shortcuts"]) == 15
+        assert body["theme"] == "dark" and body["md_vault"] == {"url": ""} and len(body["shortcuts"]) == 18
         assert body["index"]["known_exts"], "default known extensions are served"
 
 

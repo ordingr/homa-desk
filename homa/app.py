@@ -336,7 +336,8 @@ class App:
             from .overlay import hotkey as hotkey_mod, search_ui
             self.popup = search_ui.SearchPopup(self.root, self.icon, self.search_modes, self.settings,
                                                saved=self.saved, on_fullpage=self._on_fullpage,
-                                               on_action=self._on_action, fullpage_is_open=self._fullpage_open,
+                                               on_action=self._on_action, on_clipboard=self._on_clipboard,
+                                               fullpage_is_open=self._fullpage_open,
                                                fullpage_close=fullpage.close)
             self.hotkey = hotkey_mod.Hotkey(
                 str(self.settings.get("hotkey", "") or ""),
@@ -353,12 +354,15 @@ class App:
         else:
             log.info("hotkey %r registered", self.hotkey.combo)
 
-    def _on_fullpage(self, query: str) -> None:
-        threading.Thread(target=self._open_fullpage, args=(query,), name="fullpage-open", daemon=True).start()
+    def _on_fullpage(self, query: str, handoff: Optional[dict] = None) -> None:
+        threading.Thread(target=self._open_fullpage, args=(query, handoff), name="fullpage-open",
+                         daemon=True).start()
 
-    def _open_fullpage(self, query: str) -> bool:
+    def _open_fullpage(self, query: str, handoff: Optional[dict] = None) -> bool:
         try:
-            opened = fullpage.open(query, self.server.port, auth.mint_nonce)
+            if handoff is not None:
+                handoff = auth.check_handoff(handoff)
+            opened = fullpage.open(query, self.server.port, lambda: auth.mint_nonce(handoff))
         except Exception:
             log.exception("could not open the full page")
             return False
@@ -376,6 +380,9 @@ class App:
                    whole_file: bool = False) -> dict:
         return shell.dispatch(verb, row.path, new_name=new_name, confirm=confirm, index=self.index,
                               settings=self.settings, whole_file=whole_file)
+
+    def _on_clipboard(self, paths: list, op: str) -> dict:
+        return shell.clipboard_files(paths, op, index=self.index)
 
     def _fullpage_open(self) -> bool:
         return fullpage.is_open()

@@ -22,7 +22,8 @@ PAGES = ("General", "Cards", "Calendars", "Claude Code", "MCP", "About")
 RESTART_NOTE = "takes effect after restart"
 COVERAGE_SENTENCE = ("Homa sees permission prompts and task completion; it cannot yet see "
                      "AskUserQuestion or plan-approval waits (hook coverage probe pending).")
-SHORTCUT_LABELS = (("open", "Open"), ("reveal", "Reveal in Explorer"), ("copy_path", "Copy path"),
+SHORTCUT_LABELS = (("open", "Open"), ("reveal", "Reveal in Explorer"), ("copy_files", "Copy files"),
+                   ("cut_files", "Cut files"), ("copy_path", "Copy path"), ("select_all", "Select all"),
                    ("rename", "Rename"), ("properties", "Properties"), ("recycle", "Move to Recycle Bin"),
                    ("md_vault", "Open in MD Vault"), ("folder_listing", "List folder"),
                    ("cycle_sort", "Cycle sort"), ("save_search", "Save search"), ("cycle_date", "Cycle date filter"),
@@ -745,7 +746,8 @@ class SettingsWindow:
         chords = dict(DEFAULT_SHORTCUTS)
         chords.update(self.settings.get("shortcuts") or {})
         width = max(len(label) for _, label in SHORTCUT_LABELS)
-        return "\n".join(f"{label.ljust(width)}  {chords.get(action, '')}" for action, label in SHORTCUT_LABELS)
+        return "\n".join(f"{label.ljust(width)}  {chords.get(action) or '(none)'}"
+                         for action, label in SHORTCUT_LABELS)
 
     def _open(self, target: Path) -> None:
         if not target.exists():

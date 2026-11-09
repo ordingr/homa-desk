@@ -1,7 +1,10 @@
 export const DEFAULT_SHORTCUTS = {
   open: "Enter",
   reveal: "Ctrl+Enter",
-  copy_path: "Ctrl+C",
+  copy_files: "Ctrl+C",
+  cut_files: "Ctrl+X",
+  copy_path: "Ctrl+Shift+C",
+  select_all: "Ctrl+A",
   rename: "F2",
   properties: "Alt+Enter",
   recycle: "Delete",
@@ -15,6 +18,8 @@ export const DEFAULT_SHORTCUTS = {
   full_page: "F11",
   close: "Escape",
 };
+
+const UNBINDABLE = new Set(["copy_files", "cut_files", "copy_path", "select_all"]);
 
 const NAMED_KEYS = {
   enter: "Enter",
@@ -76,7 +81,8 @@ export function buildShortcuts(source) {
   const given = source && typeof source === "object" && !Array.isArray(source) ? source : {};
   const chords = {};
   for (const [action, fallback] of Object.entries(DEFAULT_SHORTCUTS)) {
-    chords[action] = parseChord(given[action]) || parseChord(fallback);
+    if (given[action] === "" && UNBINDABLE.has(action)) chords[action] = null;
+    else chords[action] = parseChord(given[action]) || parseChord(fallback);
   }
   return chords;
 }

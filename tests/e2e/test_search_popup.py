@@ -87,7 +87,7 @@ def popup(root, search_tree, tmp_path, monkeypatch):
     actions = []
     pop = search_ui.SearchPopup(root, IconStub(), registry, Settings(), saved=SavedSearches(tmp_path / "saved.json"),
                                 on_action=lambda verb, row: actions.append((verb, row.name)),
-                                on_fullpage=lambda q: actions.append(("fullpage", q)))
+                                on_fullpage=lambda q, h: actions.append(("fullpage", q)))
     pop.actions = actions
     yield pop
     pop.close()

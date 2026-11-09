@@ -24,7 +24,9 @@ async function readBody(response) {
 function errorFrom(response, body, path) {
   const err = body && typeof body === "object" ? body.error : null;
   if (err && typeof err === "object") {
-    return new ApiError(response.status, err.message || response.statusText, err.code, err.field);
+    const error = new ApiError(response.status, err.message || response.statusText, err.code, err.field);
+    if (Array.isArray(body.skipped)) error.skipped = body.skipped;
+    return error;
   }
   if (typeof err === "string") return new ApiError(response.status, err);
   if (response.status === 404) {
@@ -48,6 +50,8 @@ export async function exchangeNonce(nonce) {
     throw new ApiError(502, "The session exchange did not return a token.");
   }
   token = value;
+  const handoff = body.handoff;
+  return handoff && typeof handoff === "object" && !Array.isArray(handoff) ? handoff : null;
 }
 
 export async function request(method, path, { params, body, signal } = {}) {
@@ -98,6 +102,8 @@ export const get = (path, params, signal) => request("GET", path, { params, sign
 export const post = (path, body) => request("POST", path, { body: body ?? {} });
 export const del = (path) => request("DELETE", path);
 
+export const copyFiles = (paths, op) => post("/v1/files/clipboard", { paths, op });
+
 export function closeFullPage() {
   return request("POST", "/v1/fullpage/close", { body: {} }).catch(() => {});
 }
@@ -123,8 +129,8 @@ export function boot() {
     bootPromise = (async () => {
       if (!nonce) return { status: "no-token", q };
       try {
-        await exchangeNonce(nonce);
-        return { status: "ready", q };
+        const handoff = await exchangeNonce(nonce);
+        return { status: "ready", q, handoff };
       } catch (error) {
         return { status: "failed", q, message: error.message };
       }

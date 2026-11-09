@@ -34,6 +34,14 @@ STATE_FILE = Path(tempfile.gettempdir()) / "homa-driver" / "state.json"
 DEFAULT_PORT = 17171
 STARTUP_TIMEOUT = 30.0
 
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
 # ---- state and HTTP -------------------------------------------------------------------
 
 
@@ -68,7 +76,7 @@ def http(method: str, path: str, body=None, state: dict | None = None, timeout: 
         f"http://127.0.0.1:{state['port']}{path}", data=data, method=method,
         headers={"Authorization": f"Bearer {read_token(state['home'])}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             raw, status = response.read(), response.status
     except urllib.error.HTTPError as err:
         raw, status = err.read(), err.code
@@ -88,6 +96,18 @@ def health_ok(state: dict) -> bool:
 # ---- start / stop ---------------------------------------------------------------------
 
 
+def _real_home_overlap(home: Path) -> str:
+    """The real home folder (current or pre-rename) when `home` is one, is inside one, or contains one; else ""."""
+    def norm(p: Path) -> str:
+        return os.path.normcase(str(p.resolve())).rstrip("\\/")
+    target = norm(home)
+    for name in (".homa", ".assistant"):
+        real = norm(Path.home() / name)
+        if target == real or target.startswith(real + os.sep) or real.startswith(target + os.sep):
+            return str(Path.home() / name)
+    return ""
+
+
 def cmd_start(args) -> int:
     existing = load_state()
     if existing.get("pid") and health_ok(existing):
@@ -96,6 +116,9 @@ def cmd_start(args) -> int:
         sys.exit(f"driver: port {DEFAULT_PORT} is the live instance's port; pass a free --port, "
                  "or --allow-live-port if you really mean it")
     home = Path(args.home).resolve()
+    real = _real_home_overlap(home)
+    if real:
+        sys.exit(f"driver: --home {home} overlaps the real {real}; use a scratch folder")
     home.mkdir(parents=True, exist_ok=True)
     settings = home / "settings.json"
     try:
@@ -115,7 +138,8 @@ def cmd_start(args) -> int:
                LOCALAPPDATA=str(fake_local), APPDATA=str(fake_roaming))
     env.pop("HOMEDRIVE", None)
     env.pop("HOMEPATH", None)
-    env.pop("HOMA_TEST_MODE", None)
+    for name in [n for n in env if n.upper().startswith(("ASSISTANT_", "HOMA_")) and n.upper() != "HOMA_HOME"]:
+        del env[name]
     if args.test_mode:
         env["HOMA_TEST_MODE"] = "1"
     exe = Path(sys.executable)

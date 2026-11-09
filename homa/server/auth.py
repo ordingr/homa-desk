@@ -4,7 +4,7 @@ import logging
 import secrets
 import threading
 import time
-from typing import Callable
+from typing import Any, Callable, Optional
 from urllib.parse import urlsplit
 
 log = logging.getLogger("homa.server.auth")
@@ -48,33 +48,76 @@ _nonces: dict = {}
 _nonce_lock = threading.Lock()
 
 
-def mint_nonce() -> str:
-    """A one-shot launch nonce (SEC-2, A12): valid for NONCE_TTL_S seconds, redeemable once."""
+HANDOFF_QUERY_MAX = 1000
+HANDOFF_PATH_MAX = 32767
+_HANDOFF_KEYS = ("query", "chips", "modified", "sort", "select_path")
+
+
+def check_handoff(handoff: Any) -> dict:
+    """The popup's search state for the full page, normalised; raises ValueError on anything else."""
+    from ..search.modes import CHIPS, SORT_CHOICES, valid_modified
+    if not isinstance(handoff, dict):
+        raise ValueError("handoff must be an object")
+    unknown = set(handoff) - set(_HANDOFF_KEYS)
+    if unknown:
+        raise ValueError(f"handoff has unknown fields: {', '.join(sorted(map(str, unknown)))[:200]}")
+    query = handoff.get("query", "")
+    if not isinstance(query, str) or len(query) > HANDOFF_QUERY_MAX:
+        raise ValueError(f"handoff.query must be a string of at most {HANDOFF_QUERY_MAX} characters")
+    chips = handoff.get("chips") or []
+    if not isinstance(chips, (list, tuple)) or not all(isinstance(c, str) and c in CHIPS for c in chips):
+        raise ValueError("handoff.chips must be a list of " + ", ".join(CHIPS))
+    modified = handoff.get("modified", "")
+    if not valid_modified(modified):
+        raise ValueError("handoff.modified must be today, 7d, 30d, a YYYY-MM-DD..YYYY-MM-DD range or empty")
+    sort = handoff.get("sort", "")
+    if not isinstance(sort, str) or sort not in dict(SORT_CHOICES):
+        raise ValueError("handoff.sort must be empty, name, ext or date")
+    select_path = handoff.get("select_path")
+    if select_path == "":
+        select_path = None
+    if select_path is not None and (not isinstance(select_path, str) or len(select_path) > HANDOFF_PATH_MAX
+                                    or "\x00" in select_path):
+        raise ValueError(f"handoff.select_path must be a path of at most {HANDOFF_PATH_MAX} characters or null")
+    return {"query": query, "chips": list(dict.fromkeys(chips)), "modified": modified, "sort": sort,
+            "select_path": select_path}
+
+
+def mint_nonce(handoff: Optional[dict] = None) -> str:
+    """A one-shot launch nonce (SEC-2, A12): valid for NONCE_TTL_S seconds, redeemable once. A `handoff` (the
+    popup's query, filters and selected row) is validated here and travels with the nonce, never in the URL."""
+    checked = check_handoff(handoff) if handoff is not None else None
     nonce = secrets.token_urlsafe(32)
     now = _clock()
     with _nonce_lock:
-        for stale in [n for n, exp in _nonces.items() if exp <= now]:
+        for stale in [n for n, (exp, _) in _nonces.items() if exp <= now]:
             del _nonces[stale]
         while len(_nonces) >= NONCE_MAX_OUTSTANDING:
             del _nonces[next(iter(_nonces))]
-        _nonces[nonce] = now + NONCE_TTL_S
+        _nonces[nonce] = (now + NONCE_TTL_S, checked)
     return nonce
 
 
-def consume_nonce(candidate: object) -> bool:
+def take_nonce(candidate: object) -> tuple:
+    """(True, handoff or None) once for a live nonce, then (False, None); the nonce and its handoff go together."""
     if not isinstance(candidate, str) or not candidate or len(candidate) > 256:
-        return False
+        return False, None
     now = _clock()
     found = None
     with _nonce_lock:
-        for stale in [n for n, exp in _nonces.items() if exp <= now]:
+        for stale in [n for n, (exp, _) in _nonces.items() if exp <= now]:
             del _nonces[stale]
         for nonce in _nonces:
             if hmac.compare_digest(nonce.encode("utf-8"), candidate.encode("utf-8", "replace")):
                 found = nonce
-        if found is not None:
-            del _nonces[found]
-    return found is not None
+        if found is None:
+            return False, None
+        _, handoff = _nonces.pop(found)
+    return True, handoff
+
+
+def consume_nonce(candidate: object) -> bool:
+    return take_nonce(candidate)[0]
 
 
 def static_path_exempt(path: str, method: str) -> bool:
@@ -136,10 +179,14 @@ class AuthMiddleware:
             nonce = json.loads(body.decode("utf-8")).get("nonce")
         except (ValueError, AttributeError):
             nonce = None
-        if not consume_nonce(nonce):
+        ok, handoff = take_nonce(nonce)
+        if not ok:
             await self._reject(scope, send, 403, "invalid_nonce", "The launch code is missing, used or expired.")
             return
-        out = json.dumps({"token": self._token_provider()}).encode("utf-8")
+        answer = {"token": self._token_provider()}
+        if handoff is not None:
+            answer["handoff"] = handoff
+        out = json.dumps(answer).encode("utf-8")
         await send({"type": "http.response.start", "status": 200,
                     "headers": [(b"content-type", b"application/json"),
                                 (b"content-length", str(len(out)).encode("ascii")),

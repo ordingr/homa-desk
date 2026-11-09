@@ -35,6 +35,8 @@ ALLOW = {
     "homa/index/manager.py": [r"\*\*/\.assistant/"],
     # an update zip never overwrites a lingering pre-rename folder
     "homa/update.py": [r"\.assistant\b"],
+    # the driver refuses a --home that overlaps the real current or pre-rename data folder (R15-N1)
+    "tools/driver.py": [r"\.assistant\b"],
     # send/shutdown against an instance that still writes the old pid file
     "homa/send.py": [r'"assistant\.pid"'],
     # on-disk index format magic: changing it would invalidate every existing index file (deliberate)

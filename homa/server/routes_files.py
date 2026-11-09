@@ -35,7 +35,7 @@ from starlette.background import BackgroundTask
 from .. import paths
 from ..preview import extract
 from ..security import denylist, pathcheck
-from . import mcp
+from . import auth, mcp
 from .routes_cards import ApiError, read_json
 
 log = logging.getLogger("homa.server.routes_files")
@@ -47,6 +47,8 @@ HTTP_RANGE_TEXT_CAP = 4_194_304
 SVG_MAX_BYTES = 8_388_608
 SCAN_OVERLAP = 8192
 CHUNK = 262_144
+FULLPAGE_BODY_MAX = 262_144
+_HANDOFF_FIELDS = ("chips", "modified", "sort", "select_path")
 
 _PLACEHOLDER_ATTRS = 0x1000 | 0x40000 | 0x400000
 _DIR_ATTR = 0x10
@@ -378,17 +380,24 @@ async def fullpage_close(request: Request) -> JSONResponse:
 
 async def fullpage_open(request: Request) -> JSONResponse:
     opener = request.app.state.files_opener
-    body = await read_json(request, 4096)
+    body = await read_json(request, FULLPAGE_BODY_MAX)
     query = body.get("query", "") if isinstance(body, dict) else None
     if not isinstance(query, str) or len(query) > 1000:
         raise ApiError(422, "invalid_parameter", "query must be a string of at most 1000 characters.", "query")
-    opened = await run_in_threadpool(opener, query)
+    present = [name for name in _HANDOFF_FIELDS if name in body]
+    for name in present:
+        try:
+            auth.check_handoff({name: body[name]})
+        except ValueError as exc:
+            raise ApiError(422, "invalid_parameter", str(exc), name) from None
+    handoff = auth.check_handoff({"query": query, **{n: body[n] for n in present}}) if present else None
+    opened = await run_in_threadpool(opener, query, handoff)
     return JSONResponse({"ok": True, "opened": bool(opened)})
 
 
 def register_files_routes(app, index, settings=None, closer=None, opener=None) -> None:
     """Adds GET /v1/files/preview, POST /v1/fullpage/open and POST /v1/fullpage/close to `app` (behind the auth
-    middleware). `opener(query) -> bool` launches the full page (the open route exists only when it is given); `closer() -> bool` defaults to fullpage.close."""
+    middleware). `opener(query, handoff) -> bool` launches the full page (the open route exists only when it is given); `closer() -> bool` defaults to fullpage.close."""
     app.state.files_index = index
     app.state.files_settings = settings
     app.state.files_closer = closer

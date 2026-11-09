@@ -177,7 +177,7 @@ def _vet(index, path: Any) -> tuple:
     roots = [r["path"] for r in index.status().get("roots", [])]
     if not os.path.isabs(path):
         return None, "refused: give an absolute path"
-    if _is_unc(path) and not any(_is_unc(r) for r in roots):
+    if _is_unc(path.replace("/", "\\")) and not any(_is_unc(r) for r in roots):
         return None, "refused: the path is outside the indexed roots"
     resolved = pathcheck.resolve_in_roots(path, roots)
     if resolved is None:

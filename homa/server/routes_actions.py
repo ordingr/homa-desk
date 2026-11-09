@@ -7,9 +7,11 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from ..actions import VERBS, claude, dispatch
+from ..actions.shell import CLIPBOARD_OPS, MAX_CLIPBOARD_PATHS, clipboard_files
 from .routes_cards import ApiError, read_json
 
 ACTION_BODY_MAX = 4_096
+CLIPBOARD_BODY_MAX = 262_144
 _STATUS = {"refused": 403, "invalid": 422, "not_found": 404, "error": 500, "not_implemented": 501,
            "unavailable": 503}
 _FIELD = {"invalid": "new_name"}
@@ -75,6 +77,35 @@ async def action(request: Request) -> JSONResponse:
     return JSONResponse(envelope, status_code=status)
 
 
+async def files_clipboard(request: Request) -> JSONResponse:
+    """POST /v1/files/clipboard {"paths": [...], "op": "copy" | "cut"}: files on the clipboard for Explorer's Paste."""
+    raw = await read_json(request, CLIPBOARD_BODY_MAX)
+    if not isinstance(raw, dict):
+        raise ApiError(422, "invalid_body", "The request body must be a JSON object.")
+    op = raw.get("op")
+    if not isinstance(op, str) or op not in CLIPBOARD_OPS:
+        raise ApiError(422, "invalid_parameter", "op must be copy or cut.", "op")
+    paths = raw.get("paths")
+    if (not isinstance(paths, list) or not 0 < len(paths) <= MAX_CLIPBOARD_PATHS
+            or not all(isinstance(p, str) for p in paths)):
+        raise ApiError(422, "invalid_parameter", f"paths must be a list of 1 to {MAX_CLIPBOARD_PATHS} strings.",
+                       "paths")
+    index = getattr(request.app.state, "index", None)
+    if index is None:
+        raise ApiError(503, "index_unavailable", "The file index is not ready yet.")
+    result = await run_in_threadpool(clipboard_files, paths, op, index=index)
+    kind = result.get("kind")
+    if kind is None:
+        return JSONResponse(result)
+    status = _STATUS.get(kind, 500)
+    envelope = ApiError(status, "invalid_parameter" if kind == "invalid" else kind, result["message"],
+                        result.get("field")).to_dict()
+    if "skipped" in result:
+        envelope["skipped"] = result["skipped"]
+    return JSONResponse(envelope, status_code=status)
+
+
 routes = [Route("/v1/actions/ask_claude/status", ask_claude_status, methods=["GET"]),
           Route("/v1/actions/ask_claude/continue", ask_claude_continue, methods=["POST"]),
-          Route("/v1/actions/{verb}", action, methods=["POST"])]
+          Route("/v1/actions/{verb}", action, methods=["POST"]),
+          Route("/v1/files/clipboard", files_clipboard, methods=["POST"])]

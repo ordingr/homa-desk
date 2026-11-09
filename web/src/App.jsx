@@ -25,6 +25,8 @@ const DARK_QUERY = "(prefers-color-scheme: dark)";
 const CLAUDE_MISSING = "Claude Code not found on this machine";
 const MODIFIED_CYCLE = ["", "today", "7d", "30d"];
 const EXPAND_CHORD = parseChord(EXPAND_HINT);
+const HANDOFF_ROW_LIMIT = 300;
+const MAX_CLIPBOARD_FILES = 1000;
 
 function storedTheme() {
   try {
@@ -97,7 +99,29 @@ export default function App({ session }) {
       </Notice>
     );
   }
-  return <Workspace initialQuery={session.q} onExpired={() => setExpired(true)} />;
+  return (
+    <Workspace initialQuery={session.q} initialHandoff={session.handoff} onExpired={() => setExpired(true)} />
+  );
+}
+
+const pathKey = (path) => String(path).replace(/\//g, "\\").toLowerCase();
+
+function skippedNote(skipped) {
+  if (!Array.isArray(skipped) || skipped.length === 0) return "";
+  const reasons = [...new Set(skipped.map((item) => item.reason).filter(Boolean))];
+  return reasons.length ? ` (${reasons.slice(0, 2).join("; ")}${reasons.length > 2 ? "; …" : ""})` : "";
+}
+
+function clipboardProblem(error, op) {
+  const what = op === "cut" ? "cut" : "copied";
+  if (error.status === 403 && Array.isArray(error.skipped)) {
+    return `Nothing was ${what}${skippedNote(error.skipped)}.`;
+  }
+  if (error.status === 403) return `Nothing was ${what}: ${error.message}`;
+  if (error.status === 413) return `Too many files to put on the clipboard at once (at most ${MAX_CLIPBOARD_FILES}).`;
+  if (error.status === 422) return `The files could not be ${what}: ${error.message}`;
+  if (error.status === 503) return "The index is not ready yet. Try again in a moment.";
+  return error.message || `The files could not be ${what}.`;
 }
 
 function completion(word, name) {
@@ -114,16 +138,28 @@ function completion(word, name) {
   return "";
 }
 
-function Workspace({ initialQuery, onExpired }) {
+function Workspace({ initialQuery: launchQuery, initialHandoff, onExpired }) {
+  const [start] = useState(() => {
+    const handoff = initialHandoff || {};
+    const mod = normaliseModified(typeof handoff.modified === "string" ? handoff.modified : "");
+    return {
+      query: typeof handoff.query === "string" ? handoff.query : launchQuery,
+      chips: Array.isArray(handoff.chips) ? handoff.chips : [],
+      mod,
+      sort: typeof handoff.sort === "string" && handoff.sort ? handoff.sort : "best",
+      selectPath: typeof handoff.select_path === "string" && handoff.select_path ? handoff.select_path : null,
+    };
+  });
+  const initialQuery = start.query;
   const [themePref, setThemePref] = useState(storedTheme);
   const [appTheme, setAppTheme] = useState(null);
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
   const [text, setText] = useState(initialQuery);
-  const [chips, setChips] = useState([]);
-  const [modifiedKind, setModifiedKind] = useState("");
-  const [rangeFrom, setRangeFrom] = useState("");
-  const [rangeTo, setRangeTo] = useState("");
-  const [sort, setSort] = useState("best");
+  const [chips, setChips] = useState(start.chips);
+  const [modifiedKind, setModifiedKind] = useState(start.mod.kind);
+  const [rangeFrom, setRangeFrom] = useState(start.mod.from);
+  const [rangeTo, setRangeTo] = useState(start.mod.to);
+  const [sort, setSort] = useState(start.sort);
 
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -160,6 +196,7 @@ function Workspace({ initialQuery, onExpired }) {
   const toastTimer = useRef(0);
   const askSeq = useRef(0);
   const latest = useRef({});
+  const pendingSelect = useRef(start.selectPath && initialQuery.trim() ? pathKey(start.selectPath) : null);
 
   const [ghostOff, setGhostOff] = useState(null);
   const rows = result ? result.rows : [];
@@ -361,6 +398,29 @@ function Workspace({ initialQuery, onExpired }) {
   }, []);
 
   useEffect(() => {
+    const want = pendingSelect.current;
+    if (!want || loading) return;
+    if (problem || (result && searchedText !== initialQuery)) {
+      pendingSelect.current = null;
+      return;
+    }
+    if (!result) return;
+    const index = result.rows.findIndex((row) => pathKey(row.path) === want);
+    if (index !== -1) {
+      pendingSelect.current = null;
+      selectOnly(result.rows[index], index);
+      return;
+    }
+    if (result.rows.length < result.total && result.rows.length < HANDOFF_ROW_LIMIT) {
+      search({}, true);
+      return;
+    }
+    pendingSelect.current = null;
+    showToast("The file you picked is not in these results.", "error");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, loading, problem]);
+
+  useEffect(() => {
     const trimmed = text.trim();
     if (trimmed === lastRun.current) return undefined;
     if (trimmed === "") {
@@ -423,6 +483,24 @@ function Workspace({ initialQuery, onExpired }) {
       );
     },
     [showToast],
+  );
+
+  const clipboardFiles = useCallback(
+    async (targets, op) => {
+      if (targets.length > MAX_CLIPBOARD_FILES) {
+        showToast(`Select at most ${MAX_CLIPBOARD_FILES} files to ${op === "cut" ? "cut" : "copy"}.`, "error");
+        return;
+      }
+      try {
+        const body = await api.copyFiles(targets.map((row) => row.path), op);
+        const done = op === "cut" ? "Cut" : "Copied";
+        showToast(`${(body && body.message) || `${done} ${targets.length} files`}${skippedNote(body && body.skipped)}`);
+      } catch (error) {
+        if (error.status === 401) fail(error);
+        showToast(clipboardProblem(error, op), "error");
+      }
+    },
+    [fail, showToast],
   );
 
   const callAction = useCallback(
@@ -576,6 +654,8 @@ function Workspace({ initialQuery, onExpired }) {
       if (!row) return;
       if (verb === "copy_path") return copyPaths(targets || [row]);
       if (verb === "copy_path_quoted") return copyPaths(targets || [row], true);
+      if (verb === "copy_files") return clipboardFiles(targets || [row], "copy");
+      if (verb === "cut_files") return clipboardFiles(targets || [row], "cut");
       if (verb === "rename") {
         setModal({
           title: "Rename",
@@ -614,7 +694,7 @@ function Workspace({ initialQuery, onExpired }) {
       if (verb === "folder_listing") return loadListing(row.path, []);
       return runVerb(verb, row);
     },
-    [afterChange, askClaude, callAction, copyPaths, loadListing, runVerb, showToast],
+    [afterChange, askClaude, callAction, clipboardFiles, copyPaths, loadListing, runVerb, showToast],
   );
 
   const targetsFor = (row) => {
@@ -735,9 +815,30 @@ function Workspace({ initialQuery, onExpired }) {
       }
       const inQuery = event.target === inputRef.current;
       const otherField = tag === "SELECT" || (typing && !inQuery);
-      const hasSelection = window.getSelection().toString() !== "";
+      const picked = window.getSelection();
+      const inQueryBox = picked.anchorNode === picked.focusNode && Boolean(picked.anchorNode?.contains(inputRef.current));
+      const queryPicked = inQuery && event.target.selectionStart !== event.target.selectionEnd;
+      const hasSelection = (picked.toString() !== "" && !inQueryBox) || queryPicked;
       const rowLive =
         now.activeRow && !otherField && !hasSelection && (!inQuery || now.text === now.searchedText);
+      if (
+        now.rows.length > 0 && !otherField && !hasSelection &&
+        (!inQuery || now.text === now.searchedText) && chord("select_all") &&
+        now.rows.some((r) => !now.selected.has(r.id))
+      ) {
+        event.preventDefault();
+        setSelected(new Set(now.rows.map((r) => r.id)));
+        if (!now.activeRow) {
+          setActiveId(now.rows[0].id);
+          setAnchor(0);
+        }
+        return;
+      }
+      if (rowLive && (chord("copy_files") || chord("cut_files"))) {
+        event.preventDefault();
+        clipboardFiles(targetsFor(now.activeRow), chord("cut_files") ? "cut" : "copy");
+        return;
+      }
       if (rowLive && chord("copy_path")) {
         event.preventDefault();
         copyPaths(targetsFor(now.activeRow));
@@ -1035,6 +1136,7 @@ function Workspace({ initialQuery, onExpired }) {
           y={menu.y}
           claude={claude}
           shortcuts={shortcuts}
+          count={targetsFor(menu.row).length}
           onClose={() => setMenu(null)}
           onPick={(verb) => {
             const row = menu.row;
