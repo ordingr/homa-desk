@@ -228,3 +228,54 @@
   - Found while reading the code, not changed here: the Claude Code hook entries on the personal laptop point at port 62480,
     while the app listens on 17171 (plan section 2, F5). The migration reports this with a card and a `--doctor` suffix; it does
     not rewrite the entries.
+
+## 2026-11-09
+- Commit 2eca46b on `main` (subject: `feat: popup double-click opens full page with preview; multi-select copy/cut of files`),
+  fast-forwarded from b320269 (`.git/logs/refs/heads/main`: "merge popup-clipboard: Fast-forward"). PR: none (the repo has no
+  remote). Branch `popup-clipboard`, built in the worktree `C:\AI Projects\Assistant-clip`. Why: the user asked on 2026-11-09
+  that a double-click in the popup open the full page with the preview, and for multi-select Copy and Cut so files can be
+  copied or moved to another File Explorer folder (plan section 1, request quoted verbatim there).
+  - What changed: the popup marks several rows (Ctrl+click, Shift+click, Shift+Up/Down, Ctrl+A); Ctrl+C and Ctrl+X, and
+    **Copy** and **Cut** in the right-click menu, put the marked files on the Windows clipboard as `CF_HDROP` with
+    `Preferred DropEffect` 1 or 2, in the popup and in the full page, so Paste in File Explorer copies or moves them (Explorer
+    does the move; Homa never moves or deletes). Copy path moved from Ctrl+C to Ctrl+Shift+C in both UIs, with a load-time
+    migration of a saved `copy_path` of `Ctrl+C`; `copy_files`, `cut_files`, `copy_path` and `select_all` can be rebound or set
+    to `""`. A double-click on a Files-search row in the popup (and F11 or **Full page**) opens the full page with the same
+    query, chips, date filter and sort, that row selected and its preview open; the state travels with the launch nonce as a
+    one-shot `handoff`, never in the URL. New route `POST /v1/files/clipboard` (256 KiB body, 1 to 1,000 paths); new fields on
+    `POST /v1/session/exchange` (`handoff`) and `POST /v1/fullpage/open` (`chips`, `modified`, `sort`, `select_path`, `422` on bad
+    types). Copy and Cut refuse protected (deny-listed) files, paths outside the roots or not indexed, Homa's own folder and
+    device or long-path prefixes, and report each skip with its reason; Cut also refuses root folders and folders that contain
+    Homa's own folder.
+  - Plan: `docs/plans/2026-11-09-popup-to-fullpage-and-file-clipboard.md` (dispatches P0, D1 to D7). Roles per the plan's
+    section 5: git-keeper (P0 branch and worktree), dev (D1 backend, D2 popup), ui (D3 full page and bundle rebuild), qa (D4),
+    security (D5), git-keeper (D6 merge), doc-keeper (D7, this entry). The agent that did each step is taken from the plan, not
+    confirmed from a record in the repo. The security review states that qa passed D4 before Review 15 ran.
+  - Security: `docs/security/2026-11-09-clipboard-handoff-review.md`. Review 15 verdict: "PASS. No BLOCK. Six NOTEs (R15C-N1 to
+    R15C-N6)". The re-verification section of the same file (after dev's fixes) reads: "PASS. All six NOTEs RESOLVED. No new
+    BLOCK." Fixed before merge:
+    - R15C-N1: an unhashable `op` (a list or object) on `/v1/files/clipboard` was a `500`; now `422 invalid_parameter`,
+      `field: "op"`, in the route and in `shell._clipboard_files`.
+    - R15C-N2: a path with a lone UTF-16 surrogate was a `500` after the clipboard had already been written; now refused as
+      `refused: not a usable path` before `_vet`, and skipped paths are echoed with `backslashreplace`.
+    - R15C-N3: mixed-separator UNC spellings (`\/host/share`, `/\host\share`) reached `os.path.realpath` (an SMB attempt) before
+      the refusal; now caught by the UNC check in both `shell._vet` and `mcp._vet`.
+    - R15C-N4: a link with a protected name could be cut by adding a trailing dot or space; `_win_trim` now drops trailing dots
+      and spaces per component before the deny-list check.
+    - R15C-N5: Cut could name a folder that contains Homa's home; now refused (`refused: that folder holds Homa's own data`).
+    - R15C-N6: `tools/driver.py` followed redirects with the bearer; it now uses a `_NoRedirect` handler.
+    Informational, left open by the review: Copy (not Cut) of a folder containing Homa's home or protected files is allowed, as
+    in Explorer; `recycle` does not refuse a folder that contains Homa's home (pre-existing, out of scope).
+  - Test evidence in the repo: the review's re-verification run, `pytest` over `tests/test_clipboard_route.py`,
+    `tests/test_clipboard_files.py`, `tests/test_launch_handoff.py`, `tests/test_shortcuts_migration.py`,
+    `tests/test_driver_guard.py`, `tests/test_actions_shell.py`, `tests/test_denylist.py`, `tests/test_mcp_files.py`,
+    `tests/test_preview_routes.py` and `tests/test_rename_hardening.py`: `416 passed, 1 skipped in 104.01s`. qa's full-suite and
+    e2e results for D4, run on 2eca46b with the Explorer- and Edge-window tests excluded:
+    `2 failed, 1887 passed, 5 skipped, 3 deselected in 1396.14s`; both failures (overlay remind-me, the two-million-name
+    perf threshold) also fail on b320269 and predate this change. doc-keeper ran no tests.
+  - Not yet observed: Paste in File Explorer copying and moving real files (plan AC-C4, user-run on the personal laptop with
+    throw-away files); the live instance runs the new code only after a restart, which agents do not do.
+  - Docs: `README.md` (a top correction note; notes in Search files, Full page and previews, Actions on a file and Settings; the
+    new section "Copy, cut and the full-page handoff (2026-11-09)"; "What 2eca46b adds" in Features; "2eca46b additions
+    (2026-11-09)" in Security & privacy; a Status bullet; a Documentation link). `docs/api.md` section 15. The README's older
+    sentence "The page has no Ctrl+C" is corrected by a dated note and kept as written.

@@ -1401,3 +1401,167 @@ module, the home folder and the pid file) are replaced as described below. Those
   keys when the new ones are missing (`web/src/App.jsx`, `SplitHandle.jsx`, `preview/zoom.js`).
 - Migration: `homa/migrate.py`, described in `README.md` under "Upgrading (2026-11-08)". It is not part of the HTTP
   contract, and the card it shows ("Assistant is now Homa") is a normal sticky `custom` card.
+
+## 15. Popup handoff and file clipboard, 2026-11-09
+
+Supersedes: section 12.5, the exchange answer `200 {"token": "<the bearer token>"}` (it can now also carry `handoff`, 15.1);
+section 12.3, the `fullpage.open(query, port, mint_nonce)` call with the query as the only input (15.2); section 12.6, the
+copy-path clipboard paragraph only in that `Copy path` is no longer on Ctrl+C in either UI (15.4); section 12.9, item 7,
+"The page has no Ctrl+C" (the page binds Ctrl+C, now to Copy files, 15.4). The earlier text is kept as written.
+
+- Date: 2026-11-09. Commit 2eca46b on `main`, subject `feat: popup double-click opens full page with preview; multi-select
+  copy/cut of files`, fast-forwarded from b320269 (`.git/logs/refs/heads/main`, "merge popup-clipboard: Fast-forward"). No
+  pull request (the repo has no remote).
+- Plan: `docs/plans/2026-11-09-popup-to-fullpage-and-file-clipboard.md` (sections 4.2 and 4.3 are the contract). Security
+  review: `docs/security/2026-11-09-clipboard-handoff-review.md` (Review 15 PASS with six NOTEs, R15C-N1 to R15C-N6; the
+  re-verification section in the same file reports all six RESOLVED).
+- Written by doc-keeper from the code at 2eca46b, read on 2026-11-09: `homa/server/auth.py` (`check_handoff`, `mint_nonce`,
+  `take_nonce`, `AuthMiddleware._exchange`), `homa/server/routes_files.py` (`fullpage_open`), `homa/server/routes_actions.py`
+  (`files_clipboard`), `homa/actions/shell.py` (`dropfiles_bytes`, `_set_clipboard_files`, `_raw_prefix`, `_win_trim`,
+  `_clipboard_path`, `clipboard_files`, `_vet`), `homa/settings.py` (`DEFAULT_SHORTCUTS`, `UNBINDABLE_SHORTCUTS`,
+  `_migrate_shortcuts`), `web/src/api.js`, `web/src/App.jsx`. Verification by doc-keeper: code read only; nothing in this
+  section was run. Observed status codes are the ones quoted from the security review.
+
+### 15.1 `POST /v1/session/exchange`: the `handoff` field
+
+- Mint: `auth.mint_nonce(handoff=None)`. When the app passes a handoff (the popup's search state), `check_handoff` validates
+  and normalises it at mint time, and it is stored beside the nonce with the same 30-second TTL and the same 16-nonce cap.
+  An invalid handoff raises `ValueError` in the app and never reaches a page.
+- Exchange: unchanged request (`{"nonce": "..."}`, at most 1,024 bytes; Host and Origin checked; no bearer). On a valid
+  nonce the answer is `200 {"token": "<the bearer token>"}`, plus `"handoff": {...}` when the nonce was minted with one.
+  `Cache-Control: no-store` as before. `take_nonce` removes the nonce and its handoff together, so the handoff is readable
+  once; a replay is `403 invalid_nonce`. The security review observed that a foreign or `null` Origin is `403
+  forbidden_origin` and does not burn the nonce.
+- Handoff shape (`check_handoff` output):
+
+```json
+{"query": "<at most 1000 characters>", "chips": ["docs"], "modified": "7d", "sort": "", "select_path": "C:\\...\\file.txt"}
+```
+
+| Field | Allowed | Notes |
+|---|---|---|
+| `query` | string, at most 1,000 characters | Default `""`. |
+| `chips` | list of `docs`, `sheets`, `pdf`, `images`, `code`, `folders` | Duplicates dropped, order kept. `null` or missing is `[]`. |
+| `modified` | `""`, `today`, `7d`, `30d`, or `YYYY-MM-DD..YYYY-MM-DD` (`search.modes.valid_modified`) | Default `""`. |
+| `sort` | `""`, `name`, `ext`, `date` (`search.modes.SORT_CHOICES`) | The popup's values: `""` is Best. The page maps `""` to `best`. `"best"` itself is refused. |
+| `select_path` | string of at most 32,767 characters with no NUL, or `null` | `""` is stored as `null`. Only type and length are checked here; the page uses it to pick a row, not to read a file. |
+
+  Any other key is refused (`handoff has unknown fields: ...`).
+- The launch URL is unchanged: `http://127.0.0.1:<port>/app/?launch=<nonce>&q=<query>`. No chip, date, sort or path is in it
+  (security review, "url: http://127.0.0.1:1234/app/?launch=NONCE&q=q").
+- Page side (`web/src/api.js`): `exchangeNonce` keeps `handoff` only when it is a non-array object; `boot()` returns
+  `{status, q, handoff}`. `App.jsx` seeds the query, chips, date filter and sort from it, runs the search, and selects the
+  row whose path matches `select_path` (case-insensitive, `\`-normalised, `pathKey`). If the row is not loaded, the page
+  asks for more pages while fewer than 300 rows are loaded (`HANDOFF_ROW_LIMIT`) and the result has more; if it is still
+  not found, the page shows the toast `The file you picked is not in these results.` and selects nothing.
+
+### 15.2 `POST /v1/fullpage/open`: handoff fields
+
+Body (object, at most 262,144 bytes, `FULLPAGE_BODY_MAX`):
+
+- `query`: string, at most 1,000 characters (default `""`). Otherwise, or when the body is not an object, `422
+  invalid_parameter`, `field: "query"`.
+- Optional `chips`, `modified`, `sort`, `select_path`, with the rules of the 15.1 table. Each field present is checked
+  alone; a bad type or value is `422 invalid_parameter` with `field` set to that field's name and the `check_handoff`
+  message (for example `handoff.sort must be empty, name, ext or date`). The security review observed 422 with the right
+  `field` for list-of-lists `chips`, dict `chips`, list `modified` and dict `select_path`, and for an unhashable `sort`.
+- When at least one of the four is present, the route builds a handoff from them plus `query` and calls
+  `opener(query, handoff)`, which mints the nonce with that handoff. With none present, no handoff is minted (the M3b
+  behaviour).
+- Answer: `200 {"ok": true, "opened": true|false}`, as in 12.3. Bearer, Host and Origin as for every `/v1` route.
+- The route is what qa uses to drive the real nonce-plus-handoff path through Edge app mode (plan 4.2).
+
+### 15.3 `POST /v1/files/clipboard`
+
+Puts files on the Windows clipboard the way File Explorer's own Copy or Cut does, so that Paste in Explorer copies or
+moves them. Homa itself never moves, deletes or opens a file on this route; the only side effects are the `_vet` stat calls
+and the clipboard write.
+
+- Auth: bearer required (`401 unauthorized` without it). Host must be `127.0.0.1` or `localhost` and a present Origin must be
+  too (`403 forbidden_host`, `403 forbidden_origin`), checked by the middleware before routing; no CORS headers are sent.
+  `GET` is `405`.
+- Body: `{"op": "copy" | "cut", "paths": ["<absolute path>", ...]}`, at most 262,144 bytes (`CLIPBOARD_BODY_MAX`, 256 KiB).
+- Writes, in one Open/Empty/Close of the clipboard (`_set_clipboard_files`, 5 tries to open, 50 ms apart): `CF_HDROP` with a
+  `DROPFILES` header (`pFiles=20`, `pt=(0,0)`, `fNC=0`, `fWide=1`) followed by each path in UTF-16LE with a NUL and a final
+  NUL (`dropfiles_bytes`), and the registered format `Preferred DropEffect` as a DWORD: 1 for `copy`, 2 for `cut`.
+
+**Shape checks (route, `422`):**
+
+| Case | Status | `error.code` | `field` | Message |
+|---|---|---|---|---|
+| Body over 256 KiB | `413` | `payload_too_large` | null | from `read_json` |
+| Malformed JSON | `400` | `invalid_json` | null | from `read_json` (as in 13.2) |
+| Body not an object | `422` | `invalid_body` | null | `The request body must be a JSON object.` |
+| `op` missing, not a string, or not `copy` / `cut` (a list or object `op` included, R15C-N1) | `422` | `invalid_parameter` | `op` | `op must be copy or cut.` |
+| `paths` not a list, empty, more than 1,000 entries, or any entry not a string | `422` | `invalid_parameter` | `paths` | `paths must be a list of 1 to 1000 strings.` |
+| Index not attached | `503` | `index_unavailable` | null | `The file index is not ready yet.` |
+
+**Per-path rules** (`_clipboard_path`, then `_vet(protected_ok=False, not_root=(op == "cut"))`), in this order. A path that
+fails is skipped and reported in `skipped[]` with the reason text below; the other paths still go on the clipboard.
+
+1. Must be a non-empty string with no NUL, at most 32,767 characters, and encodable as UTF-16 (a lone surrogate fails,
+   R15C-N2): `refused: not a usable path`.
+2. Raw prefixes are refused **before** any normalising, in either slash style: `\\?\`, `\\.\`, `\??\` (so `//?/`, `//./`,
+   `\/?/` and mixed spellings too): `refused: device and long-path prefixes are not accepted`.
+3. Absolute: `refused: give an absolute path`.
+4. A UNC path, in any mix of `\` and `/` (R15C-N3), is accepted only when an indexed root is UNC; otherwise, and for any path
+   that does not resolve inside an indexed root (ADS names included): `refused: the path is outside the indexed roots`.
+5. Not inside Homa's home folder: `refused: Homa's own data`.
+6. Not on the secrets deny-list, checked on the given path, on the given path with trailing dots and spaces dropped from each
+   component (`_win_trim`, R15C-N4), and on the resolved path (so 8.3 short names and links are caught):
+   `refused: protected file (secrets deny-list)`. Copy path (12.6) still works on protected files; Copy and Cut do not
+   (plan assumption A5: a file on the clipboard can be pasted into a mail or chat, a path cannot).
+7. Exists: `That file or folder no longer exists.`
+8. In the index: `refused: the path is not in the index (excluded or not indexed yet)`.
+9. `cut` only: not an indexed root folder (any spelling, or a link to it): `refused: that is an indexed root folder, not a
+   file inside one`.
+10. `cut` only: not a folder that contains Homa's home folder (R15C-N5): `refused: that folder holds Homa's own data`.
+    `copy` of such a folder is allowed, as Explorer's own Copy is (security review, informational).
+
+What is placed: for `copy`, the resolved path; for `cut`, the link itself when the given path is a symbolic link or
+junction that sits inside an indexed root (`_link_or_target`, the rule rename and recycle use), otherwise the resolved path.
+Duplicates (compared with `os.path.normcase`) are placed once. If `_vet` reports that the index is not ready, the whole
+call stops with `unavailable` (below).
+
+**Answers:**
+
+| Case | Status | Body |
+|---|---|---|
+| At least one path placed | `200` | `{"ok": true, "message": "...", "op": "copy" \| "cut", "count": <placed>, "skipped": [{"path": "...", "reason": "..."}]}` |
+| Every path refused | `403` | `{"error": {"code": "refused", "message": "refused: none of the paths can go on the clipboard", "field": null}, "skipped": [...]}` |
+| Windows would not open the clipboard | `500` | `{"error": {"code": "error", "message": "Windows would not let Homa use the clipboard.", "field": null}, "skipped": [...]}` |
+| Any other exception in the call | `500` | `error`, message `The action failed: <exception type name>` (no `skipped`) |
+| The index reports not ready during the checks | `503` | `error.code` `unavailable`, message `unavailable: the file index is not ready yet` |
+
+- `200` messages: `Copied <n> file(s) — paste in File Explorer` or `Cut <n> file(s) — paste in File Explorer to move them`
+  (`1 file`, otherwise `<n> files`), with `; <k> skipped` added when `skipped` is not empty. `skipped` is always present on
+  `200` (possibly empty).
+- `skipped[].path` echoes the caller's text, cut to 32,767 characters, with unencodable characters written as backslash
+  escapes (R15C-N2); `skipped[].reason` is one of the fixed texts above, never a path.
+- Log: one action-log line per call (`shell.action_log()`), verb `copy_files` or `cut_files`, path field `"<n> paths"`; no
+  path list is logged. `app.log` warnings carry exception type names only.
+- In-process: the popup calls the same `shell.clipboard_files(paths, op, index=...)` through `app._on_clipboard`, so it gets
+  the same result dict (with `kind` on failures instead of an HTTP status).
+- Page side (`web/src/api.js`, `copyFiles(paths, op)`): the page refuses to send more than 1,000 rows itself, and shows the
+  `message` plus up to two distinct `skipped` reasons as a toast. On `403` with `skipped` the toast reads `Nothing was copied
+  (<reasons>).` (or `cut`).
+
+### 15.4 Shortcuts (`settings.json`, `shortcuts`)
+
+Not an HTTP route, but `GET /v1/settings` (13.1) returns the merged map, so the page and the popup use the same chords.
+
+| Action | Default from 2eca46b | Before |
+|---|---|---|
+| `copy_files` | `Ctrl+C` | (new) |
+| `cut_files` | `Ctrl+X` | (new) |
+| `copy_path` | `Ctrl+Shift+C` | `Ctrl+C` |
+| `select_all` | `Ctrl+A` | (new) |
+
+- These four, and only these four (`UNBINDABLE_SHORTCUTS`), accept `""`, which means no chord. Any other value must be a key
+  such as `F2` or `Ctrl+Shift+S`, or the key falls back to its default.
+- Migration (`_migrate_shortcuts`, run on every load): when the saved `shortcuts` has no `copy_files` key and its
+  `copy_path` is `Ctrl+C` (any case), `copy_path` becomes `Ctrl+Shift+C`. A `copy_path` chord the user chose is kept. A new
+  default that collides with a chord the user saved for another action gets `""` instead, and one warning line names both.
+- Gates: in the popup the four keys act only when results are showing, the box text equals the searched text and no text is
+  selected in the box (`_row_keys_live`); otherwise the keystroke goes to the text box. A second Ctrl+A when every row is
+  already marked also goes to the box. The page uses the same rule (`rowLive`), and its Ctrl+A selects the loaded rows only.

@@ -22,6 +22,8 @@ executables. Nothing leaves your PC.
 
 > **Correction, 2026-11-08 (rename):** the app is now called Homa. It runs as `python -m homa`, keeps its data in `%USERPROFILE%\.homa`, and the first start moves the older data folder there. Text below is current usage unless it sits under a dated heading or a dated correction note. See [Upgrading (2026-11-08)](#upgrading-from-assistant-2026-11-08).
 
+> **Correction, 2026-11-09 (commit 2eca46b):** you can mark several results in the popup or the full page and put them on the Windows clipboard as files: **Ctrl+C** copies them and **Ctrl+X** cuts them, and Paste in File Explorer does the copy or the move. **Copy path** moved to **Ctrl+Shift+C**. Double-clicking a file row in the popup opens the full page with that file selected and previewed. See [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
+
 ## Contents
 
 - [What it is](#what-it-is)
@@ -38,6 +40,7 @@ executables. Nothing leaves your PC.
 - [Ask notes](#ask-notes)
 - [Full page and previews](#full-page-and-previews)
 - [Actions on a file](#actions-on-a-file)
+- [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09)
 - [Roots, excludes and protected files](#roots-excludes-and-protected-files)
 - [Claude and your files](#claude-and-your-files)
 - [Settings](#settings)
@@ -423,6 +426,8 @@ arrives in M3b.
 
 > **Correction, 2026-11-07 (M3b):** the full-page step is in the Edge window, not in the popup. In the page, Esc clears the selection, then the query and results, and closes the window when the page is empty. The popup's Esc goes from the action menu or folder listing, to results, to the box, to closed. Saved searches apply their stored sort when recalled. The text above is kept as written.
 
+> **Correction, 2026-11-09 (commit 2eca46b):** the popup can now mark several rows (Ctrl+click, Shift+click, Shift+Up and Shift+Down, Ctrl+A) and copy or cut them as files (Ctrl+C, Ctrl+X). Ctrl+C no longer copies the path; that is Ctrl+Shift+C. Double-clicking a file row opens the full page on that file, and F11 or **Full page** now also carries the chips, the date filter, the sort and the selected row. Any new search, entering or leaving a folder listing, or Esc out of the results clears the marks. See [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
+
 **Where the box appears.** Settings, Search, "Where the search box appears": beside the icon (the default), on the monitor
 with the mouse, on the monitor with the focused window, on the primary monitor, or where it was last. Drag the box to
 move it; "where it was last" remembers the place you dropped it.
@@ -500,6 +505,8 @@ Recycle Bin, Rename and Properties. The folder listing is in the popup only.
 
 > **Correction, 2026-11-07 (commit 3d7bc25):** the page's query bar also does the following, from `web/src/App.jsx` at 3d7bc25. A query runs 150 ms after your last change, so no Enter is needed. Tab accepts the grey completion when one is shown: it completes the last word you typed from the first result's name or from a saved search's name. The address bar keeps the query as `q=`, and the popup opens the page with its query. The full page hides the search popup when it opens (`assistant/app.py`, `_open_fullpage`). The header's theme button cycles through Dark, Light and System and saves the choice to Assistant's settings (`theme` in `settings.json`, through `POST /v1/settings/theme`), so the popup follows it; the page reads the saved theme when it loads. Previews, Markdown included, zoom from 80 to 200 percent (default 100): use the buttons in the pane, or Ctrl+=, Ctrl+- and Ctrl+0 while the pane has focus. The zoom is remembered in the page's browser profile.
 
+> **Correction, 2026-11-09 (commit 2eca46b), keys in the page:** the sentence "The page has no Ctrl+C …" in **Keys** above was already out of date before this commit (the page bound Ctrl+C to copy the selected rows' paths as text; plan `docs/plans/2026-11-09-popup-to-fullpage-and-file-clipboard.md`, section 2). From 2eca46b, in the page: **Ctrl+C** copies the selected rows as files and **Ctrl+X** cuts them (paste in File Explorer); **Ctrl+Shift+C** copies their paths as text, one per line; **Ctrl+A** selects every loaded row. The right-click menu has **Copy** and **Cut** between **Reveal in Explorer** and **Copy path**; with several rows selected they read "Copy 3 files" and "Cut 3 files". Ctrl+right-click still copies the paths, and double-click still opens the file. When the page is opened from the popup by a double-click (or F11 with a row selected), it starts with the popup's query, chips, date filter and sort, selects that file and shows its preview. See [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09). The text above is kept as written.
+
 **What each file type shows.**
 
 | File | What the pane shows |
@@ -561,6 +568,17 @@ a file for good (see **Recycle Bin only** below).
 | Folder listing | Ctrl+F (button labelled "Fastsearch folder") | not in the page | Popup only. Lists the items in the selected file's folder, with protected names left out. See the note below. |
 | Ask Claude about this file | menu | menu | Marked "sends to Claude". A stub in this build: nothing is sent. |
 
+> **Correction, 2026-11-09 (commit 2eca46b):** the **Copy path** row above now reads Ctrl+Shift+C in the popup and in the page (the page also keeps Ctrl+right-click). Four rows are added. The table above is kept as written.
+>
+> | Action | Popup | Full page | Notes |
+> |---|---|---|---|
+> | Copy (files) | Ctrl+C, menu **Copy** | Ctrl+C, menu **Copy** | Puts the marked files on the clipboard; Paste in File Explorer copies them. |
+> | Cut (files) | Ctrl+X, menu **Cut** | Ctrl+X, menu **Cut** | Paste in File Explorer moves them. Explorer does the move; Homa never deletes. |
+> | Copy path | Ctrl+Shift+C | Ctrl+Shift+C, Ctrl+right-click | Several marked rows give one path per line. |
+> | Select all | Ctrl+A | Ctrl+A | Marks every row shown (the page: every loaded row). |
+>
+> Copy and Cut refuse protected files, unlike the other actions; see [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
+
 **Results.** The page shows each action's result as a short message. The popup does not show results in this build. An action's
 outcome goes to `~/.homa/logs/app.log`, and only failures are written there. The folder listing from Ctrl+F does not appear
 in the popup yet, for the same reason. Both are recorded in `docs/api.md` section 12.9.
@@ -605,6 +623,81 @@ field for this key, and Homa checks only that the address starts with `http://` 
 
 **Ask Claude about this file.** A stub. The menu item and the confirmation exist. After you confirm, the page says `Sending to Claude
 is not available in this build; nothing was sent.` The popup writes that message to the log instead. Nothing leaves the PC.
+
+## Copy, cut and the full-page handoff (2026-11-09)
+
+Added in commit 2eca46b, merged to `main` on 2026-11-09. Written from the code at 2eca46b (`homa/overlay/search_ui.py`,
+`homa/actions/shell.py`, `homa/server/routes_actions.py`, `homa/settings.py`, `web/src/App.jsx`), the plan
+`docs/plans/2026-11-09-popup-to-fullpage-and-file-clipboard.md` and the security review
+`docs/security/2026-11-09-clipboard-handoff-review.md`. Paste in File Explorer itself is a user-run check (plan AC-C4) and
+is not recorded here as done.
+
+**Mark several rows in the popup.**
+
+| You do | What happens |
+|---|---|
+| Click a row | Selects that row only and clears the marks. |
+| Ctrl+click a row | Marks or unmarks that row. |
+| Shift+click a row | Marks every row from the last row you clicked to this one. |
+| Shift+Up, Shift+Down | Moves the selection and marks the rows from the starting row to it. |
+| Ctrl+A | Marks every row shown. Press it again when all are marked, and it selects the text in the search box instead. |
+
+Marked rows have their own fill, different from the selected row. A new search, entering or leaving a folder listing, and Esc
+out of the results clear the marks. The full page already had Ctrl+click, Shift+click and Shift+arrows; Ctrl+A is new there and
+selects every loaded row.
+
+**Copy and cut files.** In the popup and in the full page:
+
+- **Ctrl+C** copies the marked files, and **Ctrl+X** cuts them. With nothing marked, they act on the selected row. Then open a
+  folder in File Explorer and paste (Ctrl+V). A copy leaves the originals where they are; a cut moves them.
+- File Explorer does the copy or the move when you paste. Homa only puts the list of files on the clipboard, in the same
+  format as Explorer's own Copy and Cut. Homa never moves, deletes or opens a file for this. A cut to another drive, or into a
+  cloud-synced folder, behaves as Explorer's own cut does there.
+- The right-click menu has **Copy** and **Cut** (at the top of the popup's menu; between **Reveal in Explorer** and **Copy path**
+  in the page's menu). With several rows marked they read, for example, "Copy 3 files" and act on every marked row; the other
+  menu items still act on the row you right-clicked. In the popup they are greyed out on Ask notes rows.
+- The keys work only on results: in the popup, when results are showing, the search text has not changed since the search,
+  and no text is selected in the box. Otherwise Ctrl+C, Ctrl+X and Ctrl+A edit the search text as usual. The page follows the
+  same rule.
+- At most 1,000 files at a time.
+- The result appears in the popup's details line, or as a message in the page: `Copied 3 files — paste in File Explorer`, or
+  `Cut 3 files — paste in File Explorer to move them`. When some files were left out, it adds `; 1 skipped` and the reason, for
+  example `(refused: protected file (secrets deny-list))`. When none could go on the clipboard, the page says `Nothing was
+  copied` (or `cut`) with the reason.
+
+**What Copy and Cut refuse, and why.** A refused file is left off the clipboard and the reason is shown; the others still go.
+
+- **Protected files** (the secrets list under [Roots, excludes and protected files](#roots-excludes-and-protected-files)):
+  `refused: protected file (secrets deny-list)`. Copy path still works on them. The difference is deliberate: a file on the
+  clipboard can be pasted into a mail or a chat, a path cannot (plan, assumption A5). The check also covers short (8.3) names,
+  links, and names written with trailing dots or spaces.
+- Files outside your indexed roots, files not in the index, files that no longer exist, and anything in Homa's own folder.
+- Paths written with `\\?\`, `\\.\` or `\??\` prefixes, and network paths when none of your roots is on the network.
+- **Cut only:** an indexed root folder itself, Homa's own folder, and any folder that contains Homa's own folder. Copy of a
+  folder that contains Homa's folder or protected files is allowed, as it is in Explorer, and Paste then copies its contents.
+
+**Copy path moved to Ctrl+Shift+C.** In both the popup and the page, **Ctrl+Shift+C** copies the paths as text, one per line
+when several rows are marked. If your `settings.json` still has the old default, `"copy_path": "Ctrl+C"`, Homa moves it to
+`Ctrl+Shift+C` when it loads the file, so that Ctrl+C becomes Copy files. A different chord that you chose for Copy path is kept.
+
+**Change or remove the four shortcuts.** They are in the `shortcuts` object of `settings.json`: `copy_files` (default
+`Ctrl+C`), `cut_files` (`Ctrl+X`), `copy_path` (`Ctrl+Shift+C`) and `select_all` (`Ctrl+A`). Set one to another key, such as
+`"Ctrl+Shift+X"`, or to `""` to turn it off; only these four accept `""`. If a chord you had already given to another action
+equals one of the new defaults, your chord wins and the new action gets no shortcut (one line in `app.log` says so).
+Settings, **About**, lists the current shortcuts, with `(none)` for a removed one.
+
+**Double-click to the full page.** In the popup, double-click a file or folder row of a Files search. The full page opens (as
+with F11) with the same query, chips, date filter and sort, that row selected and its preview showing, and the popup closes.
+**F11** and the **Full page** button now carry the same things, including the selected row when results are showing. A
+double-click in a folder listing (Ctrl+F) or on an Ask notes row only selects the row, as before, and Enter still opens the
+selected file. If the file is not in the page's first results, the page loads more, up to 300 rows; if it is still not there,
+it says `The file you picked is not in these results.` and selects nothing.
+
+The selected file's path does not go into the page's address or the Edge command line. It travels with the one-time launch
+code and is handed to the page once, inside the same 30 seconds.
+
+**Not offered:** dragging rows out of Homa into Explorer (plan, section 3.4), pasting into Homa, and undo. Use Copy or Cut and
+Paste.
 
 ## Roots, excludes and protected files
 
@@ -784,6 +877,13 @@ value falls back for that key only, with a warning in the log.
 
 **Restore defaults.** On the Roots & excludes page, a saved excludes list replaces the built-in list. **Restore defaults** puts the
 built-in list back.
+
+**Shortcut changes, 2026-11-09 (commit 2eca46b).** The `shortcuts` object in `settings.json` gains `copy_files` (`Ctrl+C`),
+`cut_files` (`Ctrl+X`) and `select_all` (`Ctrl+A`), and the default of `copy_path` changes from `Ctrl+C` to `Ctrl+Shift+C`.
+These four keys accept `""` to turn the shortcut off; no other shortcut does. A saved `"copy_path": "Ctrl+C"` (the old default)
+is moved to `Ctrl+Shift+C` when the file is loaded, unless the file already has a `copy_files` entry; a chord you picked yourself
+is kept. Source: `homa/settings.py` (`DEFAULT_SHORTCUTS`, `UNBINDABLE_SHORTCUTS`, `_migrate_shortcuts`). Details in
+[Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
 
 ## Settings and files
 
@@ -1118,6 +1218,18 @@ What 3d7bc25 adds (2026-11-07). These are read from the code at 3d7bc25. The com
 - **Shutdown:** the teardown steps share a 3-second deadline (`homa/app.py`, `SHUTDOWN_STEPS_S`). The full bound, including the server stop, is in [docs/api.md](docs/api.md) section 13.6.
 - **`update --yes`:** on a git clone, `update` runs `git pull --ff-only` and then pip on the requirements, with no flag needed. On a release zip (with `update.source` set), it downloads and unpacks the zip; pip runs only with `--yes`, and otherwise the command is printed (`homa/update.py`).
 
+What 2eca46b adds (2026-11-09). Read from the code at 2eca46b; Paste in File Explorer is a user-run check not yet recorded:
+
+- **Multi-select in the popup:** Ctrl+click, Shift+click, Shift+Up and Shift+Down, and Ctrl+A mark several rows. Ctrl+A also works in the full page (loaded rows).
+- **Copy and cut files:** Ctrl+C and Ctrl+X, or **Copy** and **Cut** in the right-click menu, put the marked files on the Windows clipboard, in both the popup and the full page. Paste in File Explorer copies or moves them; Explorer does the move and Homa never deletes. Up to 1,000 files at a time.
+- **Refusals with a reason:** protected (secrets-list) files, files outside the roots or not indexed, missing files, Homa's own folder and device or long-path prefixes are left off the clipboard, and the reason is shown. Cut also refuses a root folder and any folder that holds Homa's own folder.
+- **Copy path on Ctrl+Shift+C:** in both UIs, one path per line for several rows. An old saved `copy_path` of `Ctrl+C` is migrated.
+- **Rebindable:** `copy_files`, `cut_files`, `copy_path` and `select_all` can be set to another key in `settings.json`, or to `""` to turn them off.
+- **Double-click to the full page:** double-clicking a file row in the popup (or F11, or **Full page**) opens the full page with the same query, chips, date filter and sort, and that file selected with its preview.
+- **New route:** `POST /v1/files/clipboard` ([docs/api.md](docs/api.md) section 15).
+
+See [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
+
 ## Security & privacy
 
 Facts about this version, with the source for each. The security review is in
@@ -1320,6 +1432,33 @@ recorded in `docs/security/`, the points below describe the design and the code,
 - **Settings route.** `GET /v1/settings` returns the theme, shortcuts, search placement, hotkey, Markdown vault URL and known extensions. It does not return calendar addresses, the token, roots, excludes, the notes folder or the update source (`assistant/server/routes_settings.py`).
 - **Security review of 3d7bc25:** `docs/security/2026-11-07-m4-review.md`. Review 11 returned BLOCK on R11-F1 (the Continue launcher's working folder). Review 12, in the same file, returns "BLOCK LIFTED — PASS for commit" with R11-F1 closed by observation, and three low NOTEs: R12-N1 (resolved in place), R12-N2 (search budget overshoot on wildcard-only queries) and R12-N3 (typed query text persists in the Edge app profile's History). Review 11's scope was the working tree against HEAD 56c3aa8, which is the 3d7bc25 change set. The code was read by doc-keeper, and no test or live run was done.
 
+### 2eca46b additions (2026-11-09)
+
+Source: `docs/security/2026-11-09-clipboard-handoff-review.md` (Review 15: PASS, no BLOCK, six NOTEs R15C-N1 to R15C-N6; its
+re-verification section reports all six RESOLVED) and the code at 2eca46b.
+
+- **One new local route,** `POST /v1/files/clipboard`, behind the bearer token and the same Host and Origin checks as every
+  `/v1` route. A web page in another origin is refused before the route runs, and no CORS headers are sent.
+- **The clipboard is the only effect.** Copy and Cut place a file list on the Windows clipboard; Homa does not move, delete or
+  open the files. Paste in File Explorer is your own action. The clipboard is readable by any program running as your Windows
+  user, and Windows Clipboard History can keep the list.
+- **Path rules for Copy and Cut:** device and long-path prefixes are refused before any other processing; the path must be
+  inside an indexed root, in the index and present; Homa's own folder and protected files are refused (including short names,
+  links and trailing-dot spellings); Cut also refuses root folders and any folder containing Homa's folder. The full list is in
+  [docs/api.md](docs/api.md) section 15.3.
+- **Nothing about the paths is logged** beyond a count (`"<n> paths"` in the action log); refusal reasons are fixed texts.
+- **The full-page handoff** (query, chips, date, sort and the selected path) travels with the one-time launch code, is
+  validated before it is stored, and is handed out once, within the code's 30 seconds. It is not in the launch address or the
+  Edge command line.
+- **Fixed before merge (R15C-N1 to R15C-N6):** a list or object `op` now gets `422` instead of `500` (N1); a path with an
+  unpaired UTF-16 surrogate is refused instead of causing a `500` after the clipboard was written (N2); network paths written
+  with mixed `\` and `/` no longer reach the file system before the "outside the roots" refusal, which also covers the MCP file
+  tools (N3); a link whose name is protected can no longer be cut by adding a trailing dot or space (N4); Cut refuses a folder
+  that contains Homa's own folder (N5); the developer tool `tools/driver.py` no longer follows redirects with the token (N6).
+- **Open, informational:** Copy (not Cut) of a folder that contains Homa's folder or protected files is allowed, as in Explorer.
+  Move to Recycle Bin does not refuse a folder that contains Homa's folder (already the case before this commit; listed in the
+  review for a later pass).
+
 ## Status
 
 - **M1 shipped 2026-11-06:** the overlay, the card model and store, Claude Code hooks, the HTTP card and reminder API,
@@ -1373,6 +1512,13 @@ recorded in `docs/security/`, the points below describe the design and the code,
   Pending at the time of writing: the qa run of the suite, the security review of the migration, the work-laptop cutover and
   the icon sign-off on the rendered artwork. Plan: `docs/plans/2026-11-08-rename-to-homa.md`. Design: `docs/design/2026-11-08-homa-icon-spec.md`.
 
+- **Copy, cut and the full-page handoff, 2026-11-09 (commit 2eca46b on main, fast-forwarded from b320269; no pull request):**
+  multi-select in the popup, Copy and Cut of files to the clipboard in both UIs, Copy path on Ctrl+Shift+C, and the popup's
+  double-click opening the full page on the selected file. Plan: `docs/plans/2026-11-09-popup-to-fullpage-and-file-clipboard.md`.
+  Security review: `docs/security/2026-11-09-clipboard-handoff-review.md` (PASS; R15C-N1 to R15C-N6 resolved). Not yet
+  observed: Paste in File Explorer on the personal laptop with throw-away files (plan AC-C4, user-run); the live instance
+  picks the change up only after a restart.
+
 ## Documentation
 
 - [docs/api.md](docs/api.md): the local HTTP API, the hook contract, the card model and the file drop format.
@@ -1382,6 +1528,8 @@ recorded in `docs/security/`, the points below describe the design and the code,
 - [docs/security/2026-11-06-m2-review.md](docs/security/2026-11-06-m2-review.md): the M2 security review (Review 5).
 - [docs/security/2026-11-07-m3a-review.md](docs/security/2026-11-07-m3a-review.md): the M3a security review (Review 7).
 - [docs/search-grammar.md](docs/search-grammar.md): the Files search grammar, caps and interpretation strings.
+- [docs/security/2026-11-09-clipboard-handoff-review.md](docs/security/2026-11-09-clipboard-handoff-review.md): the review of
+  the file clipboard and the full-page handoff (Review 15).
 - [docs/reference/2026-11-06-assistant-popup-readme.md](docs/reference/2026-11-06-assistant-popup-readme.md): the behaviour of the
   reference build this replaces.
 - [CHANGELOG.md](CHANGELOG.md): what changed, and when.
