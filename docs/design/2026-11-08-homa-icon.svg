@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE08A"/>
+      <stop offset="1" stop-color="#F2A81D"/>
+    </linearGradient>
+    <path id="wing" d="M46 42 Q22 34 7 12 L17 27 L10 33 L22 40 L19 47 L30 50 L33 58 L45 60Z"/>
+  </defs>
+  <rect width="100" height="100" fill="#0E1A3A"/>
+  <g fill="url(#gold)">
+    <use href="#wing"/>
+    <use href="#wing" transform="translate(100 0) scale(-1 1)"/>
+    <path d="M55 13 Q49 14 47 19 L37 25 L46 28 Q46 34 43 40 Q40 50 44 60 Q46 67 50 71 Q54 67 56 60 Q60 50 57 40 Q55 34 55 28 Q58 19 55 13Z"/>
+    <path d="M50 68 L53 80 L50 96 L47 80Z"/>
+    <path d="M51 68 Q60 76 67 92 Q55 84 49 72Z"/>
+    <path d="M49 68 Q40 76 33 92 Q45 84 51 72Z"/>
+  </g>
+</svg>
