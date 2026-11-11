@@ -14,7 +14,7 @@ from conftest import REPO_ROOT, run_stdio_shim, wait_until
 
 pytest.importorskip("homa.mcp_stdio", reason="homa/mcp_stdio.py (M2-2) not present")
 
-TOOLS = {"send_card", "update_card", "dismiss_card", "add_reminder"}
+TOOLS = {"send_card", "update_card", "dismiss_card", "dismiss_all_cards", "add_reminder"}
 
 
 def rpc(id_, method, params=None):
@@ -43,7 +43,7 @@ def test_initialize_is_answered_with_the_assistant_server_info(mcp_live):
     assert reply["result"]["serverInfo"]["name"] == "homa"
 
 
-def test_notification_produces_no_output_and_tools_list_returns_the_four_tools(mcp_live):
+def test_notification_produces_no_output_and_tools_list_returns_the_five_tools(mcp_live):
     lines, _ = run_stdio_shim(mcp_live.home, [INIT, INITIALIZED, rpc(2, "tools/list")])
     replies = parse(lines)
     assert [r["id"] for r in replies] == [1, 2], replies

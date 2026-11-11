@@ -423,6 +423,12 @@ def build_mcp(store: CardStore, reminders: ReminderStore, index=None):
             raise ToolError("id: No card with that id.") from None
         return {"ok": True}
 
+    @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                                             idempotentHint=True, openWorldHint=False))
+    def dismiss_all_cards() -> dict[str, int]:
+        """Dismiss every open card that is not snoozed. Returns how many were dismissed."""
+        return {"dismissed": store.dismiss_all()}
+
     @server.tool(annotations=_WRITE)
     def add_reminder(text: str, sticky: bool = False) -> dict[str, str]:
         """Add a reminder from plain text such as 'call Sam in 10m', 'standup at 3pm' or

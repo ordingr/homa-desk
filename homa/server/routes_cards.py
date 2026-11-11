@@ -132,6 +132,10 @@ async def dismiss_card(request: Request) -> Response:
     return Response(status_code=204)
 
 
+async def dismiss_all_cards(request: Request) -> JSONResponse:
+    return JSONResponse({"dismissed": request.app.state.store.dismiss_all()})
+
+
 async def card_events(request: Request) -> JSONResponse:
     raw = request.query_params.get("since", "0")
     try:
@@ -178,6 +182,7 @@ exception_handlers = {
 routes = [
     Route("/v1/cards", create_card, methods=["POST"]),
     Route("/v1/cards", list_cards, methods=["GET"]),
+    Route("/v1/cards/dismiss_all", dismiss_all_cards, methods=["POST"]),
     Route("/v1/cards/{card_id}", get_card, methods=["GET"]),
     Route("/v1/cards/{card_id}", patch_card, methods=["PATCH"]),
     Route("/v1/cards/{card_id}", dismiss_card, methods=["DELETE"]),

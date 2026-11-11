@@ -5,7 +5,7 @@ skipped until the test-mode debug route is served (M1-6 wiring + M1-3a icon). Ke
 the debug payload (card window list, timer text, button rectangles) are read tolerantly and the test says which
 key it expected; adjust the reader, not the assertion, if the dev names it differently.
 
-Needs a real desktop session (SendInput, GetWindowLong). Tests that wait for the 20-s fade or a 60-s reminder
+Needs a real desktop session (SendInput, GetWindowLong). Tests that wait for the 12-s fade or a 60-s reminder
 carry their own timeout.
 """
 import ctypes
@@ -310,14 +310,94 @@ def test_hover_marks_seen_and_stops_blinking(overlay):
     assert overlay.window("e2e-hover").get("blinking") is False
 
 
-def test_done_card_disappears_20_s_after_it_is_seen(overlay):
+def test_done_card_disappears_12_s_after_it_is_seen(overlay):
     overlay.post(id="e2e-fade", title="fade", kind="done")
     assert wait_until(lambda: overlay.window("e2e-fade"), timeout=2)
     driver.move_to(*_centre(overlay.window("e2e-fade")["rect"]))
     assert wait_until(lambda: overlay.window("e2e-fade").get("seen") is True, timeout=2)
     t0 = time.monotonic()
-    assert wait_until(lambda: overlay.window("e2e-fade") is None, timeout=24, step=0.2), "card never faded"
-    assert 18 <= time.monotonic() - t0 <= 22.5
+    assert wait_until(lambda: overlay.window("e2e-fade") is None, timeout=16, step=0.2), "card never faded"
+    assert 10 <= time.monotonic() - t0 <= 14.5
+
+
+# ---- Close all strip ------------------------------------------------------------------
+
+def _close_all(overlay) -> list:
+    return overlay.ui().get("close_all") or []
+
+
+def _close_all_when_ready(overlay):
+    """close_all from /v1/_debug/ui, or None while it answers 503 'ui thread busy' (several new card windows)."""
+    ui = overlay.ui_or_none()
+    return None if ui is None else ui.get("close_all") or []
+
+
+def _overlaps(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def test_close_all_strip_shows_for_two_cards_per_monitor_and_not_for_one(overlay):
+    monitors_n = _monitor_count()
+    overlay.post(id="e2e-ca1", title="one", kind="waiting")
+    assert wait_until(lambda: len(overlay.windows()) == monitors_n, timeout=3)
+    time.sleep(0.3)
+    assert _close_all(overlay) == [], "one card on a monitor gets no Close all strip"
+    overlay.post(id="e2e-ca2", title="two", kind="waiting")
+    assert wait_until(lambda: len(_close_all(overlay)) == monitors_n, timeout=3), _close_all(overlay)
+    ui = overlay.ui()
+    icon = ui["icon"]["rect"]
+    for strip in ui["close_all"]:
+        assert strip["cards"] == 2, strip
+        assert not _overlaps(strip["rect"], icon), (strip, icon)
+        for w in driver.card_windows(ui):
+            assert not _overlaps(strip["rect"], w["rect"]), ("strip overlaps a card", strip, w)
+        for more in ui.get("strips") or []:
+            assert not _overlaps(strip["rect"], more["rect"]), ("strip overlaps the +N more strip", strip, more)
+    driver.http("DELETE", "/v1/cards/e2e-ca2")
+    assert wait_until(lambda: _close_all(overlay) == [], timeout=3), "strip stays after dropping back to one card"
+
+
+def _app_pids() -> set:
+    pid = driver.load_state().get("pid")
+    return {pid, *driver._child_pids(pid)} if pid else set()
+
+
+def _window_pid_at(x: int, y: int) -> int:
+    user32.WindowFromPoint.restype = wintypes.HWND
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    hwnd = user32.WindowFromPoint(wintypes.POINT(x, y))
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(user32.GetAncestor(hwnd, 2) or hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def test_clicking_close_all_dismisses_every_shown_card_and_keeps_the_snoozed_one(overlay):
+    for cid in ("e2e-cb1", "e2e-cb2", "e2e-cb3"):
+        overlay.post(id=cid, title=cid, kind="waiting")
+    status, body = driver.http("POST", "/v1/cards/e2e-cb3/snooze", {"minutes": 30})
+    assert status == 200, (status, body)
+    assert wait_until(lambda: [s["cards"] for s in _close_all_when_ready(overlay) or []][:1] == [2], timeout=30),         _close_all_when_ready(overlay)
+    x, y = _centre(_close_all_when_ready(overlay)[0]["rect"])
+    driver._make_dpi_aware()
+    owner = _window_pid_at(x, y)
+    if owner not in _app_pids():
+        pytest.skip(f"the window under the strip centre belongs to pid {owner}, not the test app; not clicking")
+    driver.click_at(x, y)
+
+    def open_ids():
+        status, cards = driver.http("GET", "/v1/cards")
+        return sorted(c["id"] for c in cards) if status == 200 else None
+
+    assert wait_until(lambda: open_ids() == ["e2e-cb3"], timeout=3), open_ids()
+
+    def cleared():
+        ui = overlay.ui_or_none()
+        return ui is not None and driver.card_windows(ui) == [] and not ui.get("close_all")
+
+    assert wait_until(cleared, timeout=30), overlay.ui_or_none()
 
 
 def test_mute_greys_the_icon_and_queues_cards(overlay):

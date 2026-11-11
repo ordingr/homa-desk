@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 
 from .. import uibus
 from ..cards.model import Card
+from ..cards.store import FADE_SECONDS
 from . import gfx, icon as icon_mod, monitors, panel, sounds, win
 
 log = logging.getLogger("homa.overlay.cards_ui")
@@ -48,6 +49,7 @@ class CardCallbacks:
     on_dismiss: Callable[[str], None] = _noop
     on_press: Callable[[str, str], None] = _noop
     on_open_url: Callable[[str], None] = _noop
+    on_dismiss_all: Callable[[], None] = _noop
 
 
 def callbacks_for_store(store: Any, open_url: Callable[[str], None] = _noop) -> CardCallbacks:
@@ -57,6 +59,7 @@ def callbacks_for_store(store: Any, open_url: Callable[[str], None] = _noop) -> 
         on_dismiss=store.dismiss,
         on_press=store.press,
         on_open_url=open_url,
+        on_dismiss_all=store.dismiss_all,
     )
 
 
@@ -290,10 +293,13 @@ class CardWindow:
 
 
 class MoreStrip:
-    """Small '+N more' window that closes a stack that does not fit the work area."""
+    """Small '+N more' window that closes a stack that does not fit the work area; with on_click it is a
+    button (the 'Close all' strip)."""
 
-    def __init__(self, ui: "CardsUI", monitor: monitors.Monitor) -> None:
+    def __init__(self, ui: "CardsUI", monitor: monitors.Monitor, label: Callable[[int], str] = "+{} more".format,
+                 on_click: Optional[Callable[[], None]] = None) -> None:
         self.monitor = monitor
+        self.label = label
         self.scale = monitor.scale
         self.count = 0
         self.w = gfx.px(STRIP_WIDTH, self.scale)
@@ -312,6 +318,11 @@ class MoreStrip:
                                 width=self.w, height=self.h)
         self.canvas.pack(fill="both", expand=True)
         self.font = ui.font(gfx.px(11, self.scale), "bold")
+        if on_click is not None:
+            self.canvas.configure(cursor="hand2")
+            self.canvas.bind("<ButtonPress-1>", lambda _e: ui.safe(on_click))
+            self.canvas.bind("<Enter>", lambda _e: panel.set_button_hover(self.canvas, "strip", True))
+            self.canvas.bind("<Leave>", lambda _e: panel.set_button_hover(self.canvas, "strip", False))
         self.win.geometry(f"{self.w}x{self.h}+{OFFSCREEN}+{OFFSCREEN}")
         self.win.deiconify()
         win.apply_overlay_styles(self.win)
@@ -325,11 +336,11 @@ class MoreStrip:
             if self.rounded:
                 edge = max(1, round(self.scale))
                 panel.rounded_rect(self.canvas, edge, edge, self.w - edge, self.h - edge, 3 * self.scale,
-                                   fill=panel.BUTTON_BG, outline="")
+                                   fill=panel.BUTTON_BG, outline="", tag="strip")
             else:
                 panel.rounded_rect(self.canvas, 1, 1, self.w - 1, self.h - 1, 6 * self.scale,
-                                   fill=panel.BUTTON_BG, outline=panel.TEXT_DIM)
-            self.canvas.create_text(self.w / 2, self.h / 2, text=f"+{count} more",
+                                   fill=panel.BUTTON_BG, outline=panel.TEXT_DIM, tag="strip")
+            self.canvas.create_text(self.w / 2, self.h / 2, text=self.label(count),
                                     fill=panel.TEXT, font=self.font)
         if (x, y) != self.xy:
             self.xy = (x, y)
@@ -361,6 +372,7 @@ class CardsUI:
         self._states: dict[str, _State] = {}
         self._dying: list[CardWindow] = []
         self._strips: dict[int, MoreStrip] = {}
+        self._close_strips: dict[int, MoreStrip] = {}
         self._fonts: dict[tuple, tkfont.Font] = {}
         self._seq = 0
         self._tick_n = 0
@@ -555,6 +567,8 @@ class CardsUI:
             seq = list(reversed(wins))
             strip_h = gfx.px(STRIP_HEIGHT, m.scale)
             room = (ay - gap - wt) if above else (wb - (ay + asz + gap))
+            if len(seq) >= 2:
+                room -= strip_h + gap
             shown = len(seq)
             if sum(w.h + gap for w in seq) - gap > room:
                 shown, used = 0, 0
@@ -586,24 +600,43 @@ class CardsUI:
                     w.y = w.ty
                     w.talpha = 1.0
                     w.apply()
-            self._place_strip(m, len(seq) - shown, cursor, above, right_side, ax, asz)
+            cursor = self._place_strip(m, len(seq) - shown, cursor, above, right_side, ax, asz)
+            self._place_strip(m, len(seq) if len(seq) >= 2 else 0, cursor, above, right_side, ax, asz,
+                              close_all=True)
         self._kick()
 
-    def _place_strip(self, m: monitors.Monitor, hidden: int, cursor: int, above: bool,
-                     right_side: bool, ax: int, asz: int) -> None:
-        strip = self._strips.get(m.handle)
-        if hidden <= 0:
+    def _place_strip(self, m: monitors.Monitor, count: int, cursor: int, above: bool,
+                     right_side: bool, ax: int, asz: int, close_all: bool = False) -> int:
+        """Show (count > 0) or hide one strip at `cursor`; returns the cursor past it."""
+        strips = self._close_strips if close_all else self._strips
+        strip = strips.get(m.handle)
+        if count <= 0:
             if strip is not None:
                 strip.hide()
-            return
+            return cursor
         if strip is None:
-            strip = self._strips[m.handle] = MoreStrip(self, m)
+            strip = strips[m.handle] = (MoreStrip(self, m, lambda _n: "Close all", self._close_all) if close_all
+                                        else MoreStrip(self, m))
         wl, wt, wr, wb = m.work
+        gap = gfx.px(GAP, m.scale)
         x = ax + asz - strip.w if right_side else ax
         x = max(wl, min(x, wr - strip.w))
         y = cursor - strip.h if above else cursor
         y = max(wt, min(y, wb - strip.h))
-        strip.show(hidden, x, y)
+        strip.show(count, x, y)
+        return y - gap if above else y + strip.h + gap
+
+    def _close_all(self) -> None:
+        self.cb.on_dismiss_all()
+
+    def close_all_state(self) -> list[dict]:
+        out = []
+        for handle, strip in self._close_strips.items():
+            if strip.count:
+                out.append({"monitor_handle": handle, "cards": strip.count,
+                            "rect": [strip.xy[0], strip.xy[1], strip.xy[0] + strip.w,
+                                     strip.xy[1] + strip.h]})
+        return out
 
     def strip_state(self) -> list[dict]:
         out = []
@@ -713,9 +746,10 @@ class CardsUI:
                 w.destroy()
         for w in self._dying:
             w.destroy()
-        for strip in self._strips.values():
+        for strip in [*self._strips.values(), *self._close_strips.values()]:
             strip.destroy()
         self._strips.clear()
+        self._close_strips.clear()
         self._states.clear()
         self._dying.clear()
 
@@ -755,7 +789,7 @@ class _FakeStore:
             card = self.cards[cid]
             card.seen_at = time.time()
             if not card.effective_sticky:
-                self._root.after(20000, lambda: self._ui().remove(cid))
+                self._root.after(int(FADE_SECONDS * 1000), lambda: self._ui().remove(cid))
 
         def snooze(cid: str, minutes: int) -> None:
             print(f"on_snooze {cid} {minutes}", flush=True)
@@ -771,7 +805,12 @@ class _FakeStore:
         def open_url(url: str) -> None:
             print(f"on_open_url {url}", flush=True)
 
-        return CardCallbacks(seen, snooze, dismiss, press, open_url)
+        def dismiss_all() -> None:
+            print("on_dismiss_all", flush=True)
+            for cid in list(self.cards):
+                self._ui().remove(cid)
+
+        return CardCallbacks(seen, snooze, dismiss, press, open_url, dismiss_all)
 
 
 class _DemoSettings:

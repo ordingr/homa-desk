@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from .. import __version__, paths, uibus
 from ..cards.model import strip_control
-from ..settings import DEFAULT_SHORTCUTS, THEMES as THEME_MODES
+from ..settings import CARD_INFO_SECONDS, CARD_WAITING_MINUTES, DEFAULT_SHORTCUTS, THEMES as THEME_MODES
 from . import gfx, monitors, win
 
 log = logging.getLogger("homa.overlay.settings_ui")
@@ -417,6 +417,20 @@ class SettingsWindow:
         self.every_monitor_var = self._check(
             page, "Show cards on every monitor", bool(self.settings.get("cards_every_monitor", True)),
             lambda v: self._save("Cards", "cards_every_monitor", v))
+        timing = self.settings.get("cards", {})
+        self.info_seconds_var = tk.StringVar(value=str(timing.get("info_seconds", 12)))
+        self.waiting_minutes_var = tk.StringVar(value=str(timing.get("waiting_minutes", 15)))
+        for label, var, key, (low, high), note in (
+                ("Info cards (s)", self.info_seconds_var, "info_seconds", CARD_INFO_SECONDS,
+                 "gone this long after you see one"),
+                ("Waiting (min)", self.waiting_minutes_var, "waiting_minutes", CARD_WAITING_MINUTES,
+                 "cards waiting for you; 0 keeps them until dismissed")):
+            row = self._row(page, label)
+            self._entry(row, var, 5).pack(side="left")
+            tk.Label(row, text=f"{low}–{high}, {note}", bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM,
+                     font=self._small).pack(side="left", padx=10)
+            var.trace_add("write", lambda *_a, v=var, k=key, lo=low, hi=high:
+                          self._debounce(k, lambda: self._apply_card_timing(v, k, lo, hi)))
         tk.Label(page, text="Mute a source (its cards are dropped, nothing is shown)", bg=gfx.PANEL_BG,
                  fg=gfx.PANEL_DIM, font=self._small, anchor="w").pack(fill="x", pady=(14, 2))
         muted = self.settings.get("mute_sources", {})
@@ -426,6 +440,18 @@ class SettingsWindow:
                 page, f"Mute {label}  ({source})", bool(muted.get(source, False)),
                 lambda v, s=source: self._set_mute(s, v))
         self._error_line("Cards")
+
+    def _apply_card_timing(self, var: tk.StringVar, key: str, low: int, high: int) -> None:
+        try:
+            value = int(var.get().strip())
+            if not low <= value <= high:
+                raise ValueError
+        except ValueError:
+            self._fail("Cards", f"{key.replace('_', ' ')} must be a whole number from {low} to {high}")
+            return
+        current = self.settings.get("cards", {})
+        current[key] = value
+        self._save("Cards", "cards", current)
 
     def _set_mute(self, source: str, value: bool) -> None:
         current = self.settings.get("mute_sources", {})

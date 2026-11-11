@@ -2,10 +2,15 @@ import tkinter as tk
 from datetime import datetime
 from typing import Callable, Optional
 
+from .. import settings as settings_mod
 from . import gfx, monitors, win
 
 DIDNT_UNDERSTAND = "didn't understand — try 'text in 10m' or 'text at 3pm'"
 PARSER_MISSING = "reminder parser not available"
+
+
+def sticky_label(minutes: int) -> str:
+    return f"wait for me (stays up to {minutes} min)" if minutes else "wait for me (stays until dismissed)"
 
 
 def _default_parse():
@@ -54,7 +59,7 @@ class ReminderInput:
         self.status = tk.Label(self.win, text="", bg=gfx.PANEL_BG, fg=gfx.PANEL_DIM, font=small, anchor="w",
                                justify="left", wraplength=int(420 * scale))
         self.status.pack(fill="x")
-        self.check = tk.Checkbutton(self.win, text="sticky (stay until dismissed)",
+        self.check = tk.Checkbutton(self.win, text=sticky_label(settings_mod.peek_waiting_minutes()),
                                     variable=self.sticky, bg=gfx.PANEL_BG, fg=gfx.PANEL_FG, selectcolor=gfx.PANEL_BG,
                                     activebackground=gfx.PANEL_BG, activeforeground=gfx.PANEL_FG, font=small,
                                     anchor="w", highlightthickness=0)

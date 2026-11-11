@@ -279,3 +279,33 @@
     new section "Copy, cut and the full-page handoff (2026-11-09)"; "What 2eca46b adds" in Features; "2eca46b additions
     (2026-11-09)" in Security & privacy; a Status bullet; a Documentation link). `docs/api.md` section 15. The README's older
     sentence "The page has no Ctrl+C" is corrected by a dated note and kept as written.
+
+## 2026-11-11
+- Card timeouts and Close all. Commit: on branch `card-timeouts`, merged to main 2026-11-11 (see `git log`). PR: none (pushed straight to
+  main on github.com/ordingr/homa-desk). Why: the user asked on 2026-11-11 that informational
+  cards stay 10 to 15 seconds and then go, that cards waiting for the user stay 15 minutes, and for a way to close all cards
+  at once.
+  - What changed: a seen informational (not sticky) card is closed (`expired`) after 12 seconds instead of 20
+    (`cards.info_seconds`, default 12, 5 to 120). A seen sticky card (`waiting`, `meeting`, any `sticky: true` card,
+    reminders with "wait for me") is closed after 15 minutes instead of staying until dismissed (`cards.waiting_minutes`,
+    default 15, 0 to 1440, `0` keeps the old behaviour). An earlier `expires_at` still wins; a snoozed card restarts the count
+    when shown again. Both settings apply live and are on the Settings Cards page. A **Close all** strip appears on a monitor
+    with two or more cards; it, `POST /v1/cards/dismiss_all` (`{"dismissed": n}`) and the MCP tool `dismiss_all_cards` dismiss
+    every open card except snoozed ones (cards held while muted are included). The reminder checkbox reads `wait for me
+    (stays up to N min)`, or `wait for me (stays until dismissed)` at `0`. Source files: `homa/cards/store.py`,
+    `homa/settings.py`, `homa/server/routes_cards.py`, `homa/server/mcp.py`, `homa/overlay/cards_ui.py`,
+    `homa/overlay/reminder_ui.py`, `homa/overlay/settings_ui.py`.
+  - Roles: dispatched by tech-lead; docs by doc-keeper (this entry); code by dev; qa PASS; security PASS with four NOTEs, of which
+    1 to 3 (snoozed-card tick loop, RecursionError on deeply nested settings.json, unchecked timing input) were fixed before
+    merge; merged by tech-lead. Plan: none (small change, briefed directly). Security review:
+    `docs/security/2026-11-11-card-timeouts-review.md`.
+  - Test evidence in the repo: boundary tests in `tests/test_cards_store.py` (for example
+    `test_info_card_boundary_open_at_11_999_expired_at_12` and `test_waiting_card_boundary_open_at_14_59_expired_at_15_00`).
+    Card unit tests: `151 passed` (store and timing) and `1 failed, 361 passed, 1 skipped` on the wider card set; the one
+    failure, a meetings lead-time test, passes alone and on main (load flake). Overlay e2e: the fade and both Close-all tests
+    pass; three `/v1/_debug/ui` 503 failures also fail on main 2fb484a. Tests that type keys or drag the mouse were excluded.
+  - Not yet observed by doc-keeper: the Close all strip and the Cards page fields on a live desktop.
+  - Docs: `README.md` (new section "How long cards stay, and Close all (2026-11-11)" under Using it; dated correction notes in
+    Reminders, Meetings and Connect Claude over MCP; "Card timing keys, 2026-11-11" in Settings; "What the card-timeouts change
+    adds" in Features). `docs/api.md` section 16, which also corrects section 3.1's out-of-date "no separate `expired` type"
+    line. The older 20-second and "stays until dismissed" statements are kept as written.

@@ -177,10 +177,46 @@ Right-click menu, in this order: **Search** (placeholder for now), **Remind meâ€
 
 > **Correction, 2026-11-06 (M2):** the every-monitor setting no longer needs a restart. Change it on the Cards page of [Settings](#settings), or edit `settings.json` by hand; the change applies within about 5 seconds.
 
+### How long cards stay, and Close all (2026-11-11)
+
+Supersedes: the "Stays until" column of the [Card kinds](#card-kinds) table above (the 20-second fade, and the sticky kinds
+staying until you act). That table is kept as written.
+
+Every card now goes away by itself a set time after you first see it (hover over it):
+
+- **Informational cards** (not sticky: `done`, `reminder` and `custom` by default) are closed **12 seconds** after you see
+  them. Before 2026-11-11 this was 20 seconds. Set it with `cards.info_seconds` (5 to 120).
+- **Cards waiting for you** (sticky: `waiting` and `meeting` by default, any card sent with `sticky: true`, and reminders
+  with **wait for me** ticked) are closed **15 minutes** after you see them. Before 2026-11-11 they stayed until you
+  dismissed them. Set it with `cards.waiting_minutes` (0 to 1440). `0` keeps them until you dismiss them, as before.
+- A card that is never seen never times out (an `expires_at` time still applies). A card with an `expires_at` earlier than
+  its timeout closes at `expires_at`; for a meeting card that is the end of the event.
+- A snoozed card starts the count again when it comes back and you see it.
+- A card closed this way is recorded with the event type `expired`, not `dismissed`.
+- Both numbers are on the **Cards** page of [Settings](#settings) ("Info cards (s)" and "Waiting (min)") and apply at once,
+  including to cards already on screen.
+
+**Close all.** When two or more cards are on one monitor, a **Close all** strip appears below (or above) them. Clicking it
+dismisses every open card, on every monitor, except snoozed cards, which still come back at their time. Cards that are open
+but held back while you are muted are closed too. The same action is `POST /v1/cards/dismiss_all` and the MCP tool
+`dismiss_all_cards` (see [docs/api.md](docs/api.md), section 16).
+
+Source: `homa/cards/store.py` (`FADE_SECONDS = 12.0`, `WAITING_MINUTES = 15`, `_fades`, `_fade_at`, `_sweep`,
+`dismiss_all`), `homa/cards/model.py` (`DEFAULT_STICKY`), `homa/settings.py` (`CARD_INFO_SECONDS = (5, 120)`,
+`CARD_WAITING_MINUTES = (0, 1440)`), `homa/overlay/cards_ui.py` (the strip is placed when a monitor has 2 or more cards),
+`homa/overlay/settings_ui.py` (`_build_cards`). Read from the uncommitted code on branch `card-timeouts`, 2026-11-11; not
+observed on a live desktop by doc-keeper.
+
 ## Reminders
 
 Right-click the icon, choose **Remind meâ€¦**, type one line, and press Enter. A purple card appears when the time comes.
 The dialog shows how it read your text before you submit it, and has a `sticky (stay until dismissed)` checkbox.
+
+> **Correction, 2026-11-11:** the checkbox now reads `wait for me (stays up to 15 min)`, with the number taken from
+> `cards.waiting_minutes` when the dialog opens, or `wait for me (stays until dismissed)` when that setting is `0`. A
+> reminder with it ticked is a sticky card and closes 15 minutes after you see it (see
+> [How long cards stay, and Close all](#how-long-cards-stay-and-close-all-2026-11-11)). The sentence above is kept as written.
+> Source: `homa/overlay/reminder_ui.py` (`sticky_label`), `homa/settings.py` (`peek_waiting_minutes`).
 
 Four shapes are understood:
 
@@ -280,6 +316,10 @@ detail is the start and end time, the location (cut to 80 characters) and the na
 `Meet`, `Webex` or `Join`. When the event has a join link to one of those services, clicking the card opens it in your
 browser. The card stays until the event ends. Attendee names and the event description are not shown.
 
+> **Correction, 2026-11-11:** a meeting card is sticky, so it now also closes 15 minutes (`cards.waiting_minutes`) after you
+> first see it, if that comes before the end of the event. With `cards.waiting_minutes` set to `0` it stays until the event
+> ends, as written above. See [How long cards stay, and Close all](#how-long-cards-stay-and-close-all-2026-11-11).
+
 > **Correction, 2026-11-06 (M2-9):** a join link is used only when it is `https://`, has no user name or password, uses
 > port 443 or no port, and its host is one of the services below or a subdomain of one. The allow-list is `zoom.us`,
 > `zoom.com`, `zoomgov.com`, `teams.microsoft.com`, `teams.live.com`, `meet.google.com` and `webex.com`. A link that fails
@@ -361,6 +401,10 @@ command. The Claude Desktop shim reads the token file on each call, so it needs 
 The tools cannot open, delete or run anything, and they do not list cards or return card content. Each call is written to
 `~/.homa/logs/mcp.log` as a shape only: the tool name, the argument names with their lengths or types, and the result
 size. Argument values are never written.
+
+> **Correction, 2026-11-11:** there is one more card tool, `dismiss_all_cards()`. It takes no arguments, dismisses every open
+> card that is not snoozed, and returns `{"dismissed": <count>}`. The tool list above is kept as written. Source:
+> `homa/server/mcp.py` (`dismiss_all_cards`); details in [docs/api.md](docs/api.md), section 16.
 
 ## Search files
 
@@ -885,6 +929,19 @@ is moved to `Ctrl+Shift+C` when the file is loaded, unless the file already has 
 is kept. Source: `homa/settings.py` (`DEFAULT_SHORTCUTS`, `UNBINDABLE_SHORTCUTS`, `_migrate_shortcuts`). Details in
 [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
 
+**Card timing keys, 2026-11-11.** The `cards` object in `settings.json`:
+
+| Key | Default | Allowed | Notes |
+|---|---|---|---|
+| `cards.info_seconds` | `12` | whole number, 5 to 120 | How long an informational (not sticky) card stays after you see it. Applies at once. |
+| `cards.waiting_minutes` | `15` | whole number, 0 to 1440 | How long a sticky card stays after you see it. `0` keeps it until dismissed. Applies at once. |
+
+The Cards page of Settings has both, as "Info cards (s)" and "Waiting (min)"; a value outside the range is shown as an
+error and not saved. A bad value typed into `settings.json` by hand falls back to the default for that key only, with a
+warning in the log. Source: `homa/settings.py` (`DEFAULTS`, `_check_cards`, `CARD_INFO_SECONDS`, `CARD_WAITING_MINUTES`),
+`homa/overlay/settings_ui.py` (`_build_cards`, `_apply_card_timing`). Behaviour in
+[How long cards stay, and Close all](#how-long-cards-stay-and-close-all-2026-11-11).
+
 ## Settings and files
 
 Everything lives in `~/.homa` (set the `HOMA_HOME` environment variable to use another folder). Copying that folder
@@ -1229,6 +1286,21 @@ What 2eca46b adds (2026-11-09). Read from the code at 2eca46b; Paste in File Exp
 - **New route:** `POST /v1/files/clipboard` ([docs/api.md](docs/api.md) section 15).
 
 See [Copy, cut and the full-page handoff (2026-11-09)](#copy-cut-and-the-full-page-handoff-2026-11-09).
+
+What the card-timeouts change adds (2026-11-11). Read from the uncommitted code on branch `card-timeouts`; not observed on a
+live desktop by doc-keeper:
+
+- **Shorter fade:** informational cards close 12 seconds after you see them (was 20; the M1 list above says 20 and is kept
+  as written). `cards.info_seconds`, 5 to 120.
+- **Waiting cards time out:** sticky cards (waiting, meeting, `sticky: true`, reminders with **wait for me**) close 15
+  minutes after you see them; they used to stay until dismissed. `cards.waiting_minutes`, 0 to 1440, `0` for the old
+  behaviour. An earlier `expires_at` still wins; a snoozed card starts the count again when it is shown again.
+- **Close all:** a strip on any monitor with two or more cards dismisses every open card except snoozed ones.
+- **New route and tool:** `POST /v1/cards/dismiss_all` and the MCP tool `dismiss_all_cards` ([docs/api.md](docs/api.md)
+  section 16).
+- **Settings:** the Cards page has "Info cards (s)" and "Waiting (min)"; changes apply at once.
+
+See [How long cards stay, and Close all](#how-long-cards-stay-and-close-all-2026-11-11).
 
 ## Security & privacy
 

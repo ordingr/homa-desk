@@ -147,7 +147,7 @@ class App:
         self._token = token_store.ensure()
         log.info("starting homa %s, home %s", __version__, paths.home())
 
-        self.store = CardStore()
+        self.store = CardStore(timing=lambda: self.settings.get("cards", {}))
         self.scheduler.start()
         self.settings.watch(self.scheduler)
         self.reminders = ReminderStore(self.scheduler, fire=self._fire_reminder)
@@ -156,6 +156,7 @@ class App:
         self.meetings = MeetingScheduler(self._calendar_sources(), self.store, self.scheduler, self.settings)
         self.settings.on_change("calendars", self._on_calendars_changed)
         self.settings.on_change("mute_sources", self._on_mute_sources_changed)
+        self.settings.on_change("cards", lambda _key, _value: self._arm_tick())
         sounds.set_enabled(self.settings.get("sound_on", True) is not False)
         self.settings.on_change("sound_on", lambda _key, value: sounds.set_enabled(value is not False))
         self.meetings.start()
@@ -583,6 +584,7 @@ class App:
         snapshot = self.icon.debug_state()
         snapshot["cards"] = self.cards_ui.debug_state()
         snapshot["strips"] = self.cards_ui.strip_state()
+        snapshot["close_all"] = self.cards_ui.close_all_state()
         if self.popup is not None:
             snapshot["search"] = self.popup.debug_state()
         snapshot["actions"] = shell.action_log()[-50:]

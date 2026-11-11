@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .. import paths
+from ..settings import CARD_INFO_SECONDS, CARD_WAITING_MINUTES
 from .model import Card, CardValidationError, validate_fields
 
 log = logging.getLogger("homa.cards.store")
 
-FADE_SECONDS = 20.0
+FADE_SECONDS = 12.0
+WAITING_MINUTES = 15
 HISTORY_LIMIT = 100
 STATE_VERSION = 1
 MAX_SNOOZE_MINUTES = 7 * 24 * 60
@@ -25,6 +27,7 @@ _CONTENT_FIELDS = ("kind", "priority", "sticky", "title", "detail", "url", "icon
                    "actions", "timer_started_at", "expires_at")
 
 Subscriber = Callable[[str, Optional[Card]], None]
+Timing = Callable[[], dict]
 
 
 class CardNotFound(KeyError):
@@ -36,18 +39,24 @@ class CardNotFound(KeyError):
 class CardStore:
     """Open cards, snooze/dismiss/seen/mute semantics, persistence and per-card events.
 
-    Time-based transitions (snooze return, 20 s fade, expires_at, timed-mute end) are
-    applied lazily on every call using the injected clock; tick() applies them on demand
+    Time-based transitions (snooze return, fade after being seen, expires_at, timed-mute end)
+    are applied lazily on every call using the injected clock; tick() applies them on demand
     and next_deadline() tells a scheduler when the next one is due.
+
+    A seen card fades after info_seconds, or after waiting_minutes when it is sticky (0 keeps
+    it until dismissed). `timing` returns {"info_seconds", "waiting_minutes"} and is read on
+    every call, so changed values apply at once; without it the defaults apply.
 
     Subscribers are called as callback(event, card_copy_or_None) on the thread that
     triggered the change, after the store lock is released. Events: added, updated,
     seen, snoozed, snooze_ended, dismissed, expired, pressed, muted, unmuted.
     """
 
-    def __init__(self, path: Optional[Path] = None, clock: Callable[[], float] = time.time):
+    def __init__(self, path: Optional[Path] = None, clock: Callable[[], float] = time.time,
+                 timing: Optional[Timing] = None):
         self._path = Path(path) if path is not None else None
         self._clock = clock
+        self._timing = timing
         self._lock = threading.RLock()
         self._cards: dict[str, Card] = {}
         self._events: dict[str, list] = {}
@@ -158,6 +167,15 @@ class CardStore:
                 self._dismiss(card, now, "dismissed")
             return card.copy()
 
+    def dismiss_all(self) -> int:
+        """Dismiss every open card that is not snoozed; returns how many were dismissed."""
+        with self._locked() as now:
+            cards = [c for c in self._cards.values() if c.dismissed_at is None and c.snoozed_until is None]
+            cards.sort(key=lambda c: (c.created_at or 0.0, c.id))
+            for card in cards:
+                self._dismiss(card, now, "dismissed")
+            return len(cards)
+
     def mark_seen(self, card_id: str) -> Card:
         with self._locked() as now:
             card = self._require(card_id)
@@ -217,6 +235,7 @@ class CardStore:
     def next_deadline(self) -> Optional[float]:
         """Earliest time at which a time-based transition will change store state."""
         with self._locked():
+            fades = self._fades()
             times = []
             if self._mute_until is not None and self._mute_until != math.inf:
                 times.append(self._mute_until)
@@ -227,12 +246,34 @@ class CardStore:
                     times.append(c.snoozed_until)
                 if c.expires_at is not None:
                     times.append(c.expires_at)
-                if c.seen_at is not None and not c.effective_sticky:
-                    times.append(c.seen_at + FADE_SECONDS)
+                fade_at = self._fade_at(c, fades) if c.snoozed_until is None else None
+                if fade_at is not None:
+                    times.append(fade_at)
             return min(times) if times else None
 
     def _locked(self):
         return _Guard(self)
+
+    def _fades(self) -> tuple:
+        """(seconds a seen informational card stays, seconds a seen sticky card stays or None for ever)."""
+        raw = {}
+        if self._timing is not None:
+            try:
+                raw = self._timing() or {}
+            except Exception:
+                log.exception("could not read the card timing settings; using the defaults")
+        if not isinstance(raw, dict):
+            raw = {}
+        info = _clamped(raw.get("info_seconds"), FADE_SECONDS, *CARD_INFO_SECONDS)
+        minutes = _clamped(raw.get("waiting_minutes"), WAITING_MINUTES, *CARD_WAITING_MINUTES)
+        return info, (minutes * 60.0 if minutes else None)
+
+    @staticmethod
+    def _fade_at(card: Card, fades: tuple) -> Optional[float]:
+        if card.seen_at is None:
+            return None
+        span = fades[1] if card.effective_sticky else fades[0]
+        return None if span is None else card.seen_at + span
 
     def _muted(self, now: float) -> bool:
         return self._mute_until is not None and (self._mute_until == math.inf or self._mute_until > now)
@@ -281,6 +322,7 @@ class CardStore:
         self._pending.append((event, card.copy() if card is not None else None))
 
     def _sweep(self, now: float) -> None:
+        fades = self._fades()
         if self._mute_until is not None and self._mute_until != math.inf and self._mute_until <= now:
             self._mute_until = None
             self._emit("unmuted", None)
@@ -293,9 +335,10 @@ class CardStore:
                 self._emit("snooze_ended", card)
             if card.expires_at is not None and card.expires_at <= now:
                 self._dismiss(card, now, "expired")
-            elif (card.seen_at is not None and not card.effective_sticky
-                  and card.snoozed_until is None and now >= card.seen_at + FADE_SECONDS):
-                self._dismiss(card, now, "expired")
+            elif card.snoozed_until is None:
+                fade_at = self._fade_at(card, fades)
+                if fade_at is not None and now >= fade_at:
+                    self._dismiss(card, now, "expired")
 
     def _load(self) -> None:
         path = self.path
@@ -386,6 +429,13 @@ class _Guard:
                 except Exception:
                     log.exception("card subscriber failed on %s", event)
         return False
+
+
+def _clamped(value, default: float, low: float, high: float) -> float:
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or isinstance(value, float) and not math.isfinite(value)):
+        return default
+    return min(max(value, low), high)
 
 
 def _copy_value(v):

@@ -13,7 +13,7 @@ from conftest import Api, McpHttp, wait_until
 
 pytest.importorskip("homa.server.mcp", reason="homa/server/mcp.py (M2-2) not present")
 
-TOOLS = {"send_card", "update_card", "dismiss_card", "add_reminder"}
+TOOLS = {"send_card", "update_card", "dismiss_card", "dismiss_all_cards", "add_reminder"}
 HELP = "didn't understand"
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {"protocolVersion": "2025-06-18", "capabilities": {},
@@ -27,9 +27,9 @@ def open_ids(live):
 
 # ---- tools/list, send/update/dismiss ---------------------------------------------------------------
 
-def test_tools_list_is_exactly_the_four_card_and_reminder_tools(mcp_live):
+def test_tools_list_is_exactly_the_five_card_and_reminder_tools(mcp_live):
     tools = mcp_live.mcp().list_tools()
-    assert {t.name for t in tools} == TOOLS and len(tools) == 4
+    assert {t.name for t in tools} == TOOLS and len(tools) == 5
 
 
 def test_send_card_shows_a_card_with_source_mcp_and_returns_its_id(mcp_live):
@@ -234,14 +234,14 @@ def test_regenerating_with_a_malformed_claude_settings_file_reports_failure_and_
 
 # ---- the full application ---------------------------------------------------------------------------------
 
-def test_running_app_serves_the_same_four_tools_once_m2_4_has_mounted_mcp(running_app):
+def test_running_app_serves_the_same_five_tools_once_m2_4_has_mounted_mcp(running_app):
     base, token = running_app
     status, _ = Api(base, token).request("POST", "/mcp/", INIT, headers=MCP_HEADERS)
     if status == 404:
         pytest.skip("the full app does not mount /mcp yet (M2-4 wiring in homa/app.py)")
     assert status == 200
     names = {t.name for t in McpHttp(base, token).list_tools()}
-    assert TOOLS <= names, "the full app serves the four card tools"
+    assert TOOLS <= names, "the full app serves the five card tools"
     assert names - TOOLS == {"search_files", "get_file_info", "read_text_preview", "list_indexed_roots"}, names
 
 
@@ -260,3 +260,27 @@ def test_a_tool_name_with_unicode_line_separators_logs_one_physical_line_and_tai
     assert routes_health.mcp_log_tail(500)[-1].split()[2].startswith("tool=evil")
     body = mcp_live.api().get("/v1/mcp/log?lines=1000")[1]["lines"]
     assert len(body) == len(physical()), "tail count must equal the number of physical lines"
+
+
+# ---- dismiss_all_cards -----------------------------------------------------------------------------------
+
+def test_dismiss_all_cards_closes_every_open_card_and_reports_the_count(mcp_live):
+    mcp_live.store.dismiss_all()
+    for cid in ("all-a", "all-b"):
+        assert not mcp_live.mcp().call("send_card", {"title": cid, "id": cid}).is_error
+    result = mcp_live.mcp().call("dismiss_all_cards", {})
+    assert not result.is_error
+    assert result.structured == {"dismissed": 2}
+    assert open_ids(mcp_live) == []
+    again = mcp_live.mcp().call("dismiss_all_cards", {})
+    assert not again.is_error and again.structured == {"dismissed": 0}
+
+
+def test_dismiss_all_cards_leaves_snoozed_cards(mcp_live):
+    mcp_live.store.dismiss_all()
+    mcp_live.mcp().call("send_card", {"title": "keep", "id": "all-snz"})
+    mcp_live.mcp().call("send_card", {"title": "go", "id": "all-go"})
+    mcp_live.store.snooze("all-snz", 30)
+    assert not mcp_live.mcp().call("dismiss_all_cards", {}).is_error
+    assert open_ids(mcp_live) == ["all-snz"]
+    mcp_live.store.dismiss("all-snz")

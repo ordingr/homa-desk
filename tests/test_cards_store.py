@@ -108,12 +108,12 @@ def test_get_unknown_id_raises_card_not_found(store):
 
 # ---- fade of done / reminder / custom cards (AC-OV-6) -------------------------------
 
-def test_done_card_expires_20s_after_mark_seen_not_before(store, clock):
+def test_done_card_expires_12s_after_mark_seen_not_before(store, clock):
     store.upsert(Card(id="d", title="finished", kind="done"), "hooks")
     clock.advance(600)
     assert _ids(store) == ["d"], "an unseen done card never fades"
     store.mark_seen("d")
-    clock.advance(19.5)
+    clock.advance(11.5)
     assert _ids(store) == ["d"]
     clock.advance(1.0)
     assert _ids(store) == []
@@ -123,23 +123,27 @@ def test_done_card_expires_20s_after_mark_seen_not_before(store, clock):
 def test_reminder_and_custom_fade_too(store, clock, kind):
     store.upsert(Card(id="r", title="t", kind=kind), "http:x")
     store.mark_seen("r")
-    clock.advance(20)
+    clock.advance(12)
     assert _ids(store) == []
 
 
 @pytest.mark.parametrize("kind", ["waiting", "meeting"])
-def test_waiting_and_meeting_never_fade(store, clock, kind):
+def test_waiting_and_meeting_stay_past_the_info_time_and_go_after_15_minutes(store, clock, kind):
     store.upsert(Card(id="w", title="t", kind=kind), "hooks")
     store.mark_seen("w")
-    clock.advance(3600)
+    clock.advance(600)
     assert _ids(store) == ["w"]
+    clock.advance(300)
+    assert _ids(store) == []
 
 
-def test_sticky_done_card_stays(store, clock):
+def test_sticky_done_card_stays_until_15_minutes(store, clock):
     store.upsert(Card(id="d", title="pinned", kind="done", sticky=True), "hooks")
     store.mark_seen("d")
-    clock.advance(3600)
+    clock.advance(600)
     assert _ids(store) == ["d"]
+    clock.advance(300)
+    assert _ids(store) == []
 
 
 def test_expires_at_dismisses_the_card_even_if_sticky(store, clock):
@@ -489,3 +493,257 @@ def test_store_is_usable_from_several_threads(store):
     for t in threads:
         t.join(10)
     assert len(store.list()) == 100
+
+
+# ---- card timing: info 12 s, waiting 15 min, live settings, close all ----------------------------
+
+def _timed(state_path, clock, **timing):
+    return CardStore(state_path, clock=clock, timing=lambda: timing)
+
+
+def test_default_constants():
+    assert store_mod.FADE_SECONDS == 12.0 and store_mod.WAITING_MINUTES == 15
+
+
+def test_info_card_boundary_open_at_11_999_expired_at_12(store, clock):
+    store.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    store.mark_seen("i")
+    events = []
+    store.subscribe(lambda e, c: events.append(e))
+    clock.advance(11.999)
+    assert _ids(store) == ["i"]
+    clock.advance(0.001)
+    assert _ids(store) == []
+    assert events == ["expired"]
+
+
+def test_waiting_card_boundary_open_at_14_59_expired_at_15_00(store, clock):
+    store.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    store.mark_seen("w")
+    events = []
+    store.subscribe(lambda e, c: events.append(e))
+    clock.advance(14 * 60 + 59)
+    assert _ids(store) == ["w"]
+    clock.advance(1)
+    assert _ids(store) == []
+    assert events == ["expired"]
+
+
+def test_waiting_minutes_zero_never_expires_and_has_no_deadline(state_path, clock):
+    s = _timed(state_path, clock, waiting_minutes=0)
+    s.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    s.mark_seen("w")
+    assert s.next_deadline() is None
+    clock.advance(10 * 86400)
+    assert _ids(s) == ["w"]
+
+
+def test_next_deadline_covers_both_fades(state_path, clock):
+    s = _timed(state_path, clock, info_seconds=30, waiting_minutes=2)
+    s.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    s.mark_seen("w")
+    assert s.next_deadline() == T0 + 120
+    s.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    s.mark_seen("i")
+    assert s.next_deadline() == T0 + 30
+
+
+def test_next_deadline_default_info_and_waiting(store):
+    store.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    store.mark_seen("w")
+    assert store.next_deadline() == T0 + 900
+    store.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    store.mark_seen("i")
+    assert store.next_deadline() == T0 + 12
+
+
+def test_unseen_card_has_no_fade_deadline(store):
+    store.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    assert store.next_deadline() is None
+
+
+def test_earlier_expires_at_wins_over_the_waiting_fade(store, clock):
+    store.upsert(Card(id="w", title="t", kind="waiting", expires_at=T0 + 60), "mcp")
+    store.mark_seen("w")
+    assert store.next_deadline() == T0 + 60
+    clock.advance(59)
+    assert _ids(store) == ["w"]
+    clock.advance(1)
+    assert _ids(store) == []
+
+
+def test_fade_wins_when_earlier_than_expires_at(store, clock):
+    store.upsert(Card(id="i", title="t", kind="done", expires_at=T0 + 600), "mcp")
+    store.mark_seen("i")
+    assert store.next_deadline() == T0 + 12
+    clock.advance(12)
+    assert _ids(store) == []
+
+
+def test_info_timing_changes_apply_live(clock, state_path):
+    timing = {"info_seconds": 30}
+    s = CardStore(state_path, clock=clock, timing=lambda: timing)
+    s.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    s.mark_seen("i")
+    clock.advance(20)
+    assert _ids(s) == ["i"]
+    timing["info_seconds"] = 15
+    assert _ids(s) == []
+
+
+def test_waiting_timing_changes_apply_live(clock, state_path):
+    timing = {"waiting_minutes": 15}
+    s = CardStore(state_path, clock=clock, timing=lambda: timing)
+    s.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    s.mark_seen("w")
+    clock.advance(5 * 60)
+    assert _ids(s) == ["w"]
+    timing["waiting_minutes"] = 5
+    assert _ids(s) == []
+
+
+@pytest.mark.parametrize("timing,span", [
+    ({"info_seconds": 1}, 5), ({"info_seconds": 9999}, 120), ({"info_seconds": -3}, 5),
+    ({"info_seconds": "x"}, 12), ({"info_seconds": True}, 12), ({"info_seconds": float("nan")}, 12),
+    ({"info_seconds": None}, 12), ({}, 12),
+])
+def test_info_seconds_are_clamped_or_defaulted(state_path, clock, timing, span):
+    s = _timed(state_path, clock, **timing)
+    s.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    s.mark_seen("i")
+    assert s.next_deadline() == T0 + span
+
+
+@pytest.mark.parametrize("timing,span", [
+    ({"waiting_minutes": 99999}, 1440 * 60), ({"waiting_minutes": -5}, None),
+    ({"waiting_minutes": "x"}, 900), ({"waiting_minutes": True}, 900), ({"waiting_minutes": 3}, 180),
+])
+def test_waiting_minutes_are_clamped_or_defaulted(state_path, clock, timing, span):
+    s = _timed(state_path, clock, **timing)
+    s.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    s.mark_seen("w")
+    assert s.next_deadline() == (None if span is None else T0 + span)
+
+
+def test_a_failing_timing_callable_falls_back_to_the_defaults(state_path, clock):
+    def boom():
+        raise RuntimeError("settings gone")
+    s = CardStore(state_path, clock=clock, timing=boom)
+    s.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    s.mark_seen("i")
+    assert s.next_deadline() == T0 + 12
+
+
+def test_snooze_return_restarts_the_waiting_clock(store, clock):
+    store.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    store.mark_seen("w")
+    clock.advance(10 * 60)
+    store.snooze("w", 5)
+    clock.advance(5 * 60 + 1)
+    assert store.get("w").seen_at is None
+    clock.advance(3600)
+    assert _ids(store) == ["w"], "an unseen returned card does not fade"
+    store.mark_seen("w")
+    clock.advance(14 * 60)
+    assert _ids(store) == ["w"]
+    clock.advance(60)
+    assert _ids(store) == []
+
+
+def test_dismiss_all_counts_emits_one_event_each_and_skips_snoozed(store, clock):
+    for i in "abcd":
+        store.upsert(Card(id=i, title=i, kind="waiting"), "hooks")
+        clock.advance(1)
+    store.snooze("d", 30)
+    events = []
+    store.subscribe(lambda e, c: events.append((e, c.id if c else None)))
+    assert store.dismiss_all() == 3
+    assert events == [("dismissed", "a"), ("dismissed", "b"), ("dismissed", "c")]
+    assert _ids(store) == ["d"]
+    assert store.get("d").snoozed_until is not None and store.get("d").dismissed_at is None
+    assert store.dismiss_all() == 0
+
+
+def test_dismiss_all_on_an_empty_store_returns_zero(store):
+    assert store.dismiss_all() == 0
+
+
+def test_dismiss_all_includes_cards_queued_by_mute(store, clock):
+    store.upsert(Card(id="a", title="a"), "hooks")
+    store.set_mute(math.inf)
+    store.upsert(Card(id="b", title="b"), "hooks")
+    assert store.dismiss_all() == 2
+    assert _ids(store) == []
+
+
+def test_dismiss_all_persists(state_path, clock):
+    s = CardStore(state_path, clock=clock)
+    s.upsert(Card(id="a", title="a"), "hooks")
+    s.dismiss_all()
+    assert _ids(CardStore(state_path, clock=clock)) == []
+
+
+# ---- snoozed cards and hostile timing values ------------------------------------------------------------------
+
+@pytest.mark.parametrize("kind,seen_for", [("done", 5), ("custom", 5), ("waiting", 14 * 60), ("meeting", 14 * 60)])
+def test_a_seen_card_snoozed_past_its_fade_has_the_snooze_end_as_deadline(store, clock, kind, seen_for):
+    store.upsert(Card(id="c", title="t", kind=kind), "hooks")
+    store.mark_seen("c")
+    clock.advance(seen_for)
+    store.snooze("c", 30)
+    snooze_end = T0 + seen_for + 30 * 60
+    assert store.next_deadline() == snooze_end
+    clock.advance(20 * 60)
+    assert store.get("c").dismissed_at is None, "a snoozed card does not fade while snoozed"
+    assert store.next_deadline() == snooze_end
+
+
+def test_snoozed_sticky_custom_card_also_has_the_snooze_end_as_deadline(store, clock):
+    store.upsert(Card(id="s", title="t", kind="custom", sticky=True), "hooks")
+    store.mark_seen("s")
+    clock.advance(16 * 60)
+    assert _ids(store) == [], "seen sticky card faded at the 15 minute mark"
+    store.upsert(Card(id="s2", title="t", kind="custom", sticky=True), "hooks")
+    store.mark_seen("s2")
+    store.snooze("s2", 60)
+    assert store.next_deadline() == T0 + 16 * 60 + 3600
+
+
+def test_snoozed_card_beside_an_unsnoozed_one_keeps_the_other_fade(store, clock):
+    store.upsert(Card(id="z", title="t", kind="done"), "hooks")
+    store.mark_seen("z")
+    store.snooze("z", 10)
+    store.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    store.mark_seen("i")
+    assert store.next_deadline() == T0 + 12
+
+
+@pytest.mark.parametrize("timing,info,waiting", [
+    ({"info_seconds": 10 ** 400, "waiting_minutes": 10 ** 400}, 120, 1440 * 60),
+    ({"info_seconds": -10 ** 400, "waiting_minutes": -10 ** 400}, 5, None),
+    ({"info_seconds": 2 ** 1024, "waiting_minutes": 2 ** 1024}, 120, 1440 * 60),
+    ({"info_seconds": float("inf"), "waiting_minutes": float("-inf")}, 12, 900),
+])
+def test_oversized_timing_ints_are_clamped_without_raising(state_path, clock, timing, info, waiting):
+    s = CardStore(state_path, clock=clock, timing=lambda: timing)
+    s.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    s.mark_seen("w")
+    assert s.next_deadline() == (None if waiting is None else T0 + waiting)
+    s.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    s.mark_seen("i")
+    assert s.next_deadline() == T0 + info
+    clock.advance(info)
+    assert "i" not in _ids(s)
+
+
+@pytest.mark.parametrize("raw", [[], [1, 2], "info_seconds", 42, 3.5, True, object(), {1, 2}, ("a", "b")])
+def test_a_non_dict_timing_value_falls_back_to_the_defaults(state_path, clock, raw):
+    s = CardStore(state_path, clock=clock, timing=lambda: raw)
+    s.upsert(Card(id="w", title="t", kind="waiting"), "hooks")
+    s.mark_seen("w")
+    assert s.next_deadline() == T0 + 900
+    s.upsert(Card(id="i", title="t", kind="done"), "hooks")
+    s.mark_seen("i")
+    assert s.next_deadline() == T0 + 12
+    clock.advance(12)
+    assert _ids(s) == ["w"]

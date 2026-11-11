@@ -1565,3 +1565,80 @@ Not an HTTP route, but `GET /v1/settings` (13.1) returns the merged map, so the 
 - Gates: in the popup the four keys act only when results are showing, the box text equals the searched text and no text is
   selected in the box (`_row_keys_live`); otherwise the keystroke goes to the text box. A second Ctrl+A when every row is
   already marked also goes to the box. The page uses the same rule (`rowLive`), and its Ctrl+A selects the loaded rows only.
+
+## 16. Card timeouts and dismiss all, 2026-11-11
+
+Supersedes: section 5.3, the "Lifetime" of every kind (`fades 20 s after it is first seen`; `stays until dismissed`;
+`stays until acted on`); section 3.1, the line "A card that fades after 20 s ... is recorded as `dismissed` (code only).
+There is no separate `expired` type"; section 9.2, "Four tools" (one more card tool, 16.3); section 9.7, the 20-second fade
+of the stale-calendar card. The earlier text is kept as written.
+
+- Date: 2026-11-11. Request (from the user, 2026-11-11): informational cards stay 10 to 15 seconds and then go; cards
+  waiting for the user stay 15 minutes; one control closes all cards.
+- Code: uncommitted changes on branch `card-timeouts`, worktree `C:\AI Projects\Assistant-cards`. No commit, no pull
+  request (the repo has no remote). Plan: none found under `docs/plans/`. Security review: none found at
+  `docs/security/2026-11-11-card-timeouts-review.md` when this section was written.
+- Written by doc-keeper from the code, read on 2026-11-11, not run: `homa/cards/store.py` (`FADE_SECONDS`,
+  `WAITING_MINUTES`, `_fades`, `_fade_at`, `_sweep`, `next_deadline`, `dismiss_all`), `homa/cards/model.py`
+  (`DEFAULT_STICKY`, `effective_sticky`), `homa/settings.py` (`CARD_INFO_SECONDS`, `CARD_WAITING_MINUTES`, `DEFAULTS`,
+  `_check_cards`, `peek_waiting_minutes`), `homa/server/routes_cards.py` (`dismiss_all_cards`, `routes`),
+  `homa/server/mcp.py` (`dismiss_all_cards`), `homa/overlay/cards_ui.py` (`_place_strip`, `_close_all`,
+  `close_all_state`), `homa/overlay/reminder_ui.py` (`sticky_label`), `homa/overlay/settings_ui.py` (`_build_cards`,
+  `_apply_card_timing`). Tests exist in `tests/test_cards_store.py` (for example
+  `test_info_card_boundary_open_at_11_999_expired_at_12`, `test_waiting_card_boundary_open_at_14_59_expired_at_15_00`);
+  doc-keeper did not run them.
+
+### 16.1 Lifetime after the card is seen
+
+The timer starts at `seen_at` (the first hover). Which span applies depends on the resolved `sticky` (`effective_sticky`:
+the card's own `sticky`, else the kind default in 5.3).
+
+| Resolved `sticky` | Kinds by default | Closed after `seen_at` + | Setting | Default | Range |
+|---|---|---|---|---|---|
+| `false` | `done`, `reminder`, `custom` | `info_seconds` seconds | `cards.info_seconds` | `12` (was 20 s) | 5 to 120 |
+| `true` | `waiting`, `meeting` | `waiting_minutes` minutes | `cards.waiting_minutes` | `15` (was: never) | 0 to 1440; `0` = never |
+
+- `sticky: true` sent on any kind (HTTP, CLI `--sticky`, file drop, MCP `send_card`, reminders with `sticky: true`) gets
+  the sticky span.
+- `expires_at` is checked first: a card whose `expires_at` has passed is closed then, whichever comes first.
+- A card that has never been seen never times out on these spans. `next_deadline()` includes the fade time of every open,
+  seen card, so the scheduler wakes for it.
+- A snoozed card does not time out while snoozed. When the snooze ends, `seen_at` is cleared, so the span starts again at
+  the next hover.
+- The store reads the two values from the live settings on every call (`CardStore(timing=...)` in `homa/app.py`). A
+  change applies at once, also to cards already seen. Values outside the range are clamped in the store; a non-number
+  falls back to the default (`_clamped`).
+- A card closed by a span or by `expires_at` gets `dismissed_at` set and the event type `expired` in its event log
+  (`_dismiss(card, now, "expired")`). A user or source dismiss is `dismissed`. Section 3.1's statement that there is no
+  `expired` type was already out of date before this change (CHANGELOG, M2 entry: M2-0 "added ... the `expired` event
+  type"); it is corrected here.
+
+### 16.2 `POST /v1/cards/dismiss_all`
+
+- Auth, Host and Origin as for every `/v1` route. No request body is read.
+- Dismisses every open card that is not snoozed (`dismissed_at` null and `snoozed_until` null), oldest `created_at` first.
+  Each gets the event type `dismissed`. Snoozed cards stay and come back at their time. Cards stored while muted (open,
+  not snoozed, not yet shown) are dismissed.
+- `200 OK`, body `{"dismissed": <n>}`, where `n` is the number of cards dismissed (`0` when none were open).
+- Registered before `/v1/cards/{card_id}` in the route list.
+
+### 16.3 MCP tool `dismiss_all_cards`
+
+| Tool | Arguments | Returns | Notes |
+|---|---|---|---|
+| `dismiss_all_cards` | none | `{"dismissed": <n>}` | Same store call as 16.2. Annotated `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`. |
+
+### 16.4 Overlay and settings
+
+- **Close all strip:** shown on a monitor when two or more cards are assigned to it (`_place_strip(..., close_all=True)`),
+  labelled `Close all`. Clicking it calls the store's `dismiss_all()`, so it closes the cards on every monitor, not only
+  that one. `close_all_state()` reports each visible strip (monitor handle, card count, rect).
+- **Settings schema:** `cards` is a new nested object, default `{"info_seconds": 12, "waiting_minutes": 15}`. Validation
+  messages: `cards.info_seconds must be a whole number from 5 to 120`, `cards.waiting_minutes must be a whole number from 0
+  to 1440`. A bad sub-key in the file falls back for that key only, with one warning (`invalid cards.<key> in settings;
+  using default`).
+- **Settings window, Cards page:** two fields, "Info cards (s)" and "Waiting (min)", saved after the usual typing delay; an
+  out-of-range value shows the error line and is not saved.
+- **Reminder dialog:** the sticky checkbox reads `wait for me (stays up to <N> min)`, or `wait for me (stays until
+  dismissed)` when `cards.waiting_minutes` is `0`. `N` is read from `settings.json` when the dialog opens
+  (`peek_waiting_minutes`).

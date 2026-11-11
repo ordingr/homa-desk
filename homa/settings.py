@@ -71,6 +71,9 @@ OLD_COPY_PATH_CHORD = "Ctrl+C"
 
 MUTE_SOURCES = ("hooks", "http", "mcp", "file", "reminders", "calendar")
 
+CARD_INFO_SECONDS = (5, 120)
+CARD_WAITING_MINUTES = (0, 1440)
+
 DEFAULTS: dict[str, Any] = {
     "schema": 1,
     "port": 17171,
@@ -79,6 +82,7 @@ DEFAULTS: dict[str, Any] = {
     "theme": "dark",
     "sound_on": True,
     "cards_every_monitor": True,
+    "cards": {"info_seconds": 12, "waiting_minutes": 15},
     "mute_sources": {name: False for name in MUTE_SOURCES},
     "calendars": {"ics_urls": [], "labels": {}, "outlook": False, "lead_minutes": 5, "poll_minutes": 5},
     "hotkey_skip_fullscreen": False,
@@ -93,7 +97,7 @@ DEFAULTS: dict[str, Any] = {
     "update": {"source": ""},
 }
 
-_NESTED = ("mute_sources", "calendars", "claude_code", "mcp", "index", "notes", "preview", "md_vault", "shortcuts", "update")
+_NESTED = ("cards", "mute_sources", "calendars", "claude_code", "mcp", "index", "notes", "preview", "md_vault", "shortcuts", "update")
 _BOOLS = ("sound_on", "cards_every_monitor", "hotkey_skip_fullscreen")
 
 
@@ -124,6 +128,17 @@ def _check_calendars(value: Any) -> None:
         raise ValueError("lead minutes must be a whole number from 0 to 120")
     if not _int_in(value.get("poll_minutes", 5), 1, 60):
         raise ValueError("poll minutes must be a whole number from 1 to 60")
+
+
+def _check_cards(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("cards must be an object")
+    low, high = CARD_INFO_SECONDS
+    if not _int_in(value.get("info_seconds", low), low, high):
+        raise ValueError(f"cards.info_seconds must be a whole number from {low} to {high}")
+    low, high = CARD_WAITING_MINUTES
+    if not _int_in(value.get("waiting_minutes", low), low, high):
+        raise ValueError(f"cards.waiting_minutes must be a whole number from {low} to {high}")
 
 
 def _abs_path(value: Any) -> bool:
@@ -226,6 +241,8 @@ def _check(key: str, value: Any) -> None:
         raise ValueError(f"{key} must be an object")
     if key == "mute_sources" and not all(isinstance(v, bool) for v in value.values()):
         raise ValueError("mute_sources values must be true or false")
+    if key == "cards":
+        _check_cards(value)
     if key == "calendars":
         _check_calendars(value)
     if key == "index":
@@ -308,7 +325,7 @@ def _repair_calendars(value: dict) -> None:
             value[sub] = copy.deepcopy(default)
 
 
-_NESTED_CHECKS = {"index": _check_index, "notes": _check_notes, "preview": _check_preview,
+_NESTED_CHECKS = {"cards": _check_cards, "index": _check_index, "notes": _check_notes, "preview": _check_preview,
                   "md_vault": _check_md_vault, "shortcuts": _check_shortcuts, "update": _check_update}
 
 
@@ -373,7 +390,7 @@ class Settings:
                     loaded = raw
                 else:
                     log.warning("settings.json is not an object; using defaults")
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 log.warning("settings.json unreadable; using defaults")
         return loaded
 
@@ -428,7 +445,7 @@ class Settings:
                 return
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):
                 log.warning("settings.json changed but is unreadable; keeping current settings")
                 return
             if not isinstance(raw, dict):
@@ -492,8 +509,21 @@ def peek_update_source() -> str:
         source = update.get("source", "") if isinstance(update, dict) else ""
         _check_update({"source": source})
         return source
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return ""
+
+
+def peek_waiting_minutes() -> int:
+    """Configured cards.waiting_minutes without creating or writing anything; the default when unset or invalid."""
+    try:
+        raw = json.loads(paths.settings_file().read_text(encoding="utf-8"))
+        cards = raw.get("cards") if isinstance(raw, dict) else None
+        minutes = cards.get("waiting_minutes") if isinstance(cards, dict) else None
+        if _int_in(minutes, *CARD_WAITING_MINUTES):
+            return minutes
+    except (OSError, ValueError, RecursionError):
+        pass
+    return DEFAULTS["cards"]["waiting_minutes"]
 
 
 def peek_port() -> int:
@@ -503,6 +533,6 @@ def peek_port() -> int:
         port = raw.get("port") if isinstance(raw, dict) else None
         if _valid_port(port):
             return port
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         pass
     return DEFAULTS["port"]
